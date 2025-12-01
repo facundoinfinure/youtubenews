@@ -192,11 +192,49 @@ Ver uso y costos:
 - ✅ **Rápido:** Deployment en minutos
 - ✅ **Seguro:** HTTPS incluido
 
-## ⚠️ Limitaciones
+## ⚠️ Limitaciones Importantes
 
-- ❌ No soporta GPUs (no puedes usar Ovi)
+### ❌ NO Soporta GPUs - Ovi NO Funciona Aquí
+
+**Cloud Run NO puede ejecutar Ovi** porque:
+- ❌ No tiene acceso a GPUs (NVIDIA)
+- ❌ No puede instalar drivers de NVIDIA
+- ❌ No tiene soporte para CUDA
+- ❌ Es serverless sin acceso a hardware especializado
+
+**Ovi requiere:**
+- ✅ GPU NVIDIA (T4, V100, A100, etc.)
+- ✅ Drivers de NVIDIA instalados
+- ✅ CUDA toolkit
+- ✅ Acceso directo al hardware
+
+### Otras Limitaciones
+
 - ❌ Timeout máximo: 15 minutos por request
 - ❌ Cold start: Primera request puede ser lenta (~5-10 segundos)
 
-Para producción con Ovi, considera migrar a Compute Engine más adelante.
+## 🔄 ¿Necesitas Ovi? Usa Compute Engine
+
+Si realmente necesitas Ovi, debes usar **Compute Engine con GPU**:
+
+**Opción Económica:**
+- Compute Engine Preemptible con GPU
+- Costo: ~$90-100/mes
+- Ver: `GUIA_INSTALACION.md` → Opción A
+
+**Opción Normal:**
+- Compute Engine con GPU 24/7
+- Costo: ~$330/mes
+- Ver: `GUIA_INSTALACION.md` → Opción A
+
+## 💡 Recomendación
+
+**Para empezar:** Usa Cloud Run con Gemini VEO 3
+- ✅ Muy económico ($5-20/mes)
+- ✅ Fácil de configurar
+- ✅ Gemini VEO 3 es muy bueno
+
+**Si necesitas Ovi después:** Migra a Compute Engine
+- Puedes mantener ambos configurados
+- El backend detecta automáticamente qué usar
 
