@@ -5,8 +5,8 @@ import { NewsSelector } from './components/NewsSelector';
 import { AdminDashboard } from './components/AdminDashboard';
 import { fetchEconomicNews, generateScript, generateSegmentedAudio, generateBroadcastVisuals, generateViralMetadata } from './services/geminiService';
 import { uploadVideoToYouTube } from './services/youtubeService';
-import { loadConfigFromDB, saveVideoToDB, signInWithGoogle, supabase, saveNewsToDB, getNewsByDate, markNewsAsSelected } from './services/supabaseService';
-import { NewsItem, AppState, BroadcastSegment, VideoAssets, ViralMetadata, UserProfile, ChannelConfig } from './types';
+import { loadConfigFromDB, saveVideoToDB, signInWithGoogle, supabase, saveNewsToDB, getNewsByDate, markNewsAsSelected, getAllChannels } from './services/supabaseService';
+import { NewsItem, AppState, BroadcastSegment, VideoAssets, ViralMetadata, UserProfile, ChannelConfig, Channel } from './types';
 
 // Runtime configuration access
 const getAdminEmail = () => import.meta.env.VITE_ADMIN_EMAIL || window.env?.ADMIN_EMAIL || process.env.ADMIN_EMAIL || "";
@@ -47,6 +47,8 @@ const App: React.FC = () => {
   // Data State
   const [user, setUser] = useState<UserProfile | null>(null);
   const [config, setConfig] = useState<ChannelConfig>(DEFAULT_CONFIG);
+  const [activeChannel, setActiveChannel] = useState<Channel | null>(null);
+  const [channels, setChannels] = useState<Channel[]>([]);
 
   const [allNews, setAllNews] = useState<NewsItem[]>([]);
   const [selectedNews, setSelectedNews] = useState<NewsItem[]>([]);
@@ -77,6 +79,17 @@ const App: React.FC = () => {
       }
     };
     initConfig();
+
+    // Load channels
+    const loadChannels = async () => {
+      const allChannels = await getAllChannels();
+      setChannels(allChannels);
+      if (allChannels.length > 0) {
+        setActiveChannel(allChannels[0]);
+        setConfig(allChannels[0].config);
+      }
+    };
+    loadChannels();
 
     // Auth Listener
     const { data: authListener } = supabase?.auth.onAuthStateChange((event, session) => {
@@ -149,8 +162,14 @@ const App: React.FC = () => {
       const dateObj = new Date(selectedDate);
       addLog(`📡 Checking for cached news for ${dateObj.toLocaleDateString()}...`);
 
+      if (!activeChannel) {
+        addLog(`❌ No active channel selected.`);
+        setState(AppState.ERROR);
+        return;
+      }
+
       // Check if news already exists in database
-      let fetchedNews = await getNewsByDate(dateObj);
+      let fetchedNews = await getNewsByDate(dateObj, activeChannel.id);
 
       if (fetchedNews.length > 0) {
         addLog(`✅ Found ${fetchedNews.length} cached stories.`);
@@ -160,7 +179,7 @@ const App: React.FC = () => {
         addLog(`✅ Found ${fetchedNews.length} potential stories.`);
 
         // Save news to database
-        await saveNewsToDB(dateObj, fetchedNews);
+        await saveNewsToDB(dateObj, fetchedNews, activeChannel.id);
         addLog(`💾 News saved to database.`);
       }
 
@@ -177,9 +196,11 @@ const App: React.FC = () => {
   const handleNewsSelection = async (selection: NewsItem[]) => {
     setSelectedNews(selection);
 
+    if (!activeChannel) return;
+
     // Mark selected news in database
     const dateObj = new Date(selectedDate);
-    await markNewsAsSelected(dateObj, selection);
+    await markNewsAsSelected(dateObj, selection, activeChannel.id);
     addLog(`📌 Marked ${selection.length} stories as selected.`);
 
     startProduction(selection);
@@ -223,7 +244,9 @@ const App: React.FC = () => {
           setViralMeta(meta);
           addLog("✅ SEO Metadata generated.");
           // Save draft video record to Supabase
-          await saveVideoToDB(meta);
+          if (activeChannel) {
+            await saveVideoToDB(meta, activeChannel.id);
+          }
           return meta;
         });
 

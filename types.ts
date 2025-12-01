@@ -101,6 +101,14 @@ export interface ChannelConfig {
   };
 }
 
+export interface Channel {
+  id: string;
+  created_at: string;
+  name: string;
+  config: ChannelConfig;
+  active: boolean;
+}
+
 // Window augmentation for AI Studio key selection & Google Identity & Runtime Env
 declare global {
   interface AIStudio {
