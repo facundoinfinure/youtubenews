@@ -62,11 +62,20 @@ VITE_BACKEND_URL=https://tu-backend-url.com
 
 ## 🖥️ Paso 2: Configurar Backend (Google Cloud)
 
-Tienes 2 opciones:
+**💰 RECOMENDACIÓN DE COSTOS:**
+
+1. **Para empezar/desarrollo:** Usa **Opción B (Cloud Run)** - Solo pagas por uso (~$5-20/mes)
+2. **Para producción con Ovi:** Usa **Opción A con Preemptible** - ~$90-100/mes
+3. **Para pruebas rápidas:** No despliegues backend, usa Gemini directamente desde el frontend
+
+Tienes 3 opciones:
 
 ### Opción A: Compute Engine con GPU (Recomendado para Ovi)
 
-**Costo:** ~$0.50-2.00/hora (puedes usar instancias preemptibles más baratas)
+**⚠️ IMPORTANTE:** Las GPUs son caras. Lee las opciones económicas abajo antes de continuar.
+
+**Costo Normal:** ~$0.28/hora (~$204/mes si corre 24/7)
+**Costo con Preemptible:** ~$0.08-0.12/hora (~$60-90/mes) - **RECOMENDADO**
 
 #### 2.1 Crear Proyecto en GCP
 
@@ -85,23 +94,30 @@ gcloud services enable compute.googleapis.com
 gcloud services enable containerregistry.googleapis.com
 ```
 
-#### 2.3 Crear Instancia con GPU
+#### 2.3 Crear Instancia con GPU (ECONÓMICA)
+
+**💰 Opción Económica: Instancia Preemptible**
+
+Las instancias preemptibles son 60-80% más baratas pero pueden ser interrumpidas (perfecto para desarrollo/testing).
 
 ```bash
-# Opción 1: Usar el script automatizado
-cd backend
-chmod +x deploy-gcp.sh
-export GCP_PROJECT_ID=tu-project-id
-export GEMINI_API_KEY=tu-gemini-key
-./deploy-gcp.sh
-
-# Opción 2: Crear manualmente desde la consola
+# Crear instancia preemptible desde la consola:
 # Ve a Compute Engine → VM Instances → Create Instance
-# - Machine type: n1-standard-4 (o mayor)
-# - GPU: 1x NVIDIA T4 (o mejor)
+
+# Configuración ECONÓMICA recomendada:
+# - Machine type: n1-standard-2 (2 vCPU, 7.5 GB) - suficiente para Ovi
+# - GPU: 1x NVIDIA T4
+# - ✅ MARCA "Preemptible" (esto reduce el costo en ~70%)
 # - Image: Ubuntu 22.04 LTS
-# - Boot disk: 100GB
+# - Boot disk: 30GB (suficiente, puedes aumentar después)
+# - Region: us-central1 (más barato)
+
+# Costo estimado: ~$60-80/mes en lugar de $204/mes
 ```
+
+**📝 Nota:** Las instancias preemptibles pueden ser detenidas por Google con 30 segundos de aviso. El backend se reiniciará automáticamente si usas Docker con `--restart=always`.
+
+**Alternativa aún más barata:** Usa Cloud Run (Opción B) que solo cobra por uso real.
 
 #### 2.4 Conectar a la Instancia
 
@@ -187,9 +203,10 @@ Tu backend estará disponible en: `http://TU-IP-EXTERNA:8080`
 
 ---
 
-### Opción B: Cloud Run (Sin GPU, Solo Gemini)
+### Opción B: Cloud Run (Sin GPU, Solo Gemini) ⭐ MÁS ECONÓMICO
 
-**Costo:** Pay-per-use, muy económico para empezar
+**Costo:** Pay-per-use, muy económico para empezar (~$5-20/mes)
+**Recomendado para:** Desarrollo, pruebas, y producción sin necesidad de Ovi
 
 #### 2.1 Habilitar APIs
 
@@ -212,6 +229,26 @@ export ALLOWED_ORIGINS=https://tu-app.vercel.app
 El script te dará la URL del backend automáticamente.
 
 **⚠️ Nota:** Cloud Run no soporta GPUs, así que solo usará Gemini VEO 3.
+
+---
+
+### Opción C: Sin Backend (Solo Gemini desde Frontend)
+
+**Costo:** $0 adicional (solo pagas por uso de Gemini API)
+
+Si quieres empezar sin backend propio:
+
+1. **No despliegues backend**
+2. **Actualiza el frontend** para usar Gemini directamente
+3. **Configura solo** `VITE_GEMINI_API_KEY` en Vercel
+4. **El frontend** llamará a Gemini VEO 3 directamente
+
+**Limitaciones:**
+- Estás limitado por las cuotas de Gemini (error 429 si excedes)
+- No tienes fallback automático a Ovi
+- YouTube upload puede tener problemas de CORS (necesitarás backend para eso)
+
+**Para habilitar esto:** Necesitarías modificar el código para que `generateBroadcastVisuals` use Gemini directamente en lugar del backend.
 
 ---
 
@@ -333,17 +370,39 @@ gcloud compute firewall-rules list
 
 ---
 
-## 📊 Costos Estimados
+## 📊 Costos Estimados (Actualizado)
 
 ### Opción A: Compute Engine con GPU
-- **T4 GPU:** ~$0.35/hora
-- **n1-standard-4:** ~$0.19/hora
-- **Total:** ~$0.54/hora (~$13/día si corre 24/7)
-- **Preemptible:** 60-80% más barato pero puede ser interrumpido
 
-### Opción B: Cloud Run
+**Configuración Normal (24/7):**
+- **T4 GPU:** ~$0.35/hora = ~$255/mes
+- **n1-standard-2:** ~$0.10/hora = ~$73/mes
+- **Disco:** ~$1-2/mes
+- **Total:** ~$330/mes ❌ CARO
+
+**Configuración Preemptible (RECOMENDADO):**
+- **T4 GPU Preemptible:** ~$0.11/hora = ~$80/mes
+- **n1-standard-2 Preemptible:** ~$0.03/hora = ~$22/mes
+- **Disco:** ~$1-2/mes
+- **Total:** ~$103/mes ✅ 70% más barato
+
+**Configuración Mínima (Solo para pruebas):**
+- **n1-standard-1 Preemptible:** ~$0.015/hora = ~$11/mes
+- **T4 GPU Preemptible:** ~$0.11/hora = ~$80/mes
+- **Total:** ~$91/mes
+
+**💡 Tip:** Apaga la instancia cuando no la uses. Solo pagas cuando está corriendo.
+
+### Opción B: Cloud Run (MUY ECONÓMICO)
 - **Solo pagas por uso:** ~$0.00002400 por request
-- **Muy económico para empezar**
+- **Sin costo fijo:** $0 cuando no se usa
+- **Costo estimado:** $5-20/mes para uso moderado
+- **⚠️ Limitación:** No tiene GPU, solo usa Gemini VEO 3
+
+### Opción C: Solo Gemini (Sin Backend Propio)
+- **Costo:** $0 (usa el frontend directamente con Gemini)
+- **Limitación:** Estás limitado por las cuotas de Gemini API
+- **Recomendado para:** Pruebas y desarrollo inicial
 
 ---
 
