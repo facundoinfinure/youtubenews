@@ -323,6 +323,12 @@ const App: React.FC = () => {
         config={config}
         onUpdateConfig={setConfig}
         onExit={() => setState(AppState.IDLE)}
+        activeChannel={activeChannel}
+        channels={channels}
+        onChannelChange={(channel) => {
+          setActiveChannel(channel);
+          setConfig(channel.config);
+        }}
       />
     );
   }
