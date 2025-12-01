@@ -45,6 +45,7 @@ export interface StoredVideo {
   description: string;
   youtube_id: string | null;
   viral_score: number;
+  tags?: string[]; // Added tags
   analytics?: VideoAnalytics;
 }
 
@@ -107,6 +108,7 @@ declare global {
   }
 
   interface Window {
+    aistudio?: AIStudio;
     webkitAudioContext: typeof AudioContext;
     // Runtime environment variables injected by env.sh
     env?: {

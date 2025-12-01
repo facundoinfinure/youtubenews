@@ -10,7 +10,7 @@
   "dependencies": {
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "@google/genai": "^0.0.12",
+    "@google/genai": "*",
     "framer-motion": "^10.16.4",
     "@supabase/supabase-js": "^2.39.0"
   },
