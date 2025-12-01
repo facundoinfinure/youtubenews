@@ -60,26 +60,8 @@ export const fetchEconomicNews = async (targetDate: Date | undefined, config: Ch
       };
     });
   } catch (e) {
-    console.warn("Failed to parse news JSON directly, fallback to empty news", e);
-    // Fallback data
-    return [
-      {
-        headline: "Market volatility increases as tech stocks wobble",
-        source: "Financial Times",
-        url: "#",
-        summary: "Investors are jittery as major tech earnings show mixed results.",
-        viralScore: 85,
-        imageKeyword: "stock market chart down"
-      },
-      {
-        headline: "Inflation data shows mixed results for consumers",
-        source: "Wall Street Journal",
-        url: "#",
-        summary: "CPI data suggests inflation is sticky, worrying the Fed.",
-        viralScore: 72,
-        imageKeyword: "inflation prices"
-      }
-    ];
+    console.warn("Failed to parse news JSON directly", e);
+    throw new Error("Failed to parse news from Gemini");
   }
 };
 
@@ -123,10 +105,7 @@ export const generateScript = async (news: NewsItem[], config: ChannelConfig): P
     return JSON.parse(cleanText) as ScriptLine[];
   } catch (e) {
     console.error("Script parsing error", e);
-    return [
-      { speaker: config.characters.hostA.name, text: "Well, the teleprompter is broken." },
-      { speaker: config.characters.hostB.name, text: "Typical." }
-    ];
+    throw new Error("Failed to parse script from Gemini");
   }
 };
 
@@ -164,11 +143,7 @@ export const generateViralMetadata = async (news: NewsItem[], config: ChannelCon
     const text = response.text || "{}";
     return JSON.parse(text) as ViralMetadata;
   } catch (e) {
-    return {
-      title: `${config.channelName} DAILY UPDATE`,
-      description: `The latest news explained. ${config.tagline}`,
-      tags: ["news", config.country]
-    };
+    throw new Error("Failed to parse viral metadata from Gemini");
   }
 };
 

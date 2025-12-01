@@ -68,9 +68,6 @@ export const saveVideoToDB = async (
 ) => {
   if (!supabase) return;
 
-  // Mock analytics for the new video
-  const mockRetention = Array.from({ length: 20 }, (_, i) => 100 - (i * (Math.random() * 2 + 1)));
-
   const { error } = await supabase
     .from('videos')
     .insert({
@@ -80,9 +77,9 @@ export const saveVideoToDB = async (
       youtube_id: youtubeId,
       viral_score: viralScorePrediction,
       views: 0,
-      ctr: Math.floor(Math.random() * 5) + 2, // Mock CTR 2-7%
+      ctr: 0,
       avg_view_duration: "0:00",
-      retention_data: mockRetention
+      retention_data: []
     });
 
   if (error) console.error("Error saving video:", error);
@@ -90,37 +87,7 @@ export const saveVideoToDB = async (
 
 export const fetchVideosFromDB = async (): Promise<StoredVideo[]> => {
   if (!supabase) {
-    // Return Mock Data if Supabase not connected
-    return [
-      {
-        id: 'mock-1',
-        created_at: new Date(Date.now() - 86400000).toISOString(),
-        title: 'MARKET CRASH IMMINENT?! 📉 (ChimpNews Explain)',
-        description: 'Mock description...',
-        youtube_id: 'mock_vid_1',
-        viral_score: 92,
-        analytics: {
-          views: 12500,
-          ctr: 5.4,
-          avgViewDuration: "0:48",
-          retentionData: [100, 95, 92, 88, 85, 80, 75, 70, 68, 65, 60, 55, 50, 48, 45]
-        }
-      },
-      {
-        id: 'mock-2',
-        created_at: new Date(Date.now() - 172800000).toISOString(),
-        title: 'TECH STOCKS RALLY 🚀',
-        description: 'Mock description...',
-        youtube_id: 'mock_vid_2',
-        viral_score: 78,
-        analytics: {
-          views: 8200,
-          ctr: 4.1,
-          avgViewDuration: "0:35",
-          retentionData: [100, 90, 80, 70, 60, 50, 40, 30, 20, 10]
-        }
-      }
-    ];
+    return [];
   }
 
   const { data, error } = await supabase
