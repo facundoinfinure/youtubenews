@@ -218,40 +218,52 @@ const pollForVideo = async (operation: any): Promise<string> => {
 export const generateBroadcastVisuals = async (newsContext: string, config: ChannelConfig): Promise<VideoAssets> => {
   const ai = getAiClient();
   const model = 'veo-3.1-fast-generate-preview';
-  // If format is Shorts (9:16), Veo supports it. 
-  // However, fast-generate-preview might have limitations, but per docs it supports 9:16.
   const aspectRatio = config.format;
   const resolution = '720p';
 
-  // 1. Wide Shot
+  // Negative prompt to prevent unwanted content
+  const negativePrompt = "NO humans, NO human faces, NO human bodies, NO people, NO persons, NO unspecified animals, realistic human skin, human hands, human features";
+
+  // 1. Wide Shot - VERY specific to prevent human generation
   const promptWide = `Wide cinematic shot of a professional news studio. 
   Two news anchors sitting at a desk. 
-  Left anchor: ${config.characters.hostA.visualPrompt}.
-  Right anchor: ${config.characters.hostB.visualPrompt}.
-  Background screens show economic graphs about ${newsContext}. 4k, photorealistic.`;
+  IMPORTANT: Left anchor MUST be EXACTLY: ${config.characters.hostA.visualPrompt}. NOT a human.
+  IMPORTANT: Right anchor MUST be EXACTLY: ${config.characters.hostB.visualPrompt}. NOT a human.
+  Background screens show economic graphs about ${newsContext}. 
+  Professional lighting, 4k, photorealistic.
+  NEGATIVE: ${negativePrompt}`;
 
-  // 2. Host A Close Up
-  const promptHostA = `Close up shot of a news anchor. ${config.characters.hostA.visualPrompt}.
-  Speaking seriously and gesturing. Professional news studio background. Photorealistic.`;
+  // 2. Host A Close Up - Extremely specific
+  const promptHostA = `Close up shot of a news anchor. 
+  IMPORTANT: The anchor MUST be EXACTLY: ${config.characters.hostA.visualPrompt}. 
+  NOT a human, NOT any other animal.
+  The character is speaking seriously and gesturing with their hands/paws. 
+  Professional news studio background with soft lighting. Photorealistic, 4k quality.
+  NEGATIVE: ${negativePrompt}`;
 
-  // 3. Host B Close Up
-  const promptHostB = `Close up shot of a news anchor. ${config.characters.hostB.visualPrompt}.
-  Speaking wittily. Professional news studio background. Photorealistic.`;
+  // 3. Host B Close Up - Extremely specific
+  const promptHostB = `Close up shot of a news anchor. 
+  IMPORTANT: The anchor MUST be EXACTLY: ${config.characters.hostB.visualPrompt}. 
+  NOT a human, NOT any other animal.
+  The character is speaking expressively with wit and charm. 
+  Professional news studio background with soft lighting. Photorealistic, 4k quality.
+  NEGATIVE: ${negativePrompt}`;
 
   console.log("Starting video generation with aspect ratio:", aspectRatio);
+  console.log("Host A prompt:", config.characters.hostA.visualPrompt);
+  console.log("Host B prompt:", config.characters.hostB.visualPrompt);
 
   try {
     const promises = [
       ai.models.generateVideos({ model, prompt: promptWide, config: { numberOfVideos: 1, resolution, aspectRatio } }),
 
-      ai.models.generateVideos({ model, prompt: promptHostA + " Variation 1.", config: { numberOfVideos: 1, resolution, aspectRatio } }),
-      ai.models.generateVideos({ model, prompt: promptHostA + " Variation 2.", config: { numberOfVideos: 1, resolution, aspectRatio } }),
+      ai.models.generateVideos({ model, prompt: promptHostA + " Camera angle: slightly from the side. Variation 1.", config: { numberOfVideos: 1, resolution, aspectRatio } }),
+      ai.models.generateVideos({ model, prompt: promptHostA + " Camera angle: direct frontal. Variation 2.", config: { numberOfVideos: 1, resolution, aspectRatio } }),
 
-      ai.models.generateVideos({ model, prompt: promptHostB + " Variation 1.", config: { numberOfVideos: 1, resolution, aspectRatio } }),
-      ai.models.generateVideos({ model, prompt: promptHostB + " Variation 2.", config: { numberOfVideos: 1, resolution, aspectRatio } })
+      ai.models.generateVideos({ model, prompt: promptHostB + " Camera angle: slightly from the side. Variation 1.", config: { numberOfVideos: 1, resolution, aspectRatio } }),
+      ai.models.generateVideos({ model, prompt: promptHostB + " Camera angle: direct frontal. Variation 2.", config: { numberOfVideos: 1, resolution, aspectRatio } })
     ];
 
-    // Note: Reduced to 2 variations per host + 1 wide = 5 videos to save time/quota given the new complexity
     const operations = await Promise.all(promises);
 
     const results = await Promise.all(operations.map(op => pollForVideo(op).catch(e => { console.error("Vid failed", e); return null; })));

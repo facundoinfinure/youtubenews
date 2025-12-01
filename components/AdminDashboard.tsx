@@ -111,6 +111,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
   const [videos, setVideos] = useState<StoredVideo[]>([]);
   const [selectedVideo, setSelectedVideo] = useState<StoredVideo | null>(null);
 
+  // Sync tempConfig when config changes (e.g., when switching channels)
+  useEffect(() => {
+    setTempConfig(config);
+  }, [config]);
+
   useEffect(() => {
     if (activeTab === 'insights' && activeChannel) {
       fetchVideosFromDB(activeChannel.id).then(setVideos);

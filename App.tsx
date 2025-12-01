@@ -347,7 +347,7 @@ const App: React.FC = () => {
             <div className="w-8 h-6 bg-red-600 rounded-lg flex items-center justify-center relative">
               <div className="w-0 h-0 border-t-[3px] border-t-transparent border-l-[6px] border-l-white border-b-[3px] border-b-transparent ml-0.5"></div>
             </div>
-            <span className="font-headline tracking-tighter text-xl ml-1">YouTube</span>
+            <span className="font-headline tracking-tighter text-xl ml-1">ChimpNews</span>
             <sup className="text-gray-400 text-[10px] ml-0.5">HK</sup>
           </div>
         </div>
@@ -405,6 +405,27 @@ const App: React.FC = () => {
                     <p className="text-gray-400 max-w-md">
                       {config.tagline}. Select a date to scrape news for {config.country}.
                     </p>
+
+                    {/* Channel Selector */}
+                    <div className="flex flex-col items-center gap-2 w-full max-w-xs">
+                      <label className="text-xs text-gray-500 uppercase tracking-wider font-bold">Active Channel</label>
+                      <select
+                        value={activeChannel?.id || ''}
+                        onChange={(e) => {
+                          const selected = channels.find(c => c.id === e.target.value);
+                          if (selected) {
+                            setActiveChannel(selected);
+                            setConfig(selected.config);
+                          }
+                        }}
+                        className="bg-[#1f1f1f] border border-[#3f3f3f] text-white px-4 py-2 rounded-lg w-full focus:outline-none focus:border-blue-500"
+                      >
+                        {channels.map(ch => (
+                          <option key={ch.id} value={ch.id}>{ch.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
                     <div className="flex flex-col items-center gap-2 w-full max-w-xs">
                       <label className="text-xs text-gray-500 uppercase tracking-wider font-bold">News Date</label>
                       <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)}
