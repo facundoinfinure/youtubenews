@@ -12,56 +12,7 @@ const getClientId = () => {
   return import.meta.env.VITE_GOOGLE_CLIENT_ID || window.env?.googlecloud_clientid || process.env.googlecloud_clientid || process.env.GOOGLE_CLIENT_ID;
 }
 
-const SCOPES = "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
-
-export const initGoogleLogin = (onSuccess: (user: UserProfile) => void, onError: (err: string) => void) => {
-  if (!window.google) {
-    onError("Google Identity Services script not loaded.");
-    return null;
-  }
-
-  const CLIENT_ID = getClientId();
-
-  console.log("Initializing Login with ClientID:", CLIENT_ID);
-
-  if (!CLIENT_ID) {
-    onError("Missing Google Client ID. Please check Cloud Run environment variables (googlecloud_clientid).");
-    return null;
-  }
-
-  const tokenClient = window.google.accounts.oauth2.initTokenClient({
-    client_id: CLIENT_ID,
-    scope: SCOPES,
-    callback: async (tokenResponse: any) => {
-      if (tokenResponse.error) {
-        console.error("OAuth Error Response:", tokenResponse);
-        onError(`OAuth Error: ${tokenResponse.error} - ${tokenResponse.error_description || ''}`);
-        return;
-      }
-
-      if (tokenResponse.access_token) {
-        try {
-          // Fetch user profile to verify email
-          const userInfoRes = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
-            headers: { Authorization: `Bearer ${tokenResponse.access_token}` },
-          });
-          const userInfo = await userInfoRes.json();
-
-          onSuccess({
-            email: userInfo.email,
-            name: userInfo.name,
-            picture: userInfo.picture,
-            accessToken: tokenResponse.access_token
-          });
-        } catch (e) {
-          onError("Failed to fetch user profile.");
-        }
-      }
-    },
-  });
-
-  return tokenClient;
-};
+// Login handled via Supabase Auth now
 
 export const uploadVideoToYouTube = async (
   blob: Blob,

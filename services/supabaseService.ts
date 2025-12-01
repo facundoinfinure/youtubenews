@@ -11,6 +11,31 @@ const supabaseKey = getSupabaseKey();
 
 export const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
+export const signInWithGoogle = async () => {
+  if (!supabase) throw new Error("Supabase not initialized");
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo: window.location.origin,
+      scopes: 'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile'
+    }
+  });
+  if (error) throw error;
+  return data;
+};
+
+export const signOut = async () => {
+  if (!supabase) return;
+  await supabase.auth.signOut();
+};
+
+export const getSession = async () => {
+  if (!supabase) return null;
+  const { data } = await supabase.auth.getSession();
+  return data.session;
+};
+
+
 export const saveConfigToDB = async (config: ChannelConfig) => {
   if (!supabase) return;
   // We assume a single config row with ID 1 for simplicity in this demo
