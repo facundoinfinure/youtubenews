@@ -6,6 +6,7 @@ export interface NewsItem {
   summary: string;
   viralScore: number;
   imageKeyword: string;
+  imageUrl?: string; // Real image URL from Google News
 }
 
 export interface ScriptLine {

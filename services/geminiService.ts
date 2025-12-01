@@ -50,9 +50,19 @@ export const fetchEconomicNews = async (targetDate: Date | undefined, config: Ch
       if ((!finalUrl || finalUrl === "#") && groundingChunks[index]?.web?.uri) {
         finalUrl = groundingChunks[index].web.uri;
       }
+
+      // Extract image URL from grounding metadata
+      let imageUrl = item.imageUrl;
+      if (!imageUrl && groundingChunks[index]?.web) {
+        // Try to get image from grounding chunk (using type assertion as structure may vary)
+        const webChunk = groundingChunks[index].web as any;
+        imageUrl = webChunk?.image || webChunk?.imageUrl || webChunk?.thumbnail;
+      }
+
       return {
         ...item,
         url: finalUrl,
+        imageUrl,
         // Fallbacks
         viralScore: item.viralScore || Math.floor(Math.random() * 40) + 60,
         summary: item.summary || item.headline,
