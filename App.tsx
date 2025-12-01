@@ -5,7 +5,7 @@ import { NewsSelector } from './components/NewsSelector';
 import { AdminDashboard } from './components/AdminDashboard';
 import { fetchEconomicNews, generateScript, generateSegmentedAudio, generateBroadcastVisuals, generateViralMetadata } from './services/geminiService';
 import { uploadVideoToYouTube } from './services/youtubeService';
-import { loadConfigFromDB, saveVideoToDB, signInWithGoogle, supabase } from './services/supabaseService';
+import { loadConfigFromDB, saveVideoToDB, signInWithGoogle, supabase, saveNewsToDB, getNewsByDate, markNewsAsSelected } from './services/supabaseService';
 import { NewsItem, AppState, BroadcastSegment, VideoAssets, ViralMetadata, UserProfile, ChannelConfig } from './types';
 
 // Runtime configuration access
@@ -147,10 +147,24 @@ const App: React.FC = () => {
 
     try {
       const dateObj = new Date(selectedDate);
-      addLog(`📡 Scanning financial markets for ${dateObj.toLocaleDateString()} in ${config.country}...`);
-      const fetchedNews = await fetchEconomicNews(dateObj, config);
+      addLog(`📡 Checking for cached news for ${dateObj.toLocaleDateString()}...`);
+
+      // Check if news already exists in database
+      let fetchedNews = await getNewsByDate(dateObj);
+
+      if (fetchedNews.length > 0) {
+        addLog(`✅ Found ${fetchedNews.length} cached stories.`);
+      } else {
+        addLog(`📡 Scanning financial markets for ${dateObj.toLocaleDateString()} in ${config.country}...`);
+        fetchedNews = await fetchEconomicNews(dateObj, config);
+        addLog(`✅ Found ${fetchedNews.length} potential stories.`);
+
+        // Save news to database
+        await saveNewsToDB(dateObj, fetchedNews);
+        addLog(`💾 News saved to database.`);
+      }
+
       setAllNews(fetchedNews);
-      addLog(`✅ Found ${fetchedNews.length} potential stories.`);
       setState(AppState.SELECTING_NEWS);
     } catch (error) {
       console.error(error);
@@ -162,6 +176,12 @@ const App: React.FC = () => {
   // STEP 2: Handle Selection and Start Production
   const handleNewsSelection = async (selection: NewsItem[]) => {
     setSelectedNews(selection);
+
+    // Mark selected news in database
+    const dateObj = new Date(selectedDate);
+    await markNewsAsSelected(dateObj, selection);
+    addLog(`📌 Marked ${selection.length} stories as selected.`);
+
     startProduction(selection);
   };
 

@@ -1,6 +1,6 @@
 
 import { createClient } from '@supabase/supabase-js';
-import { ChannelConfig, StoredVideo, ViralMetadata } from '../types';
+import { ChannelConfig, StoredVideo, ViralMetadata, NewsItem } from '../types';
 
 // Initialize Client with Runtime Fallbacks
 const getSupabaseUrl = () => import.meta.env.VITE_SUPABASE_URL || window.env?.VITE_SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
@@ -83,6 +83,85 @@ export const saveVideoToDB = async (
     });
 
   if (error) console.error("Error saving video:", error);
+};
+
+// =============================================================================================
+// NEWS PERSISTENCE
+// =============================================================================================
+
+export const saveNewsToDB = async (newsDate: Date, news: NewsItem[]) => {
+  if (!supabase) return;
+
+  const dateStr = newsDate.toISOString().split('T')[0]; // YYYY-MM-DD
+
+  // Delete existing news for this date to avoid duplicates
+  await supabase.from('news_items').delete().eq('news_date', dateStr);
+
+  // Insert new news items
+  const newsRecords = news.map(item => ({
+    news_date: dateStr,
+    headline: item.headline,
+    source: item.source,
+    url: item.url,
+    summary: item.summary,
+    viral_score: item.viralScore,
+    image_keyword: item.imageKeyword,
+    image_url: item.imageUrl || null,
+    selected: false
+  }));
+
+  const { error } = await supabase.from('news_items').insert(newsRecords);
+  if (error) console.error("Error saving news:", error);
+};
+
+export const getNewsByDate = async (newsDate: Date): Promise<NewsItem[]> => {
+  if (!supabase) return [];
+
+  const dateStr = newsDate.toISOString().split('T')[0];
+
+  const { data, error } = await supabase
+    .from('news_items')
+    .select('*')
+    .eq('news_date', dateStr)
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    console.error("Error fetching news:", error);
+    return [];
+  }
+
+  if (!data || data.length === 0) return [];
+
+  return data.map((row: any) => ({
+    headline: row.headline,
+    source: row.source,
+    url: row.url,
+    summary: row.summary,
+    viralScore: row.viral_score,
+    imageKeyword: row.image_keyword,
+    imageUrl: row.image_url
+  }));
+};
+
+export const markNewsAsSelected = async (newsDate: Date, selectedNews: NewsItem[]) => {
+  if (!supabase) return;
+
+  const dateStr = newsDate.toISOString().split('T')[0];
+
+  // First, mark all news for this date as not selected
+  await supabase
+    .from('news_items')
+    .update({ selected: false })
+    .eq('news_date', dateStr);
+
+  // Then mark the selected ones
+  for (const item of selectedNews) {
+    await supabase
+      .from('news_items')
+      .update({ selected: true })
+      .eq('news_date', dateStr)
+      .eq('headline', item.headline);
+  }
 };
 
 export const fetchVideosFromDB = async (): Promise<StoredVideo[]> => {
