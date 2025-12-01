@@ -62,20 +62,27 @@ VITE_BACKEND_URL=https://tu-backend-url.com
 
 ## 🖥️ Paso 2: Configurar Backend (Google Cloud)
 
-**⭐ RECOMENDADO: Cloud Run (Opción B)** - La más económica y fácil de configurar
+**⭐ RECOMENDADO: Compute Engine Preemptible con GPU (Opción A)** - Para usar Ovi optimizando costos
 
-**Costo:** Solo pagas por uso (~$5-20/mes) - Perfecto para empezar
+**Costo:** ~$90-100/mes (24/7) o ~$25-30/mes apagando cuando no la usas
+
+**📖 Guía Completa:** Ver `GUIA_COMPUTE_ENGINE_OVI.md` para instrucciones detalladas paso a paso.
 
 Tienes 2 opciones principales:
 
-### Opción A: Compute Engine con GPU (Solo si necesitas Ovi)
+### ⭐ Opción A: Compute Engine Preemptible con GPU (RECOMENDADO - Para Ovi)
 
-**⚠️ IMPORTANTE:** Las GPUs son caras. Solo usa esto si realmente necesitas Ovi.
+**Costo con Preemptible:** ~$0.08-0.12/hora
+- **24/7:** ~$90-100/mes
+- **8 horas/día:** ~$25-30/mes (apagando cuando no la usas)
 
-**Costo Normal:** ~$0.28/hora (~$204/mes si corre 24/7)
-**Costo con Preemptible:** ~$0.08-0.12/hora (~$60-90/mes)
+**Ventajas:**
+- ✅ Tiene GPU para Ovi
+- ✅ 70% más barato que Compute Engine normal
+- ✅ Puedes apagarla cuando no la uses (solo pagas por horas activas)
+- ✅ Ovi + Gemini fallback disponible
 
-**💡 Recomendación:** Empieza con Cloud Run (Opción B). Solo migra a esto si necesitas Ovi específicamente.
+**📖 Guía Completa:** Ver `GUIA_COMPUTE_ENGINE_OVI.md` para instrucciones detalladas.
 
 #### 2.1 Crear Proyecto en GCP
 
