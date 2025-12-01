@@ -359,6 +359,28 @@ const App: React.FC = () => {
             </div>
           )}
 
+          {/* Channel Selector - Moved to header */}
+          {user && channels.length > 0 && (
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-gray-400">Channel:</label>
+              <select
+                value={activeChannel?.id || ''}
+                onChange={(e) => {
+                  const selected = channels.find(c => c.id === e.target.value);
+                  if (selected) {
+                    setActiveChannel(selected);
+                    setConfig(selected.config);
+                  }
+                }}
+                className="bg-[#1a1a1a] border border-[#333] rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500"
+              >
+                {channels.map(ch => (
+                  <option key={ch.id} value={ch.id}>{ch.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {/* Admin Toggle */}
           {user && (
             <button
@@ -405,26 +427,6 @@ const App: React.FC = () => {
                     <p className="text-gray-400 max-w-md">
                       {config.tagline}. Select a date to scrape news for {config.country}.
                     </p>
-
-                    {/* Channel Selector */}
-                    <div className="flex flex-col items-center gap-2 w-full max-w-xs">
-                      <label className="text-xs text-gray-500 uppercase tracking-wider font-bold">Active Channel</label>
-                      <select
-                        value={activeChannel?.id || ''}
-                        onChange={(e) => {
-                          const selected = channels.find(c => c.id === e.target.value);
-                          if (selected) {
-                            setActiveChannel(selected);
-                            setConfig(selected.config);
-                          }
-                        }}
-                        className="bg-[#1f1f1f] border border-[#3f3f3f] text-white px-4 py-2 rounded-lg w-full focus:outline-none focus:border-blue-500"
-                      >
-                        {channels.map(ch => (
-                          <option key={ch.id} value={ch.id}>{ch.name}</option>
-                        ))}
-                      </select>
-                    </div>
 
                     <div className="flex flex-col items-center gap-2 w-full max-w-xs">
                       <label className="text-xs text-gray-500 uppercase tracking-wider font-bold">News Date</label>

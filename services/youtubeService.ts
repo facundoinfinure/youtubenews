@@ -14,70 +14,70 @@ const getClientId = () => {
 
 // Login handled via Supabase Auth now
 
+const getBackendUrl = () => {
+  return (
+    import.meta.env.VITE_BACKEND_URL ||
+    window.env?.BACKEND_URL ||
+    process.env.BACKEND_URL ||
+    "http://localhost:8080"
+  );
+};
+
 export const uploadVideoToYouTube = async (
   blob: Blob,
   metadata: ViralMetadata,
   accessToken: string,
   onProgress: (percent: number) => void
 ): Promise<string> => {
+  const backendUrl = getBackendUrl();
 
-  // 1. Initiate Resumable Upload
-  const initRes = await fetch(
-    "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-        "X-Upload-Content-Length": blob.size.toString(),
-        "X-Upload-Content-Type": "video/webm",
-      },
-      body: JSON.stringify({
-        snippet: {
-          title: metadata.title,
-          description: metadata.description,
-          tags: metadata.tags,
-          categoryId: "25", // News & Politics
-        },
-        status: {
-          privacyStatus: "private", // Default to private for safety
-          selfDeclaredMadeForKids: false,
-        },
-      }),
-    }
-  );
+  try {
+    // Use backend proxy to avoid CORS issues
+    const formData = new FormData();
+    formData.append("file", blob, "video.webm");
+    formData.append("metadata", JSON.stringify({
+      title: metadata.title,
+      description: metadata.description,
+      tags: metadata.tags,
+      categoryId: "25", // News & Politics
+      privacyStatus: "private",
+    }));
+    formData.append("access_token", accessToken);
 
-  if (!initRes.ok) {
-    const err = await initRes.text();
-    throw new Error(`Upload initiation failed: ${err}`);
+    // Create XMLHttpRequest for progress tracking
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          const percent = (e.loaded / e.total) * 100;
+          onProgress(percent);
+        }
+      };
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const response = JSON.parse(xhr.responseText);
+            if (response.success && response.video_url) {
+              resolve(response.video_url);
+            } else {
+              reject(new Error(response.error || "Upload failed"));
+            }
+          } catch (e) {
+            reject(new Error("Failed to parse response"));
+          }
+        } else {
+          reject(new Error(`Upload failed with status ${xhr.status}`));
+        }
+      };
+
+      xhr.onerror = () => reject(new Error("Network error during upload."));
+
+      xhr.open("POST", `${backendUrl}/api/v1/youtube/upload`);
+      xhr.send(formData);
+    });
+  } catch (error) {
+    throw new Error(`YouTube upload error: ${(error as Error).message}`);
   }
-
-  const uploadUrl = initRes.headers.get("Location");
-  if (!uploadUrl) throw new Error("No upload URL received from YouTube.");
-
-  // 2. Upload the file
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("PUT", uploadUrl);
-    xhr.setRequestHeader("Content-Type", "video/webm");
-
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) {
-        const percent = (e.loaded / e.total) * 100;
-        onProgress(percent);
-      }
-    };
-
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        const response = JSON.parse(xhr.responseText);
-        resolve(`https://youtu.be/${response.id}`);
-      } else {
-        reject(`Upload failed with status ${xhr.status}`);
-      }
-    };
-
-    xhr.onerror = () => reject("Network error during upload.");
-    xhr.send(blob);
-  });
 };
