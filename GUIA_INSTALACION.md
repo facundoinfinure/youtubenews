@@ -62,20 +62,20 @@ VITE_BACKEND_URL=https://tu-backend-url.com
 
 ## 🖥️ Paso 2: Configurar Backend (Google Cloud)
 
-**💰 RECOMENDACIÓN DE COSTOS:**
+**⭐ RECOMENDADO: Cloud Run (Opción B)** - La más económica y fácil de configurar
 
-1. **Para empezar/desarrollo:** Usa **Opción B (Cloud Run)** - Solo pagas por uso (~$5-20/mes)
-2. **Para producción con Ovi:** Usa **Opción A con Preemptible** - ~$90-100/mes
-3. **Para pruebas rápidas:** No despliegues backend, usa Gemini directamente desde el frontend
+**Costo:** Solo pagas por uso (~$5-20/mes) - Perfecto para empezar
 
-Tienes 3 opciones:
+Tienes 2 opciones principales:
 
-### Opción A: Compute Engine con GPU (Recomendado para Ovi)
+### Opción A: Compute Engine con GPU (Solo si necesitas Ovi)
 
-**⚠️ IMPORTANTE:** Las GPUs son caras. Lee las opciones económicas abajo antes de continuar.
+**⚠️ IMPORTANTE:** Las GPUs son caras. Solo usa esto si realmente necesitas Ovi.
 
 **Costo Normal:** ~$0.28/hora (~$204/mes si corre 24/7)
-**Costo con Preemptible:** ~$0.08-0.12/hora (~$60-90/mes) - **RECOMENDADO**
+**Costo con Preemptible:** ~$0.08-0.12/hora (~$60-90/mes)
+
+**💡 Recomendación:** Empieza con Cloud Run (Opción B). Solo migra a esto si necesitas Ovi específicamente.
 
 #### 2.1 Crear Proyecto en GCP
 
@@ -203,32 +203,47 @@ Tu backend estará disponible en: `http://TU-IP-EXTERNA:8080`
 
 ---
 
-### Opción B: Cloud Run (Sin GPU, Solo Gemini) ⭐ MÁS ECONÓMICO
+### ⭐ Opción B: Cloud Run (RECOMENDADO - MÁS ECONÓMICO)
 
-**Costo:** Pay-per-use, muy económico para empezar (~$5-20/mes)
-**Recomendado para:** Desarrollo, pruebas, y producción sin necesidad de Ovi
+**Costo:** Pay-per-use, muy económico (~$5-20/mes)
+**Recomendado para:** Desarrollo, pruebas, y producción
+**Ventajas:** 
+- ✅ Muy fácil de configurar
+- ✅ Escala automáticamente
+- ✅ Solo pagas por uso real
+- ✅ Sin servidores que mantener
 
-#### 2.1 Habilitar APIs
+#### 2.1 Configurar Variables de Entorno
 
 ```bash
-gcloud services enable cloudbuild.googleapis.com
-gcloud services enable run.googleapis.com
+# Reemplaza con tus valores reales
+export GCP_PROJECT_ID=tu-proyecto-id
+export GEMINI_API_KEY=tu-gemini-api-key
+export ALLOWED_ORIGINS=https://tu-app.vercel.app
+
+# Si aún no tienes la URL de Vercel, usa '*' temporalmente:
+# export ALLOWED_ORIGINS=*
 ```
 
-#### 2.2 Deploy con Script
+#### 2.2 Deploy con Script (Súper Fácil)
 
 ```bash
 cd backend
 chmod +x deploy-cloud-run.sh
-export GCP_PROJECT_ID=tu-project-id
-export GEMINI_API_KEY=tu-gemini-key
-export ALLOWED_ORIGINS=https://tu-app.vercel.app
 ./deploy-cloud-run.sh
 ```
 
-El script te dará la URL del backend automáticamente.
+El script hará todo automáticamente:
+- ✅ Habilitará las APIs necesarias
+- ✅ Construirá la imagen Docker
+- ✅ Desplegará a Cloud Run
+- ✅ Te dará la URL del backend
 
-**⚠️ Nota:** Cloud Run no soporta GPUs, así que solo usará Gemini VEO 3.
+**⏱️ Tiempo:** 5-10 minutos
+
+**📝 Nota:** Cloud Run no soporta GPUs, así que solo usará Gemini VEO 3 (más económico).
+
+**📖 Guía detallada:** Ver `GUIA_CLOUD_RUN.md` para más detalles y solución de problemas.
 
 ---
 
