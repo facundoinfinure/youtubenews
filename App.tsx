@@ -62,6 +62,7 @@ const App: React.FC = () => {
   const [thumbnailVariant, setThumbnailVariant] = useState<string | null>(null);
   const [previewScript, setPreviewScript] = useState<ScriptLine[]>([]);
   const [storedVideos, setStoredVideos] = useState<StoredVideo[]>([]); // NEW: For home page sidebar
+  const [productionProgress, setProductionProgress] = useState({ current: 0, total: 0, step: '' });
 
   // UI State
   const getYesterday = () => {
@@ -228,7 +229,9 @@ const App: React.FC = () => {
     setUploadStatus(null);
 
     try {
-      const dateObj = new Date(selectedDate);
+      // Fix timezone issue: Parse as local date, not UTC
+      const [year, month, day] = selectedDate.split('-').map(Number);
+      const dateObj = new Date(year, month - 1, day, 12, 0, 0); // Noon local time
       addLog(`📡 Checking for cached news for ${dateObj.toLocaleDateString()}...`);
 
       if (!activeChannel) {
@@ -281,15 +284,22 @@ const App: React.FC = () => {
     setViralMeta(null);
     setUploadStatus(null);
 
+    // Initialize progress tracking (6 major steps)
+    const TOTAL_STEPS = 6;
+    setProductionProgress({ current: 0, total: TOTAL_STEPS, step: 'Starting production...' });
+
     try {
       // 2. Generate Script
       setState(AppState.GENERATING_SCRIPT);
       addLog(`✍️ Editorial approved. Scripting with tone: ${config.tone}...`);
 
-      // Generate viral hook first
+      // Step 1: Generate viral hook first
+      setProductionProgress({ current: 1, total: TOTAL_STEPS, step: 'Creating viral hook...' });
       const viralHook = await generateViralHook(finalNews, config);
       addLog(`🎣 Viral hook: "${viralHook.substring(0, 40)}..."`);
 
+      // Step 2: Generate script
+      setProductionProgress({ current: 2, total: TOTAL_STEPS, step: 'Writing script...' });
       const genScript = await generateScript(finalNews, config, viralHook);
       addLog("✅ Script written.");
 
@@ -303,6 +313,7 @@ const App: React.FC = () => {
 
       // 3. Generate Media (Parallel)
       setState(AppState.GENERATING_MEDIA);
+      setProductionProgress({ current: 3, total: TOTAL_STEPS, step: 'Generating audio & video...' });
       addLog(`🎬 Rolling cameras (${config.format})...`);
       addLog("🎙️ Sound check...");
 
@@ -339,6 +350,9 @@ const App: React.FC = () => {
         metaTask
       ]);
 
+      // Step 4: Merge segments
+      setProductionProgress({ current: 4, total: TOTAL_STEPS, step: 'Merging media segments...' });
+
       // Merge audio and video segments
       const finalSegments = audioSegments.map((seg, i) => ({
         ...seg,
@@ -350,13 +364,16 @@ const App: React.FC = () => {
       setViralMeta(metadata);
       addLog(`✅ Media ready: ${audioSegments.length} audio clips, ${videoSegments.filter(v => v).length} unique video clips.`);
 
-      // 4. Generate thumbnail variants (after metadata for title context)
+      // Step 5: Generate thumbnail variants (after metadata for title context)
+      setProductionProgress({ current: 5, total: TOTAL_STEPS, step: 'Creating thumbnails...' });
       addLog("🎨 Creating thumbnail variants...");
       const thumbnails = await generateThumbnailVariants(mainContext, config, metadata);
       setThumbnailDataUrl(thumbnails.primary);
       setThumbnailVariant(thumbnails.variant);
       addLog(`✅ Thumbnails ready (${thumbnails.variant ? '2 variants for A/B testing' : '1 thumbnail'})`);
 
+      // Step 6: Complete!
+      setProductionProgress({ current: 6, total: TOTAL_STEPS, step: 'Broadcast ready!' });
       setState(AppState.READY);
       addLog("🚀 Broadcast Ready!");
 
@@ -653,6 +670,26 @@ const App: React.FC = () => {
               <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0f0f0f] text-center p-8">
                 <div className="w-20 h-20 border-4 border-t-transparent rounded-full animate-spin mb-6" style={{ borderColor: config.logoColor1, borderTopColor: 'transparent' }}></div>
                 <h3 className="text-xl font-bold mb-2">PRODUCING BROADCAST</h3>
+
+                {/* Progress Bar */}
+                {productionProgress.total > 0 && (
+                  <div className="w-full max-w-md mb-4">
+                    <div className="flex justify-between text-xs mb-2 text-gray-400">
+                      <span>{productionProgress.step}</span>
+                      <span>{productionProgress.current}/{productionProgress.total}</span>
+                    </div>
+                    <div className="h-2 bg-gray-800 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-gradient-to-r transition-all duration-500"
+                        style={{
+                          width: `${(productionProgress.current / productionProgress.total) * 100}%`,
+                          backgroundImage: `linear-gradient(90deg, ${config.logoColor1}, ${config.logoColor2})`
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+
                 <div className="text-gray-400 font-mono text-sm max-w-lg mx-auto">
                   {logs[logs.length - 1] || "Initializing..."}
                 </div>

@@ -73,6 +73,14 @@ export const fetchEconomicNews = async (targetDate: Date | undefined, config: Ch
 
       try {
         const news: NewsItem[] = JSON.parse(jsonStr);
+
+        // CRITICAL: Validate we got 15 items as requested
+        if (news.length < 15) {
+          console.warn(`⚠️ Only received ${news.length} news items, expected 15`);
+          console.warn(`Response text (first 200 chars): ${text.substring(0, 200)}`);
+          throw new Error(`Insufficient news items: got ${news.length}, expected 15. The API may not have enough data for this date.`);
+        }
+
         const processedNews = news.map((item, index) => {
           // Prioritize grounding URL if available and missing in item
           let finalUrl = item.url;
@@ -103,8 +111,9 @@ export const fetchEconomicNews = async (targetDate: Date | undefined, config: Ch
         return processedNews.sort((a, b) => b.viralScore - a.viralScore);
 
       } catch (e) {
-        console.warn("Failed to parse news JSON directly", e);
-        throw new Error("Failed to parse news from Gemini");
+        console.error("Failed to parse news JSON", e);
+        console.error("Response text (first 500 chars):", text.substring(0, 500));
+        throw new Error(`Failed to parse news from Gemini: ${(e as Error).message}`);
       }
     },
     3600000, // 1 hour TTL
@@ -163,7 +172,9 @@ export const generateScript = async (news: NewsItem[], config: ChannelConfig, vi
     return JSON.parse(cleanText) as ScriptLine[];
   } catch (e) {
     console.error("Script parsing error", e);
-    throw new Error("Failed to parse script from Gemini");
+    const text = response.text || "[]";
+    console.error("Response text (first 200 chars):", text.substring(0, 200));
+    throw new Error(`Failed to parse script from Gemini: ${(e as Error).message}`);
   }
 };
 
