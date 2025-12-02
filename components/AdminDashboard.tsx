@@ -10,6 +10,7 @@ interface AdminDashboardProps {
   activeChannel: Channel | null;
   channels: Channel[];
   onChannelChange: (channel: Channel) => void;
+  onDeleteVideo: (videoId: string, youtubeId: string | null) => Promise<void>;
 }
 
 const CharacterEditor: React.FC<{
@@ -105,7 +106,7 @@ const RetentionChart: React.FC<{ data: number[], color: string }> = ({ data, col
   );
 };
 
-export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdateConfig, onExit, activeChannel, channels, onChannelChange }) => {
+export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdateConfig, onExit, activeChannel, channels, onChannelChange, onDeleteVideo }) => {
   const [tempConfig, setTempConfig] = useState<ChannelConfig>(config);
   const [activeTab, setActiveTab] = useState<'insights' | 'settings'>('insights');
   const [videos, setVideos] = useState<StoredVideo[]>([]);
@@ -299,6 +300,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                         </div>
                       </div>
                     </div>
+                  </div>
+
+                  {/* Delete Button */}
+                  <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333] flex justify-end">
+                    <button
+                      onClick={async () => {
+                        if (confirm("Are you sure you want to delete this video? This cannot be undone.")) {
+                          await onDeleteVideo(selectedVideo.id, selectedVideo.youtube_id);
+                          setVideos(prev => prev.filter(v => v.id !== selectedVideo.id));
+                          setSelectedVideo(null);
+                        }
+                      }}
+                      className="bg-red-900/50 text-red-200 border border-red-800 hover:bg-red-900 px-4 py-2 rounded text-sm font-bold transition-colors"
+                    >
+                      🗑️ Delete Video Record
+                    </button>
                   </div>
                 </>
               ) : (

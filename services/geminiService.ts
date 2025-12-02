@@ -317,3 +317,35 @@ export const generateBroadcastVisuals = async (newsContext: string, config: Chan
     };
   }
 };
+
+export const generateThumbnail = async (newsContext: string, config: ChannelConfig): Promise<string | null> => {
+  const ai = getAiClient();
+
+  const prompt = `
+    Create a high-impact YouTube thumbnail for a news video about: ${newsContext}.
+    Channel Style: ${config.channelName} (${config.tone}).
+    Visuals: Bold, high contrast, breaking news style. 
+    Include text overlay if possible or just striking imagery.
+    Aspect Ratio: 16:9.
+    No photorealistic faces of real politicians if restricted, use stylized or symbolic representations.
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: "imagen-3.0-generate-001",
+      contents: prompt,
+      config: {
+        responseModalities: ["IMAGE" as any],
+      }
+    });
+
+    const imageBase64 = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+    if (imageBase64) {
+      return `data:image/png;base64,${imageBase64}`;
+    }
+    return null;
+  } catch (e) {
+    console.error("Thumbnail generation failed", e);
+    return null;
+  }
+};

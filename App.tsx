@@ -1,12 +1,11 @@
-
 import React, { useState, useEffect } from 'react';
-import { BroadcastPlayer } from './components/BroadcastPlayer';
+import { AppState, ChannelConfig, NewsItem, BroadcastSegment, VideoAssets, ViralMetadata, UserProfile, Channel } from './types';
+import { signInWithGoogle, getSession, signOut, getAllChannels, saveChannel, saveVideoToDB, getNewsByDate, saveNewsToDB, markNewsAsSelected, deleteVideoFromDB, loadConfigFromDB, supabase } from './services/supabaseService';
+import { fetchEconomicNews, generateScript, generateSegmentedAudio, generateBroadcastVisuals, generateViralMetadata, generateThumbnail } from './services/geminiService';
+import { uploadVideoToYouTube, deleteVideoFromYouTube } from './services/youtubeService';
 import { NewsSelector } from './components/NewsSelector';
+import { BroadcastPlayer } from './components/BroadcastPlayer';
 import { AdminDashboard } from './components/AdminDashboard';
-import { fetchEconomicNews, generateScript, generateSegmentedAudio, generateBroadcastVisuals, generateViralMetadata } from './services/geminiService';
-import { uploadVideoToYouTube } from './services/youtubeService';
-import { loadConfigFromDB, saveVideoToDB, signInWithGoogle, supabase, saveNewsToDB, getNewsByDate, markNewsAsSelected, getAllChannels } from './services/supabaseService';
-import { NewsItem, AppState, BroadcastSegment, VideoAssets, ViralMetadata, UserProfile, ChannelConfig, Channel } from './types';
 
 // Runtime configuration access
 const getAdminEmail = () => import.meta.env.VITE_ADMIN_EMAIL || window.env?.ADMIN_EMAIL || process.env.ADMIN_EMAIL || "";
@@ -57,6 +56,7 @@ const App: React.FC = () => {
   const [viralMeta, setViralMeta] = useState<ViralMetadata | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [loginError, setLoginError] = useState<string | null>(null);
+  const [thumbnailDataUrl, setThumbnailDataUrl] = useState<string | null>(null);
 
   // UI State
   const getYesterday = () => {
@@ -303,7 +303,14 @@ const App: React.FC = () => {
           return meta;
         });
 
-      await Promise.all([audioTask, videoTask, metaTask]);
+      const thumbnailTask = generateThumbnail(mainContext, config)
+        .then(dataUrl => {
+          setThumbnailDataUrl(dataUrl);
+          addLog(dataUrl ? "✅ Thumbnail generated." : "⚠️ Thumbnail generation skipped.");
+          return dataUrl;
+        });
+
+      await Promise.all([audioTask, videoTask, metaTask, thumbnailTask]);
 
       setState(AppState.READY);
       addLog("🚀 Broadcast Ready!");
@@ -320,10 +327,18 @@ const App: React.FC = () => {
     setUploadStatus("Starting Upload...");
 
     try {
+      // Convert thumbnail data URL to Blob if available
+      let thumbnailBlob: Blob | null = null;
+      if (thumbnailDataUrl) {
+        const response = await fetch(thumbnailDataUrl);
+        thumbnailBlob = await response.blob();
+      }
+
       const videoUrl = await uploadVideoToYouTube(
         videoBlob,
         viralMeta,
         user.accessToken,
+        thumbnailBlob,
         (percent) => setUploadStatus(`Uploading: ${Math.round(percent)}%`)
       );
       setUploadStatus("✅ Published! " + videoUrl);
@@ -331,6 +346,20 @@ const App: React.FC = () => {
       window.open(videoUrl, '_blank');
     } catch (e) {
       setUploadStatus("❌ Upload Failed: " + (e as Error).message);
+    }
+  };
+
+  const handleDeleteVideo = async (videoId: string, youtubeId: string | null) => {
+    try {
+      // Delete from YouTube if it was uploaded
+      if (youtubeId && user) {
+        await deleteVideoFromYouTube(youtubeId, user.accessToken);
+      }
+      // Delete from database
+      await deleteVideoFromDB(videoId);
+    } catch (e) {
+      console.error("Delete failed", e);
+      alert("Failed to delete video: " + (e as Error).message);
     }
   };
 
@@ -392,6 +421,7 @@ const App: React.FC = () => {
           setActiveChannel(channel);
           setConfig(channel.config);
         }}
+        onDeleteVideo={handleDeleteVideo}
       />
     );
   }

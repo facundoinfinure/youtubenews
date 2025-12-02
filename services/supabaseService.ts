@@ -87,6 +87,20 @@ export const saveVideoToDB = async (
   if (error) console.error("Error saving video:", error);
 };
 
+export const deleteVideoFromDB = async (id: string) => {
+  if (!supabase) return;
+
+  const { error } = await supabase
+    .from('videos')
+    .delete()
+    .eq('id', id);
+
+  if (error) {
+    console.error("Error deleting video:", error);
+    throw error;
+  }
+};
+
 // =============================================================================================
 // CHANNEL MANAGEMENT
 // =============================================================================================
