@@ -15,14 +15,14 @@ export const NewsSelector: React.FC<NewsSelectorProps> = ({ news, onConfirmSelec
     if (selectedIndices.includes(index)) {
       setSelectedIndices(selectedIndices.filter(i => i !== index));
     } else {
-      if (selectedIndices.length < 3) {
+      if (selectedIndices.length < 5) {
         setSelectedIndices([...selectedIndices, index]);
       }
     }
   };
 
   const handleConfirm = () => {
-    if (selectedIndices.length >= 2 && selectedIndices.length <= 3) {
+    if (selectedIndices.length >= 2 && selectedIndices.length <= 5) {
       const selectedItems = selectedIndices.map(i => news[i]);
       onConfirmSelection(selectedItems);
     }
@@ -35,12 +35,12 @@ export const NewsSelector: React.FC<NewsSelectorProps> = ({ news, onConfirmSelec
           <h2 className="text-2xl font-bold text-white mb-2">Editorial Meeting</h2>
           <p className="text-gray-400 text-sm">
             Wire reports for <span className="text-white font-mono">{date.toLocaleDateString()}</span>.
-            Select <span className="text-yellow-400 font-bold">2 or 3 stories</span> for the broadcast.
+            Select <span className="text-yellow-400 font-bold">2 to 5 stories</span> for the broadcast.
           </p>
         </div>
         <div className="text-right">
           <div className={`text-3xl font-bold ${selectedIndices.length >= 2 ? 'text-green-500' : 'text-gray-500'}`}>
-            {selectedIndices.length}/3
+            {selectedIndices.length}/5
           </div>
           <div className="text-xs text-gray-500 uppercase">Selected</div>
         </div>
@@ -49,7 +49,7 @@ export const NewsSelector: React.FC<NewsSelectorProps> = ({ news, onConfirmSelec
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
         {news.map((item, idx) => {
           const isSelected = selectedIndices.includes(idx);
-          const isDisabled = !isSelected && selectedIndices.length >= 3;
+          const isDisabled = !isSelected && selectedIndices.length >= 5;
 
           return (
             <div

@@ -121,10 +121,10 @@ export const generateScript = async (news: NewsItem[], config: ChannelConfig): P
   }
 };
 
-export const generateViralMetadata = async (news: NewsItem[], config: ChannelConfig): Promise<ViralMetadata> => {
+export const generateViralMetadata = async (news: NewsItem[], config: ChannelConfig, date: Date): Promise<ViralMetadata> => {
   const ai = getAiClient();
   const newsContext = news.map(n => `- ${n.headline}`).join('\n');
-  const dateStr = new Date().toLocaleDateString();
+  const dateStr = date.toLocaleDateString();
 
   const prompt = `
   You are a YouTube Growth Hacker for the channel "${config.channelName}". 
@@ -242,7 +242,7 @@ export const generateBroadcastVisuals = async (newsContext: string, config: Chan
       model: "veo-3.1-generate-preview",
       contents: prompt,
       config: {
-        responseModalities: ["VIDEO" as any], // Request video output
+        // responseModalities: ["VIDEO" as any], // Removed as it caused runtime error. Model should infer or default.
       }
     });
 

@@ -292,7 +292,7 @@ const App: React.FC = () => {
           return vids;
         });
 
-      const metaTask = generateViralMetadata(finalNews, config)
+      const metaTask = generateViralMetadata(finalNews, config, new Date(selectedDate))
         .then(async (meta) => {
           setViralMeta(meta);
           addLog("✅ SEO Metadata generated.");
