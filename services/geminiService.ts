@@ -95,7 +95,7 @@ export const fetchEconomicNews = async (targetDate: Date | undefined, config: Ch
   );
 };
 
-export const generateScript = async (news: NewsItem[], config: ChannelConfig): Promise<ScriptLine[]> => {
+export const generateScript = async (news: NewsItem[], config: ChannelConfig, viralHook?: string): Promise<ScriptLine[]> => {
   const ai = getAiClient();
 
   const newsContext = news.map(n => `- ${n.headline} (Source: ${n.source}). Summary: ${n.summary}`).join('\n');
@@ -110,12 +110,20 @@ export const generateScript = async (news: NewsItem[], config: ChannelConfig): P
   
   They are discussing the selected news.
   
+  SCRIPT STRUCTURE (60 seconds):
+  - 0-10s: HOOK (grab attention)${viralHook ? ` Use this: "${viralHook}"` : ''}
+  - 10-40s: CONTENT (deliver value, cite sources)
+  - 40-50s: PAYOFF (answer the hook)
+  - 50-60s: CTA (subscribe/like)
+  
   Rules:
   - KEEP IT UNDER 150 WORDS TOTAL (approx 1 minute).
   - CITATION REQUIRED: You MUST explicitly mention the source of the news in the dialogue.
   - Structure the output as a JSON Array of objects: [{"speaker": "${config.characters.hostA.name}", "text": "..."}, {"speaker": "${config.characters.hostB.name}", "text": "..."}].
   - Use "Both" as speaker for the intro/outro if they speak together.
   - Be creative, use puns related to the characters (e.g. if one is a gorilla, use banana puns; if a penguin, ice puns).
+  - Pattern interrupt every 15 seconds
+  - Use "you" language
   - STRICT JSON OUTPUT. NO MARKDOWN.
   `;
 
@@ -139,43 +147,106 @@ export const generateScript = async (news: NewsItem[], config: ChannelConfig): P
   }
 };
 
+export const fetchTrendingTopics = async (country: string): Promise<string[]> => {
+  const cacheKey = `trending_${country}_${new Date().toISOString().split('T')[0]}`;
+
+  return ContentCache.getOrGenerate(
+    cacheKey,
+    async () => {
+      const ai = getAiClient();
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: `What are the top 10 trending topics on YouTube in ${country} today? Focus on news, finance, and current events. Return as JSON array of strings.`,
+        config: {
+          tools: [{ googleSearch: {} }],
+          responseMimeType: "application/json"
+        }
+      });
+
+      try {
+        const topics = JSON.parse(response.text || "[]");
+        return Array.isArray(topics) ? topics : [];
+      } catch {
+        return [];
+      }
+    },
+    7200000, // 2 hour TTL
+    0.02
+  );
+};
+
 export const generateViralMetadata = async (news: NewsItem[], config: ChannelConfig, date: Date): Promise<ViralMetadata> => {
   const ai = getAiClient();
-  const newsContext = news.map(n => `- ${n.headline}`).join('\n');
+
+  // Get trending topics for SEO boost
+  const trending = await fetchTrendingTopics(config.country);
+  const newsContext = news.map(n => `- ${n.headline} (Viral Score: ${n.viralScore})`).join('\n');
   const dateStr = date.toLocaleDateString();
 
   const prompt = `
-  You are a YouTube Growth Hacker for the channel "${config.channelName}". 
-  Generate the metadata for a video discussing these stories:
-  ${newsContext}
+You are a VIRAL YouTube expert with 100M+ views across channels.
 
-  Language: ${config.language}.
+NEWS STORIES:
+${newsContext}
 
-  Return a JSON object with:
-  1. "title": A CLICKBAIT, VIRAL style title (max 70 chars). Use CAPS for emphasis and maybe one emoji. 
-  2. "description": A short, SEO-optimized description (max 300 chars) summarizing the video. Include the channel tagline "${config.tagline}" and the date: ${dateStr}.
-  3. "tags": An array of 15 high-volume tags/keywords strings. Include these default tags if relevant: ${config.defaultTags?.join(', ') || ''}.
+TRENDING NOW IN ${config.country}:
+${trending.join(', ')}
 
-  Example JSON:
-  {
-    "title": "MARKET CRASH IMMINENT?! 📉 (${config.channelName} Explain)",
-    "description": "We break down the latest numbers. Is your portfolio safe? ${config.tagline}. News for ${dateStr}.",
-    "tags": ["finance", "news"]
-  }
-  `;
+Create HIGH-CTR metadata:
 
-  const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash",
-    contents: prompt,
-    config: { responseMimeType: "application/json" }
-  });
+TITLE RULES (max 60 chars):
+- Use power words: SHOCKING, BREAKING, EXPOSED, WATCH, URGENT, REVEALED
+- Include numbers/percentages if relevant
+- Create curiosity gap (tease but don't reveal)
+- Add ONE emoji that fits the tone
+- Examples:
+  * "MARKET CRASH: 40% Drop INCOMING?! 📉"
+  * "They're HIDING This From You! 🚨"
+  * "BREAKING: 5 Stocks to BUY NOW 💰"
 
-  try {
-    const text = response.text || "{}";
-    return JSON.parse(text) as ViralMetadata;
-  } catch (e) {
-    throw new Error("Failed to parse viral metadata from Gemini");
-  }
+DESCRIPTION RULES (max 250 chars):
+- Hook in first 10 words
+- Include keywords: ${news.map(n => n.imageKeyword).join(', ')}
+- Add trending terms: ${trending.slice(0, 3).join(', ')}
+- Include date: ${dateStr}
+- Call to action
+- Timestamp preview: "0:00 Intro | 0:15 Analysis | 0:45 Prediction"
+- End with tagline: "${config.tagline}"
+
+TAGS RULES (exactly 20 tags):
+- Mix broad + specific
+- Include: ${(config.defaultTags || []).join(', ')}
+- Add trending: ${trending.slice(0, 5).join(', ')}
+- Long-tail keywords
+- Event-specific tags
+
+Return JSON: { title, description, tags }
+  `.trim();
+
+  const cacheKey = `metadata_${news.map(n => n.headline).join('_').substring(0, 50)}_${dateStr}`;
+
+  return ContentCache.getOrGenerate(
+    cacheKey,
+    async () => {
+
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt,
+        config: { responseMimeType: "application/json" }
+      });
+
+      const metadata = JSON.parse(response.text || "{}");
+
+      // Validate and ensure defaults
+      return {
+        title: metadata.title?.substring(0, 60) || "Breaking News",
+        description: metadata.description?.substring(0, 250) || "",
+        tags: Array.isArray(metadata.tags) ? metadata.tags.slice(0, 20) : []
+      };
+    },
+    1800000, // 30 min TTL
+    0.03
+  );
 };
 
 export const generateSegmentedAudio = async (script: ScriptLine[], config: ChannelConfig): Promise<BroadcastSegment[]> => {
@@ -356,5 +427,133 @@ export const generateThumbnail = async (newsContext: string, config: ChannelConf
   } catch (e) {
     console.error("Thumbnail generation failed", e);
     return null;
+  }
+};
+
+export const generateThumbnailVariants = async (
+  newsContext: string,
+  config: ChannelConfig,
+  viralMeta: ViralMetadata
+): Promise<{ primary: string | null; variant: string | null }> => {
+  const ai = getAiClient();
+
+  // Define 3 proven thumbnail styles
+  const styles = [
+    {
+      name: "Shocked Face + Bold Text",
+      prompt: "Close-up shocked/surprised expression with mouth open, bold oversized text overlay with the headline, high contrast bright colors, dramatic lighting from one side"
+    },
+    {
+      name: "Split Screen Comparison",
+      prompt: "Split-screen vertical composition showing before/after or two contrasting elements, bold arrows pointing between them, numbers/percentages overlaid, contrasting color schemes on each side"
+    },
+    {
+      name: "Symbolic + Urgency",
+      prompt: "Symbolic representation of the topic (money, charts, danger symbols), urgent red/yellow color scheme, text with exclamation marks, clock or fire emoji elements"
+    }
+  ];
+
+  // Rotate style based on date (simple A/B pattern)
+  const styleIndex = new Date().getDate() % styles.length;
+  const primaryStyle = styles[styleIndex];
+  const variantStyle = styles[(styleIndex + 1) % styles.length];
+
+  const basePrompt = (style: typeof styles[0]) => `
+Create a VIRAL YouTube thumbnail for: "${viralMeta.title}"
+
+Topic: ${newsContext}
+Channel: ${config.channelName}
+
+STYLE: ${style.name}
+${style.prompt}
+
+REQUIREMENTS:
+- 16:9 ratio (1280x720)
+- Bold readable text: "${viralMeta.title.substring(0, 30)}"
+- Brand colors: ${config.logoColor1}, ${config.logoColor2}
+- High contrast (mobile-friendly)
+- Evoke emotion: shock, curiosity, urgency
+- NO photorealistic politicians (use icons/symbols)
+- Professional news aesthetic
+
+Make it CLICK-WORTHY!
+  `.trim();
+
+  try {
+    const [primary, variant] = await Promise.all([
+      retryWithBackoff(async () => {
+        const response = await ai.models.generateContent({
+          model: "imagen-3.0-generate-001",
+          contents: basePrompt(primaryStyle),
+          config: { responseModalities: ["IMAGE" as any] }
+        });
+
+        const imageBase64 = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+        if (!imageBase64) throw new Error('No image data');
+        return `data:image/png;base64,${imageBase64}`;
+      }, { maxRetries: 2, baseDelay: 2000 }),
+
+      retryWithBackoff(async () => {
+        const response = await ai.models.generateContent({
+          model: "imagen-3.0-generate-001",
+          contents: basePrompt(variantStyle),
+          config: { responseModalities: ["IMAGE" as any] }
+        });
+
+        const imageBase64 = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+        if (!imageBase64) throw new Error('No image data');
+        return `data:image/png;base64,${imageBase64}`;
+      }, { maxRetries: 2, baseDelay: 2000 })
+    ]);
+
+    return { primary, variant };
+  } catch (e) {
+    console.error("Thumbnail variants generation failed", e);
+    // Fallback to single thumbnail
+    const fallback = await generateThumbnail(newsContext, config);
+    return { primary: fallback, variant: null };
+  }
+};
+
+export const generateViralHook = async (
+  news: NewsItem[],
+  config: ChannelConfig
+): Promise<string> => {
+  const ai = getAiClient();
+
+  const topStory = news[0];
+
+  const prompt = `
+You are a VIRAL content scriptwriter (100M+ views).
+
+Create an ATTENTION-GRABBING opening hook (2-3 sentences, max 30 words) for this news:
+"${topStory.headline}"
+
+HOOK FORMULA:
+1. Shocking statement OR urgent question
+2. Promise immediate value
+3. Create curiosity gap
+
+POWER WORDS: YOU, THIS, NOW, SHOCKING, BREAKING, EXPOSED, REVEALED
+
+EXAMPLES:
+- "You WON'T believe what just happened to the stock market. In 60 seconds, I'll show you how this affects YOUR money."
+- "BREAKING: This could change EVERYTHING. Here's what the news won't tell you."
+- "They tried to hide THIS from you. Watch before it's deleted."
+
+Channel tone: ${config.tone}
+Return ONLY the hook text, no explanation.
+  `.trim();
+
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: prompt
+    });
+
+    return response.text?.trim() || "You won't believe this news...";
+  } catch (e) {
+    console.error("Viral hook generation failed", e);
+    return `Breaking news about ${topStory.headline.substring(0, 30)}...`;
   }
 };

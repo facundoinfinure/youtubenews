@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { AppState, ChannelConfig, NewsItem, BroadcastSegment, VideoAssets, ViralMetadata, UserProfile, Channel } from './types';
 import { signInWithGoogle, getSession, signOut, getAllChannels, saveChannel, saveVideoToDB, getNewsByDate, saveNewsToDB, markNewsAsSelected, deleteVideoFromDB, loadConfigFromDB, supabase } from './services/supabaseService';
-import { fetchEconomicNews, generateScript, generateSegmentedAudio, generateBroadcastVisuals, generateViralMetadata, generateThumbnail } from './services/geminiService';
+import { fetchEconomicNews, generateScript, generateSegmentedAudio, generateBroadcastVisuals, generateViralMetadata, generateThumbnail, generateThumbnailVariants, generateViralHook } from './services/geminiService';
 import { uploadVideoToYouTube, deleteVideoFromYouTube } from './services/youtubeService';
 import { ContentCache } from './services/ContentCache';
 import { NewsSelector } from './components/NewsSelector';
@@ -58,6 +58,7 @@ const App: React.FC = () => {
   const [logs, setLogs] = useState<string[]>([]);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [thumbnailDataUrl, setThumbnailDataUrl] = useState<string | null>(null);
+  const [thumbnailVariant, setThumbnailVariant] = useState<string | null>(null);
 
   // UI State
   const getYesterday = () => {
@@ -270,7 +271,12 @@ const App: React.FC = () => {
       // 2. Generate Script
       setState(AppState.GENERATING_SCRIPT);
       addLog(`✍️ Editorial approved. Scripting with tone: ${config.tone}...`);
-      const genScript = await generateScript(finalNews, config);
+
+      // Generate viral hook first
+      const viralHook = await generateViralHook(finalNews, config);
+      addLog(`🎣 Viral hook: "${viralHook.substring(0, 40)}..."`);
+
+      const genScript = await generateScript(finalNews, config, viralHook);
       addLog("✅ Script written.");
 
       // 3. Generate Media (Parallel)
@@ -304,14 +310,16 @@ const App: React.FC = () => {
           return meta;
         });
 
-      const thumbnailTask = generateThumbnail(mainContext, config)
-        .then(dataUrl => {
-          setThumbnailDataUrl(dataUrl);
-          addLog(dataUrl ? "✅ Thumbnail generated." : "⚠️ Thumbnail generation skipped.");
-          return dataUrl;
-        });
+      const [segments, videos, metadata] = await Promise.all([audioTask, videoTask, metaTask]);
 
-      await Promise.all([audioTask, videoTask, metaTask, thumbnailTask]);
+      setViralMeta(metadata); // Update state with the resolved metadata
+
+      // 4. Generate thumbnail variants (after metadata for title context)
+      addLog("🎨 Creating thumbnail variants...");
+      const thumbnails = await generateThumbnailVariants(mainContext, config, metadata);
+      setThumbnailDataUrl(thumbnails.primary);
+      setThumbnailVariant(thumbnails.variant);
+      addLog(`✅ Thumbnails ready (${thumbnails.variant ? '2 variants for A/B testing' : '1 thumbnail'})`);
 
       setState(AppState.READY);
       addLog("🚀 Broadcast Ready!");
