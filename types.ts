@@ -18,6 +18,7 @@ export interface BroadcastSegment {
   speaker: string;
   text: string;
   audioBase64: string;
+  videoUrl?: string; // NEW: Specific video for this segment
 }
 
 export interface VideoAssets {

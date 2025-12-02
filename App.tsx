@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { AppState, ChannelConfig, NewsItem, BroadcastSegment, VideoAssets, ViralMetadata, UserProfile, Channel, ScriptLine } from './types';
 import { signInWithGoogle, getSession, signOut, getAllChannels, saveChannel, saveVideoToDB, getNewsByDate, saveNewsToDB, markNewsAsSelected, deleteVideoFromDB, loadConfigFromDB, supabase } from './services/supabaseService';
-import { fetchEconomicNews, generateScript, generateSegmentedAudio, generateBroadcastVisuals, generateViralMetadata, generateThumbnail, generateThumbnailVariants, generateViralHook } from './services/geminiService';
+import { fetchEconomicNews, generateScript, generateSegmentedAudio, generateBroadcastVisuals, generateViralMetadata, generateThumbnail, generateThumbnailVariants, generateViralHook, generateVideoSegments } from './services/geminiService';
 import { uploadVideoToYouTube, deleteVideoFromYouTube } from './services/youtubeService';
 import { ContentCache } from './services/ContentCache';
 import { NewsSelector } from './components/NewsSelector';
@@ -293,6 +293,7 @@ const App: React.FC = () => {
       addLog(`🎬 Rolling cameras (${config.format})...`);
       addLog("🎙️ Sound check...");
 
+
       const audioTask = generateSegmentedAudio(genScript, config)
         .then(segs => {
           setSegments(segs);
@@ -300,8 +301,11 @@ const App: React.FC = () => {
           return segs;
         });
 
+      // NEW: Granular Video Generation
+      const videoSegmentsTask = generateVideoSegments(genScript, config);
+
       const mainContext = finalNews[0]?.headline || "News";
-      const videoTask = generateBroadcastVisuals(mainContext, config, genScript)
+      const backgroundVideoTask = generateBroadcastVisuals(mainContext, config, genScript)
         .then(vids => {
           setVideos(vids);
           addLog("✅ Video feeds established.");
@@ -312,16 +316,29 @@ const App: React.FC = () => {
         .then(async (meta) => {
           setViralMeta(meta);
           addLog("✅ SEO Metadata generated.");
-          // Save draft video record to Supabase
           if (activeChannel) {
             await saveVideoToDB(meta, activeChannel.id);
           }
           return meta;
         });
 
-      const [segments, videos, metadata] = await Promise.all([audioTask, videoTask, metaTask]);
+      const [audioSegments, videoSegments, backgroundVideos, metadata] = await Promise.all([
+        audioTask,
+        videoSegmentsTask,
+        backgroundVideoTask,
+        metaTask
+      ]);
 
-      setViralMeta(metadata); // Update state with the resolved metadata
+      // Merge audio and video segments
+      const finalSegments = audioSegments.map((seg, i) => ({
+        ...seg,
+        videoUrl: videoSegments[i] || undefined // Attach specific video if generated
+      }));
+
+      setSegments(finalSegments);
+      setVideos(backgroundVideos);
+      setViralMeta(metadata);
+      addLog(`✅ Media ready: ${audioSegments.length} audio clips, ${videoSegments.filter(v => v).length} unique video clips.`);
 
       // 4. Generate thumbnail variants (after metadata for title context)
       addLog("🎨 Creating thumbnail variants...");
