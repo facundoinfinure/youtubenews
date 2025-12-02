@@ -4,6 +4,103 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer base {
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+@layer components {
+
+  /* Glassmorphism Card */
+  .glass-card {
+    background: rgba(255, 255, 255, 0.03);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  }
+
+  .glass-card-hover {
+    @apply glass-card;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .glass-card-hover:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.12);
+    transform: translateY(-2px);
+    box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.5);
+  }
+
+  /* Animated Button */
+  .btn-primary {
+    @apply px-6 py-2.5 rounded-xl font-semibold text-sm;
+    @apply bg-gradient-to-r from-primary-600 to-primary-500;
+    @apply text-white border border-primary-400/30;
+    @apply shadow-lg transition-all duration-200;
+    @apply hover:scale-105 hover:shadow-xl hover:shadow-primary-500/20;
+    @apply active:scale-95;
+  }
+
+  .btn-secondary {
+    @apply px-6 py-2.5 rounded-xl font-semibold text-sm;
+    @apply bg-gray-800 text-gray-200 border border-gray-700;
+    @apply shadow-md transition-all duration-200;
+    @apply hover:bg-gray-700 hover:scale-105;
+    @apply active:scale-95;
+  }
+
+  .btn-accent {
+    @apply px-6 py-2.5 rounded-xl font-semibold text-sm;
+    @apply bg-gradient-to-r from-accent-500 to-accent-400;
+    @apply text-gray-900 border border-accent-300/30;
+    @apply shadow-lg transition-all duration-200;
+    @apply hover:scale-105 hover:shadow-xl hover:shadow-accent-500/20;
+    @apply active:scale-95;
+  }
+
+  /* Interactive Card */
+  .card-interactive {
+    @apply transition-all duration-300 cursor-pointer;
+    @apply hover:transform hover:-translate-y-1;
+    @apply hover:shadow-2xl;
+  }
+
+  /* Focus Ring */
+  .focus-ring {
+    @apply focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 focus:ring-offset-gray-900;
+  }
+
+  /* Shimmer Loading */
+  .shimmer {
+    background: linear-gradient(90deg,
+        #1a1a1a 0%,
+        #2a2a2a 50%,
+        #1a1a1a 100%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s ease-in-out infinite;
+  }
+
+  @keyframes shimmer {
+    0% {
+      background-position: -200% 0;
+    }
+
+    100% {
+      background-position: 200% 0;
+    }
+  }
+}
+
 body {
   font-family: 'Inter', sans-serif;
   background-color: #1a1a1a;
