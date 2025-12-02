@@ -242,7 +242,7 @@ export const generateBroadcastVisuals = async (newsContext: string, config: Chan
       model: "veo-3.1-generate-preview",
       contents: prompt,
       config: {
-        responseModalities: [Modality.VIDEO], // Request video output
+        responseModalities: ["VIDEO" as any], // Request video output
       }
     });
 

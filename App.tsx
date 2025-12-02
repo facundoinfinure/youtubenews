@@ -519,9 +519,6 @@ const App: React.FC = () => {
               <BroadcastPlayer
                 segments={segments}
                 videos={videos}
-              <BroadcastPlayer
-                segments={segments}
-                videos={videos}
                 news={allNews}
                 displayDate={new Date(selectedDate)}
                 onUploadToYouTube={handleYouTubeUpload}

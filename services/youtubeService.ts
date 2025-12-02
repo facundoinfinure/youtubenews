@@ -14,37 +14,32 @@ const getClientId = () => {
 
 // Login handled via Supabase Auth now
 
-const getBackendUrl = () => {
-  return (
-    import.meta.env.VITE_BACKEND_URL ||
-    window.env?.BACKEND_URL ||
-    process.env.BACKEND_URL ||
-    "http://localhost:8080"
-  );
-};
-
 export const uploadVideoToYouTube = async (
   blob: Blob,
   metadata: ViralMetadata,
   accessToken: string,
   onProgress: (percent: number) => void
 ): Promise<string> => {
-  const backendUrl = getBackendUrl();
-
   try {
-    // Use backend proxy to avoid CORS issues
-    const formData = new FormData();
-    formData.append("file", blob, "video.webm");
-    formData.append("metadata", JSON.stringify({
-      title: metadata.title,
-      description: metadata.description,
-      tags: metadata.tags,
-      categoryId: "25", // News & Politics
-      privacyStatus: "private",
-    }));
-    formData.append("access_token", accessToken);
+    const metadataObj = {
+      snippet: {
+        title: metadata.title,
+        description: metadata.description,
+        tags: metadata.tags,
+        categoryId: "25", // News & Politics
+      },
+      status: {
+        privacyStatus: "private", // Default to private for safety
+      },
+    };
 
-    // Create XMLHttpRequest for progress tracking
+    const formData = new FormData();
+    formData.append(
+      "snippet",
+      new Blob([JSON.stringify(metadataObj)], { type: "application/json" })
+    );
+    formData.append("file", blob, "video.mp4");
+
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
 
@@ -59,22 +54,23 @@ export const uploadVideoToYouTube = async (
         if (xhr.status >= 200 && xhr.status < 300) {
           try {
             const response = JSON.parse(xhr.responseText);
-            if (response.success && response.video_url) {
-              resolve(response.video_url);
-            } else {
-              reject(new Error(response.error || "Upload failed"));
-            }
+            const videoId = response.id;
+            resolve(`https://youtu.be/${videoId}`);
           } catch (e) {
-            reject(new Error("Failed to parse response"));
+            reject(new Error("Failed to parse YouTube response"));
           }
         } else {
-          reject(new Error(`Upload failed with status ${xhr.status}`));
+          reject(new Error(`Upload failed with status ${xhr.status}: ${xhr.responseText}`));
         }
       };
 
       xhr.onerror = () => reject(new Error("Network error during upload."));
 
-      xhr.open("POST", `${backendUrl}/api/v1/youtube/upload`);
+      xhr.open(
+        "POST",
+        "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=multipart&part=snippet,status"
+      );
+      xhr.setRequestHeader("Authorization", `Bearer ${accessToken}`);
       xhr.send(formData);
     });
   } catch (error) {
