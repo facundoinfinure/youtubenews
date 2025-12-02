@@ -3,7 +3,7 @@ export const MODEL_STRATEGY = {
     // Critical tasks - need high quality
     news: "gemini-2.5-flash",           // Needs grounding
     audio: "gemini-2.5-flash-preview-tts", // Quality matters
-    video: "veo-3.1-generate-preview",  // No alternative
+    video: "veo-2.0-generate-preview-001",  // Stable version
     thumbnail: "imagen-3.0-generate-001", // Quality matters
 
     // Simple tasks - can use cheaper models

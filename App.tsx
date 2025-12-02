@@ -406,8 +406,21 @@ const App: React.FC = () => {
       // Delete from YouTube if it was uploaded
       if (youtubeId && user) {
         console.log(`[APP] Deleting from YouTube: ${youtubeId}`);
-        await deleteVideoFromYouTube(youtubeId, user.accessToken);
-        console.log(`[APP] YouTube deletion successful`);
+        try {
+          await deleteVideoFromYouTube(youtubeId, user.accessToken);
+          console.log(`[APP] YouTube deletion successful`);
+        } catch (ytError) {
+          console.warn(`[APP] YouTube deletion failed:`, ytError);
+          // If it's a 404 (Not Found) or 403 (Forbidden - maybe lost access), we should probably still delete from DB
+          // For now, we'll assume any error means we can't delete it there, but we SHOULD delete it here to clean up "ghost" records.
+          // We'll notify the user but proceed.
+          const msg = (ytError as Error).message;
+          if (msg.includes('404') || msg.includes('not found')) {
+            toast.error('Video not found on YouTube (already deleted?), removing from database...');
+          } else {
+            toast.error(`YouTube delete error: ${msg}. Proceeding with DB delete.`);
+          }
+        }
       }
 
       // Delete from database
@@ -540,7 +553,7 @@ const App: React.FC = () => {
           {user && (
             <button
               onClick={() => setState(AppState.ADMIN_DASHBOARD)}
-              className="bg-[#272727] hover:bg-[#3f3f3f] text-xs font-bold px-3 py-1.5 rounded border border-[#444] text-gray-300"
+              className="btn-secondary"
             >
               ADMIN
             </button>
@@ -608,8 +621,8 @@ const App: React.FC = () => {
                       <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)}
                         className="bg-[#1f1f1f] border border-[#3f3f3f] text-white px-4 py-2 rounded-lg w-full focus:outline-none focus:border-blue-500" />
                     </div>
-                    <button onClick={verifyKeyAndStart} className="bg-white text-black font-medium text-sm px-6 py-3 rounded-full hover:bg-gray-200 transition-colors mt-4">
-                      Start Production
+                    <button onClick={verifyKeyAndStart} className="btn-primary mt-4">
+                      ▶ Start Production
                     </button>
                   </>
                 )}

@@ -112,8 +112,9 @@ export const deleteVideoFromDB = async (id: string) => {
   console.log(`[DELETE] Successfully deleted ${data?.length || 0} row(s)`);
 
   if (!data || data.length === 0) {
-    console.warn(`[DELETE] No rows were deleted for ID: ${id}`);
-    throw new Error(`Video with ID ${id} not found or could not be deleted`);
+    console.warn(`[DELETE] No rows were deleted for ID: ${id} (already deleted?)`);
+    // Do not throw, just return. This makes the operation idempotent.
+    return;
   }
 };
 

@@ -164,8 +164,8 @@ export const fetchTrendingTopics = async (country: string): Promise<string[]> =>
         model: getModelForTask('trending'),
         contents: `What are the top 10 trending topics on YouTube in ${country} today? Focus on news, finance, and current events. Return as JSON array of strings.`,
         config: {
-          tools: [{ googleSearch: {} }],
-          responseMimeType: "application/json"
+          tools: [{ googleSearch: {} }]
+          // responseMimeType: "application/json" // Conflict with tools in some models
         }
       });
 
