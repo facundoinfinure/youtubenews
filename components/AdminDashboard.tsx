@@ -308,12 +308,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                     <button
                       onClick={async () => {
                         if (confirm('Are you sure you want to delete this video? This will also delete it from YouTube if uploaded.')) {
-                          await onDeleteVideo(selectedVideo.id, selectedVideo.youtube_id);
-                          setSelectedVideo(null);
-                          // RE-FETCH videos after deletion
-                          if (activeChannel) {
-                            const refreshedVideos = await fetchVideosFromDB(activeChannel.id);
-                            setVideos(refreshedVideos);
+                          try {
+                            console.log(`[ADMIN] Deleting video: ${selectedVideo.id}`);
+                            await onDeleteVideo(selectedVideo.id, selectedVideo.youtube_id);
+                            console.log(`[ADMIN] Delete successful, clearing selection`);
+                            setSelectedVideo(null);
+
+                            // RE-FETCH videos after deletion
+                            if (activeChannel) {
+                              console.log(`[ADMIN] Re-fetching videos for channel: ${activeChannel.id}`);
+                              const refreshedVideos = await fetchVideosFromDB(activeChannel.id);
+                              console.log(`[ADMIN] Fetched ${refreshedVideos.length} videos`);
+                              setVideos(refreshedVideos);
+                            }
+                          } catch (error) {
+                            console.error(`[ADMIN] Delete failed:`, error);
+                            // Error already shown by handleDeleteVideo
                           }
                         }
                       }}

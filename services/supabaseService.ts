@@ -91,16 +91,29 @@ export const saveVideoToDB = async (
 };
 
 export const deleteVideoFromDB = async (id: string) => {
-  if (!supabase) return;
+  if (!supabase) {
+    console.error("[DELETE] Supabase not initialized");
+    throw new Error("Database not available");
+  }
 
-  const { error } = await supabase
+  console.log(`[DELETE] Attempting to delete video: ${id}`);
+
+  const { error, data } = await supabase
     .from('videos')
     .delete()
-    .eq('id', id);
+    .eq('id', id)
+    .select(); // Add select() to return deleted rows
 
   if (error) {
-    console.error("Error deleting video:", error);
+    console.error("[DELETE] Supabase error:", error);
     throw error;
+  }
+
+  console.log(`[DELETE] Successfully deleted ${data?.length || 0} row(s)`);
+
+  if (!data || data.length === 0) {
+    console.warn(`[DELETE] No rows were deleted for ID: ${id}`);
+    throw new Error(`Video with ID ${id} not found or could not be deleted`);
   }
 };
 

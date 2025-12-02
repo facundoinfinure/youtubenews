@@ -400,16 +400,28 @@ const App: React.FC = () => {
   };
 
   const handleDeleteVideo = async (videoId: string, youtubeId: string | null) => {
+    console.log(`[APP] Delete requested for video: ${videoId}, YouTube ID: ${youtubeId}`);
     try {
       // Delete from YouTube if it was uploaded
       if (youtubeId && user) {
+        console.log(`[APP] Deleting from YouTube: ${youtubeId}`);
         await deleteVideoFromYouTube(youtubeId, user.accessToken);
+        console.log(`[APP] YouTube deletion successful`);
       }
+
       // Delete from database
+      console.log(`[APP] Deleting from database: ${videoId}`);
       await deleteVideoFromDB(videoId);
+      console.log(`[APP] Database deletion successful`);
+
+      // Show success message
+      alert("✅ Video deleted successfully!");
+
     } catch (e) {
-      console.error("Delete failed", e);
-      alert("Failed to delete video: " + (e as Error).message);
+      console.error("[APP] Delete failed:", e);
+      const errorMsg = (e as Error).message || "Unknown error";
+      alert(`❌ Failed to delete video: ${errorMsg}\n\nCheck console for details.`);
+      throw e; // Re-throw to ensure AdminDashboard knows it failed
     }
   };
 
