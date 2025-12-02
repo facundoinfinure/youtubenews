@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { AppState, ChannelConfig, NewsItem, BroadcastSegment, VideoAssets, ViralMetadata, UserProfile, Channel, ScriptLine } from './types';
-import { signInWithGoogle, getSession, signOut, getAllChannels, saveChannel, saveVideoToDB, getNewsByDate, saveNewsToDB, markNewsAsSelected, deleteVideoFromDB, loadConfigFromDB, supabase } from './services/supabaseService';
+import { AppState, ChannelConfig, NewsItem, BroadcastSegment, VideoAssets, ViralMetadata, UserProfile, Channel, ScriptLine, StoredVideo } from './types';
+import { signInWithGoogle, getSession, signOut, getAllChannels, saveChannel, saveVideoToDB, getNewsByDate, saveNewsToDB, markNewsAsSelected, deleteVideoFromDB, loadConfigFromDB, supabase, fetchVideosFromDB } from './services/supabaseService';
 import { fetchEconomicNews, generateScript, generateSegmentedAudio, generateBroadcastVisuals, generateViralMetadata, generateThumbnail, generateThumbnailVariants, generateViralHook, generateVideoSegments } from './services/geminiService';
 import { uploadVideoToYouTube, deleteVideoFromYouTube } from './services/youtubeService';
 import { ContentCache } from './services/ContentCache';
@@ -60,15 +60,27 @@ const App: React.FC = () => {
   const [thumbnailDataUrl, setThumbnailDataUrl] = useState<string | null>(null);
   const [thumbnailVariant, setThumbnailVariant] = useState<string | null>(null);
   const [previewScript, setPreviewScript] = useState<ScriptLine[]>([]);
+  const [storedVideos, setStoredVideos] = useState<StoredVideo[]>([]); // NEW: For home page sidebar
 
   // UI State
   const getYesterday = () => {
     const d = new Date();
     d.setDate(d.getDate() - 1);
-    return d.toLocaleDateString('en-CA'); // Local YYYY-MM-DD
+    return d.toISOString().split('T')[0];
   };
   const [selectedDate, setSelectedDate] = useState<string>(getYesterday());
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
+
+  // Fetch stored videos for home page sidebar
+  useEffect(() => {
+    const fetchStoredVids = async () => {
+      if (activeChannel) {
+        const vids = await fetchVideosFromDB(activeChannel.id);
+        setStoredVideos(vids.slice(0, 4)); // Top 4 for sidebar
+      }
+    };
+    fetchStoredVids();
+  }, [activeChannel]);
 
   const addLog = (msg: string) => setLogs(prev => [...prev, msg]);
 
@@ -316,9 +328,6 @@ const App: React.FC = () => {
         .then(async (meta) => {
           setViralMeta(meta);
           addLog("✅ SEO Metadata generated.");
-          if (activeChannel) {
-            await saveVideoToDB(meta, activeChannel.id);
-          }
           return meta;
         });
 
@@ -481,8 +490,7 @@ const App: React.FC = () => {
             <div className="w-8 h-6 bg-red-600 rounded-lg flex items-center justify-center relative">
               <div className="w-0 h-0 border-t-[3px] border-t-transparent border-l-[6px] border-l-white border-b-[3px] border-b-transparent ml-0.5"></div>
             </div>
-            <span className="font-headline tracking-tighter text-xl ml-1">ChimpNews</span>
-            <sup className="text-gray-400 text-[10px] ml-0.5">HK</sup>
+            <span className="font-headline tracking-tighter text-xl ml-1">{config.channelName}</span>
           </div>
         </div>
 
@@ -666,21 +674,51 @@ const App: React.FC = () => {
         </div>
 
         <div className="hidden md:block w-[30%] lg:w-[25%] space-y-3">
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="flex gap-2 cursor-pointer group">
+          {storedVideos.length > 0 ? storedVideos.map((video) => (
+            <div key={video.id} className="flex gap-2 cursor-pointer group">
               <div className="w-40 h-24 bg-gray-800 rounded-lg overflow-hidden relative flex-shrink-0">
-                <div className="absolute inset-0 bg-gray-700 group-hover:bg-gray-600 transition"></div>
-                <div className="absolute bottom-1 right-1 bg-black/80 text-white text-xs px-1 rounded">10:0{i}</div>
+                {video.thumbnail_url ? (
+                  <img src={video.thumbnail_url} alt={video.title} className="w-full h-full object-cover" />
+                ) : (
+                  <div className="absolute inset-0 bg-gray-700 group-hover:bg-gray-600 transition"></div>
+                )}
+                <div className="absolute top-1 right-1 bg-black/80 text-white text-xs px-1.5 py-0.5 rounded">
+                  {video.is_posted ? '✅ Posted' : '📝 Draft'}
+                </div>
+                {video.is_posted && video.analytics && (
+                  <div className="absolute bottom-1 right-1 bg-black/80 text-white text-xs px-1 rounded">
+                    {video.analytics.views.toLocaleString()} views
+                  </div>
+                )}
               </div>
               <div className="flex flex-col gap-1">
                 <h4 className="text-sm font-bold line-clamp-2 leading-tight group-hover:text-blue-400">
-                  Why {config.channelName} is trending
+                  {video.title}
                 </h4>
                 <div className="text-xs text-gray-400">{config.channelName}</div>
-                <div className="text-xs text-gray-400">54K views • 2 days ago</div>
+                <div className="text-xs text-gray-400">
+                  {new Date(video.created_at).toLocaleDateString()}
+                </div>
               </div>
             </div>
-          ))}
+          )) : (
+            // Fallback placeholders if no videos
+            [1, 2, 3, 4].map((i) => (
+              <div key={i} className="flex gap-2 cursor-pointer group">
+                <div className="w-40 h-24 bg-gray-800 rounded-lg overflow-hidden relative flex-shrink-0">
+                  <div className="absolute inset-0 bg-gray-700 group-hover:bg-gray-600 transition"></div>
+                  <div className="absolute bottom-1 right-1 bg-black/80 text-white text-xs px-1 rounded">10:0{i}</div>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <h4 className="text-sm font-bold line-clamp-2 leading-tight group-hover:text-blue-400">
+                    Why {config.channelName} is trending
+                  </h4>
+                  <div className="text-xs text-gray-400">{config.channelName}</div>
+                  <div className="text-xs text-gray-400">54K views • 2 days ago</div>
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </main>
     </div>

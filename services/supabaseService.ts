@@ -65,7 +65,8 @@ export const saveVideoToDB = async (
   metadata: ViralMetadata,
   channelId: string,
   youtubeId: string | null = null,
-  viralScorePrediction: number = 85
+  viralScorePrediction: number = 0,
+  thumbnailUrl?: string
 ) => {
   if (!supabase) return;
 
@@ -81,7 +82,9 @@ export const saveVideoToDB = async (
       ctr: 0,
       avg_view_duration: "0:00",
       retention_data: [],
-      channel_id: channelId
+      channel_id: channelId,
+      thumbnail_url: thumbnailUrl,
+      is_posted: youtubeId !== null // If has youtube_id, it's posted
     });
 
   if (error) console.error("Error saving video:", error);
@@ -273,6 +276,8 @@ export const fetchVideosFromDB = async (channelId: string): Promise<StoredVideo[
     description: row.description,
     youtube_id: row.youtube_id,
     viral_score: row.viral_score,
+    thumbnail_url: row.thumbnail_url,
+    is_posted: row.is_posted || false, // Default to false if not set
     analytics: {
       views: row.views || 0,
       ctr: row.ctr || 0,

@@ -307,10 +307,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                   <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333] flex justify-end">
                     <button
                       onClick={async () => {
-                        if (confirm("Are you sure you want to delete this video? This cannot be undone.")) {
+                        if (confirm('Are you sure you want to delete this video? This will also delete it from YouTube if uploaded.')) {
                           await onDeleteVideo(selectedVideo.id, selectedVideo.youtube_id);
-                          setVideos(prev => prev.filter(v => v.id !== selectedVideo.id));
                           setSelectedVideo(null);
+                          // RE-FETCH videos after deletion
+                          if (activeChannel) {
+                            const refreshedVideos = await fetchVideosFromDB(activeChannel.id);
+                            setVideos(refreshedVideos);
+                          }
                         }
                       }}
                       className="bg-red-900/50 text-red-200 border border-red-800 hover:bg-red-900 px-4 py-2 rounded text-sm font-bold transition-colors"

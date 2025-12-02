@@ -49,6 +49,8 @@ export interface StoredVideo {
   viral_score: number;
   tags?: string[]; // Added tags
   analytics?: VideoAnalytics;
+  thumbnail_url?: string; // NEW: Stored thumbnail
+  is_posted: boolean; // NEW: Posted status
 }
 
 export enum AppState {
