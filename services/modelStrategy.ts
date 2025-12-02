@@ -3,7 +3,7 @@ export const MODEL_STRATEGY = {
     // Critical tasks - need high quality
     news: "gemini-2.5-flash",           // Needs grounding
     audio: "gemini-2.5-flash-preview-tts", // Quality matters
-    video: "veo-3",  // VEO-3 available in AI Studio
+    video: "veo-3.1-generate-preview",  // VEO 3.1 - official model name from docs
     thumbnail: "imagen-3.0-generate-001", // Quality matters
 
     // Simple tasks - can use cheaper models

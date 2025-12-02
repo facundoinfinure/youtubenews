@@ -392,24 +392,21 @@ export const generateVideoSegments = async (
 
     return retryWithBackoff(async () => {
       try {
-        const response = await ai.models.generateContent({
+        // CORRECT METHOD: Use generateVideos() for VEO, not generateContent()
+        const operation = await ai.models.generateVideos({
           model: getModelForTask('video'),
-          contents: prompt,
+          prompt: prompt,
           config: {
-            // VEO3-specific config if needed
+            aspectRatio: config.format === '9:16' ? '9:16' : '16:9'
           }
         });
 
         CostTracker.track('video', getModelForTask('video'), getCostForTask('video'));
 
-        const operation = response as any;
-        if (operation.operation) {
-          return await pollForVideo(operation.operation);
+        // VEO returns an async operation that needs polling
+        if (operation) {
+          return await pollForVideo(operation);
         }
-
-        // Direct response handling if applicable
-        const videoUri = operation.response?.generatedVideos?.[0]?.video?.uri;
-        if (videoUri) return `${videoUri}&key=${getApiKey()}`;
 
         return null;
       } catch (e) {
@@ -453,23 +450,20 @@ QUALITY: High definition, stable camera, good lighting
 
   return retryWithBackoff(async () => {
     try {
-      const response = await ai.models.generateContent({
+      // CORRECT METHOD: Use generateVideos() for VEO
+      const operation = await ai.models.generateVideos({
         model: getModelForTask('video'),
-        contents: prompt,
+        prompt: prompt,
         config: {
-          // VEO3-specific config
+          aspectRatio: config.format === '9:16' ? '9:16' : '16:9'
         }
       });
 
       CostTracker.track('video', getModelForTask('video'), getCostForTask('video'));
 
-      // Try to extract video URI from operation or direct response
-      // Poll for completion if it's an async operation
-      const operation = response as any; // Type assertion for flexibility
-
-      // Check if we got a direct URI or need to poll
-      if (operation.operation) {
-        const videoUri = await pollForVideo(operation.operation);
+      // Poll for video completion
+      if (operation) {
+        const videoUri = await pollForVideo(operation);
         return {
           wide: videoUri,
           hostA: [],
@@ -477,28 +471,12 @@ QUALITY: High definition, stable camera, good lighting
         };
       }
 
-      // Check for direct video in response
-      const videoPart = response.candidates?.[0]?.content?.parts?.find(
-        (part: any) => part.videoMetadata || part.fileData
-      );
-
-      if (videoPart) {
-        const uri = (videoPart as any).fileData?.fileUri || (videoPart as any).videoMetadata?.uri;
-        if (uri) {
-          return {
-            wide: `${uri}&key=${getApiKey()}`,
-            hostA: [],
-            hostB: []
-          };
-        }
-      }
-
-      throw new Error('No video URI found in VEO3 response');
+      throw new Error('No operation returned from VEO');
 
     } catch (e) {
       console.error("VEO3 generation failed", e);
       // Fallback to placeholder for now
-      console.warn("Using placeholder video - VEO3 may not be available yet");
+      console.warn("Using placeholder video - VEO3 generation failed");
       return {
         wide: "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
         hostA: [],
