@@ -355,6 +355,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
 
                             // RE-FETCH videos after deletion
                             if (activeChannel) {
+                              // Optimistic update: Remove from UI immediately
+                              setVideos(prev => prev.filter(v => v.id !== selectedVideo.id));
+
                               console.log(`[ADMIN] Re-fetching videos for channel: ${activeChannel.id}`);
                               const refreshedVideos = await fetchVideosFromDB(activeChannel.id);
                               console.log(`[ADMIN] Fetched ${refreshedVideos.length} videos`);

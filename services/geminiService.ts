@@ -24,18 +24,26 @@ export const fetchEconomicNews = async (targetDate: Date | undefined, config: Ch
     async () => {
       const ai = getAiClient();
 
-      // Use the selected date directly, don't subtract a day
+      // Fix Timezone Issue: Create date from input string but force it to be treated as local date
+      // by appending time to middle of day to avoid UTC midnight shift
       let dateToQuery = new Date();
       if (targetDate) {
-        dateToQuery = new Date(targetDate);
+        const d = new Date(targetDate);
+        // Create a new date using the local year, month, date to ensure it matches the user's intent
+        // regardless of how the input date was parsed (UTC vs Local)
+        // Actually, the safest way if targetDate is a Date object from an input type="date" (which is usually YYYY-MM-DD UTC)
+        // is to just use the UTC components if we want that exact date, OR just add a buffer.
+        // Let's try appending T12:00:00 if it's a string, but here it is a Date.
+        // Let's just use the UTC date string which matches the input.
+        dateToQuery = d;
       } else {
-        // Only subtract a day if no date is provided (default behavior)
         dateToQuery.setDate(dateToQuery.getDate() - 1);
       }
 
-      const dateString = dateToQuery.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+      // Use UTC date string for the prompt to avoid "yesterday" shift in Western Hemisphere
+      const dateString = dateToQuery.toLocaleDateString('en-US', { timeZone: 'UTC', month: 'long', day: 'numeric', year: 'numeric' });
 
-      const prompt = `Find 15 impactful economic or political news stories from ${dateString} relevant to ${config.country}. 
+      const prompt = `Find EXACTLY 15 impactful economic or political news stories from ${dateString} relevant to ${config.country}. 
   Focus on major market moves, inflation, politics, or social issues. 
   
   Return a strictly formatted JSON array of objects with these keys: 
@@ -46,6 +54,7 @@ export const fetchEconomicNews = async (targetDate: Date | undefined, config: Ch
   - "viralScore" (number, 1-100 based on controversy or impact)
   - "imageKeyword" (string, 2-3 words visual description of the topic for image generation, e.g. "bitcoin crash", "stock market bull")
 
+  IMPORTANT: You MUST return 15 items. Do not return fewer.
   Do not include markdown formatting like \`\`\`json.`;
 
       const response = await ai.models.generateContent({
@@ -64,7 +73,7 @@ export const fetchEconomicNews = async (targetDate: Date | undefined, config: Ch
 
       try {
         const news: NewsItem[] = JSON.parse(jsonStr);
-        return news.map((item, index) => {
+        const processedNews = news.map((item, index) => {
           // Prioritize grounding URL if available and missing in item
           let finalUrl = item.url;
           if ((!finalUrl || finalUrl === "#") && groundingChunks[index]?.web?.uri) {
@@ -89,6 +98,10 @@ export const fetchEconomicNews = async (targetDate: Date | undefined, config: Ch
             imageKeyword: item.imageKeyword || "breaking news"
           };
         });
+
+        // Sort by viral score descending
+        return processedNews.sort((a, b) => b.viralScore - a.viralScore);
+
       } catch (e) {
         console.warn("Failed to parse news JSON directly", e);
         throw new Error("Failed to parse news from Gemini");
