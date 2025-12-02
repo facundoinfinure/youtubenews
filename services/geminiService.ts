@@ -2,6 +2,8 @@ import { GoogleGenAI, Modality } from "@google/genai";
 import { NewsItem, ScriptLine, BroadcastSegment, VideoAssets, ViralMetadata, ChannelConfig } from "../types";
 import { ContentCache } from "./ContentCache";
 import { retryWithBackoff } from "./retryUtils";
+import { getModelForTask, getCostForTask } from "./modelStrategy";
+import { CostTracker } from "./CostTracker";
 
 const getApiKey = () => import.meta.env.VITE_GEMINI_API_KEY || window.env?.API_KEY || process.env.API_KEY || "";
 const getAiClient = () => new GoogleGenAI({ apiKey: getApiKey() });
@@ -47,12 +49,14 @@ export const fetchEconomicNews = async (targetDate: Date | undefined, config: Ch
   Do not include markdown formatting like \`\`\`json.`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: getModelForTask('news'),
         contents: prompt,
         config: {
           tools: [{ googleSearch: {} }],
         },
       });
+
+      CostTracker.track('news', getModelForTask('news'), getCostForTask('news'));
 
       const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
       const text = response.text || "";
@@ -128,13 +132,15 @@ export const generateScript = async (news: NewsItem[], config: ChannelConfig, vi
   `;
 
   const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash",
+    model: getModelForTask('script'),
     contents: `Here is the selected news for today's episode:\n${newsContext}\n\nWrite the script in JSON format.`,
     config: {
       systemInstruction: systemPrompt,
       responseMimeType: "application/json"
     }
   });
+
+  CostTracker.track('script', getModelForTask('script'), getCostForTask('script'));
 
   try {
     const text = response.text || "[]";
@@ -155,13 +161,15 @@ export const fetchTrendingTopics = async (country: string): Promise<string[]> =>
     async () => {
       const ai = getAiClient();
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: getModelForTask('trending'),
         contents: `What are the top 10 trending topics on YouTube in ${country} today? Focus on news, finance, and current events. Return as JSON array of strings.`,
         config: {
           tools: [{ googleSearch: {} }],
           responseMimeType: "application/json"
         }
       });
+
+      CostTracker.track('trending', getModelForTask('trending'), getCostForTask('trending'));
 
       try {
         const topics = JSON.parse(response.text || "[]");
@@ -230,10 +238,12 @@ Return JSON: { title, description, tags }
     async () => {
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: getModelForTask('metadata'),
         contents: prompt,
         config: { responseMimeType: "application/json" }
       });
+
+      CostTracker.track('metadata', getModelForTask('metadata'), getCostForTask('metadata'));
 
       const metadata = JSON.parse(response.text || "{}");
 
@@ -254,26 +264,34 @@ export const generateSegmentedAudio = async (script: ScriptLine[], config: Chann
 
   // PARALLEL PROCESSING - much faster
   const audioPromises = script.map(async (line) => {
-    let voiceName = 'Kore'; // Default
+    let character = config.characters.hostA; // Default
     if (line.speaker === config.characters.hostA.name) {
-      voiceName = config.characters.hostA.voiceName;
+      character = config.characters.hostA;
     } else if (line.speaker === config.characters.hostB.name) {
-      voiceName = config.characters.hostB.voiceName;
+      character = config.characters.hostB;
     }
 
     return retryWithBackoff(async () => {
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash-preview-tts",
+        model: getModelForTask('audio'),
         contents: line.text,
         config: {
           responseModalities: [Modality.AUDIO],
           speechConfig: {
             voiceConfig: {
-              prebuiltVoiceConfig: { voiceName }
+              prebuiltVoiceConfig: {
+                voiceName: character.voiceName,
+                // Enhanced voice parameters
+                ...(character.voiceStyle && { style: character.voiceStyle }),
+                ...(character.speakingRate && { speakingRate: character.speakingRate }),
+                ...(character.pitch && { pitch: character.pitch })
+              }
             }
           }
         }
       });
+
+      CostTracker.track('audio', getModelForTask('audio'), getCostForTask('audio'));
 
       const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
       if (!base64Audio) throw new Error('No audio data received');
@@ -342,12 +360,14 @@ QUALITY: High definition, stable camera, good lighting
   return retryWithBackoff(async () => {
     try {
       const response = await ai.models.generateContent({
-        model: "veo-3.1-generate-preview",
+        model: getModelForTask('video'),
         contents: prompt,
         config: {
           // VEO3-specific config
         }
       });
+
+      CostTracker.track('video', getModelForTask('video'), getCostForTask('video'));
 
       // Try to extract video URI from operation or direct response
       // Poll for completion if it's an async operation
@@ -412,12 +432,14 @@ export const generateThumbnail = async (newsContext: string, config: ChannelConf
 
   try {
     const response = await ai.models.generateContent({
-      model: "imagen-3.0-generate-001",
+      model: getModelForTask('thumbnail'),
       contents: prompt,
       config: {
         responseModalities: ["IMAGE" as any],
       }
     });
+
+    CostTracker.track('thumbnail', getModelForTask('thumbnail'), getCostForTask('thumbnail'));
 
     const imageBase64 = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
     if (imageBase64) {
@@ -483,10 +505,12 @@ Make it CLICK-WORTHY!
     const [primary, variant] = await Promise.all([
       retryWithBackoff(async () => {
         const response = await ai.models.generateContent({
-          model: "imagen-3.0-generate-001",
+          model: getModelForTask('thumbnail'),
           contents: basePrompt(primaryStyle),
           config: { responseModalities: ["IMAGE" as any] }
         });
+
+        CostTracker.track('thumbnail', getModelForTask('thumbnail'), getCostForTask('thumbnail'));
 
         const imageBase64 = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
         if (!imageBase64) throw new Error('No image data');
@@ -495,10 +519,12 @@ Make it CLICK-WORTHY!
 
       retryWithBackoff(async () => {
         const response = await ai.models.generateContent({
-          model: "imagen-3.0-generate-001",
+          model: getModelForTask('thumbnail'),
           contents: basePrompt(variantStyle),
           config: { responseModalities: ["IMAGE" as any] }
         });
+
+        CostTracker.track('thumbnail', getModelForTask('thumbnail'), getCostForTask('thumbnail'));
 
         const imageBase64 = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
         if (!imageBase64) throw new Error('No image data');
@@ -547,9 +573,11 @@ Return ONLY the hook text, no explanation.
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: getModelForTask('viralHook'),
       contents: prompt
     });
+
+    CostTracker.track('viralHook', getModelForTask('viralHook'), getCostForTask('viralHook'));
 
     return response.text?.trim() || "You won't believe this news...";
   } catch (e) {

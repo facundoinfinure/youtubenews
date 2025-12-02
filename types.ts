@@ -83,6 +83,9 @@ export interface CharacterProfile {
   bio: string; // Personality, political stance
   visualPrompt: string; // Description for Veo
   voiceName: string; // TTS Voice ID
+  voiceStyle?: 'energetic' | 'calm' | 'dramatic' | 'neutral'; // Voice emotion/style
+  speakingRate?: number; // 0.5 - 2.0, default 1.0
+  pitch?: number; // -20 to +20, default 0
 }
 
 export interface ChannelConfig {
