@@ -95,6 +95,7 @@ export interface ChannelConfig {
   logoColor1: string; // Hex
   logoColor2: string; // Hex
   captionsEnabled: boolean;
+  defaultTags?: string[]; // Added for default tags
   characters: {
     hostA: CharacterProfile;
     hostB: CharacterProfile;

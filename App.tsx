@@ -62,7 +62,7 @@ const App: React.FC = () => {
   const getYesterday = () => {
     const d = new Date();
     d.setDate(d.getDate() - 1);
-    return d.toISOString().split('T')[0];
+    return d.toLocaleDateString('en-CA'); // Local YYYY-MM-DD
   };
   const [selectedDate, setSelectedDate] = useState<string>(getYesterday());
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
@@ -119,6 +119,59 @@ const App: React.FC = () => {
       authListener?.subscription.unsubscribe();
     };
   }, []);
+
+  // Save Progress to LocalStorage
+  useEffect(() => {
+    if (state === AppState.READY || state === AppState.SELECTING_NEWS) {
+      const progress = {
+        state,
+        allNews,
+        selectedNews,
+        segments,
+        videos,
+        viralMeta,
+        selectedDate,
+        logs
+      };
+      localStorage.setItem('chimpNewsProgress', JSON.stringify(progress));
+    }
+  }, [state, allNews, selectedNews, segments, videos, viralMeta, selectedDate, logs]);
+
+  // Load Progress
+  useEffect(() => {
+    const saved = localStorage.getItem('chimpNewsProgress');
+    if (saved && state === AppState.LOGIN) { // Only load if we are at start (but after login check? No, state is LOGIN initially)
+      // We need to wait for user to be logged in.
+    }
+  }, []);
+
+  // Restore progress after login
+  useEffect(() => {
+    if (user && state === AppState.IDLE) {
+      const saved = localStorage.getItem('chimpNewsProgress');
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          // Only restore if date matches or user wants to? 
+          // For now, just restore if it's recent?
+          // Let's just restore.
+          if (parsed.state === AppState.READY || parsed.state === AppState.SELECTING_NEWS) {
+            setAllNews(parsed.allNews || []);
+            setSelectedNews(parsed.selectedNews || []);
+            setSegments(parsed.segments || []);
+            setVideos(parsed.videos || { wide: null, hostA: [], hostB: [] });
+            setViralMeta(parsed.viralMeta || null);
+            setSelectedDate(parsed.selectedDate || getYesterday());
+            setLogs(parsed.logs || []);
+            setState(parsed.state);
+            addLog("🔄 Restored previous session.");
+          }
+        } catch (e) {
+          console.error("Failed to restore progress", e);
+        }
+      }
+    }
+  }, [user]); // Run when user logs in
 
   // LOGIN LOGIC
   const handleLogin = async () => {
@@ -281,6 +334,15 @@ const App: React.FC = () => {
     }
   };
 
+  const handleConfigUpdate = (newConfig: ChannelConfig) => {
+    setConfig(newConfig);
+    if (activeChannel) {
+      const updatedChannel = { ...activeChannel, config: newConfig };
+      setActiveChannel(updatedChannel);
+      setChannels(prev => prev.map(c => c.id === updatedChannel.id ? updatedChannel : c));
+    }
+  };
+
   // --------------------------------------------------------------------------------
   // LOGIN SCREEN
   // --------------------------------------------------------------------------------
@@ -317,11 +379,12 @@ const App: React.FC = () => {
   // --------------------------------------------------------------------------------
   // ADMIN DASHBOARD
   // --------------------------------------------------------------------------------
+
   if (state === AppState.ADMIN_DASHBOARD) {
     return (
       <AdminDashboard
         config={config}
-        onUpdateConfig={setConfig}
+        onUpdateConfig={handleConfigUpdate}
         onExit={() => setState(AppState.IDLE)}
         activeChannel={activeChannel}
         channels={channels}
@@ -359,10 +422,21 @@ const App: React.FC = () => {
             </div>
           )}
 
-          {/* Channel Selector - Moved to header */}
+
+
+          {/* Admin Toggle */}
+          {user && (
+            <button
+              onClick={() => setState(AppState.ADMIN_DASHBOARD)}
+              className="bg-[#272727] hover:bg-[#3f3f3f] text-xs font-bold px-3 py-1.5 rounded border border-[#444] text-gray-300"
+            >
+              ADMIN
+            </button>
+          )}
+
+          {/* Channel Selector - Moved to right of Admin */}
           {user && channels.length > 0 && (
             <div className="flex items-center gap-2">
-              <label className="text-xs text-gray-400">Channel:</label>
               <select
                 value={activeChannel?.id || ''}
                 onChange={(e) => {
@@ -379,16 +453,6 @@ const App: React.FC = () => {
                 ))}
               </select>
             </div>
-          )}
-
-          {/* Admin Toggle */}
-          {user && (
-            <button
-              onClick={() => setState(AppState.ADMIN_DASHBOARD)}
-              className="bg-[#272727] hover:bg-[#3f3f3f] text-xs font-bold px-3 py-1.5 rounded border border-[#444] text-gray-300"
-            >
-              ADMIN
-            </button>
           )}
 
           {user && (
@@ -455,7 +519,10 @@ const App: React.FC = () => {
               <BroadcastPlayer
                 segments={segments}
                 videos={videos}
-                news={selectedNews}
+              <BroadcastPlayer
+                segments={segments}
+                videos={videos}
+                news={allNews}
                 displayDate={new Date(selectedDate)}
                 onUploadToYouTube={handleYouTubeUpload}
                 config={config}

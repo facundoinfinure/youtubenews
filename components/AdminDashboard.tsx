@@ -381,6 +381,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                     </label>
                   </div>
                 </div>
+                <div className="col-span-2">
+                  <label className="text-sm text-gray-400 block mb-1">Default Tags (comma separated)</label>
+                  <input
+                    type="text"
+                    value={tempConfig.defaultTags?.join(', ') || ''}
+                    onChange={e => setTempConfig({ ...tempConfig, defaultTags: e.target.value.split(',').map(t => t.trim()).filter(t => t) })}
+                    className="w-full bg-[#111] border border-[#333] p-2 rounded text-white"
+                    placeholder="news, finance, market"
+                  />
+                </div>
                 <div className="flex items-center gap-2 mt-6">
                   <input type="checkbox" checked={tempConfig.captionsEnabled} onChange={e => setTempConfig({ ...tempConfig, captionsEnabled: e.target.checked })} className="w-5 h-5" />
                   <label className="text-sm text-white">Enable Auto-Captions</label>
