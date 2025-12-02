@@ -413,6 +413,26 @@ const App: React.FC = () => {
     }
   };
 
+  const handleChannelSwitch = async (channel: Channel) => {
+    // Reset all state when switching channels
+    setActiveChannel(channel);
+    setConfig(channel.config);
+    setState(AppState.IDLE);
+    setAllNews([]);
+    setSelectedNews([]);
+    setSegments([]);
+    setVideos({ wide: null, hostA: [], hostB: [] });
+    setViralMeta(null);
+    setLogs([]);
+    setThumbnailDataUrl(null);
+    setThumbnailVariant(null);
+    setPreviewScript([]);
+
+    // Fetch videos for new channel
+    const vids = await fetchVideosFromDB(channel.id);
+    setStoredVideos(vids.slice(0, 4));
+  };
+
   const handleConfigUpdate = (newConfig: ChannelConfig) => {
     setConfig(newConfig);
     if (activeChannel) {
@@ -490,7 +510,7 @@ const App: React.FC = () => {
             <div className="w-8 h-6 bg-red-600 rounded-lg flex items-center justify-center relative">
               <div className="w-0 h-0 border-t-[3px] border-t-transparent border-l-[6px] border-l-white border-b-[3px] border-b-transparent ml-0.5"></div>
             </div>
-            <span className="font-headline tracking-tighter text-xl ml-1">{config.channelName}</span>
+            <span className="font-headline text-xl ml-1">{config.channelName}</span>
           </div>
         </div>
 
@@ -521,8 +541,7 @@ const App: React.FC = () => {
                 onChange={(e) => {
                   const selected = channels.find(c => c.id === e.target.value);
                   if (selected) {
-                    setActiveChannel(selected);
-                    setConfig(selected.config);
+                    handleChannelSwitch(selected);
                   }
                 }}
                 className="bg-[#1a1a1a] border border-[#333] rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500"
