@@ -1,7 +1,8 @@
-
 import React, { useState, useEffect } from 'react';
 import { ChannelConfig, CharacterProfile, StoredVideo, Channel } from '../types';
 import { fetchVideosFromDB, saveConfigToDB, getAllChannels, saveChannel } from '../services/supabaseService';
+import { CostTracker } from '../services/CostTracker';
+import { ContentCache } from '../services/ContentCache';
 
 interface AdminDashboardProps {
   config: ChannelConfig;
@@ -78,11 +79,11 @@ const RetentionChart: React.FC<{ data: number[], color: string }> = ({ data, col
   const points = data.map((val, idx) => {
     const x = (idx / (data.length - 1)) * width;
     const y = height - (val / max) * height;
-    return `${x},${y}`;
+    return `${x},${y} `;
   }).join(' ');
 
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full overflow-visible">
+    <svg viewBox={`0 0 ${width} ${height} `} className="w-full h-full overflow-visible">
       {/* Grid lines */}
       <line x1="0" y1={height * 0.25} x2={width} y2={height * 0.25} stroke="#333" strokeDasharray="4" />
       <line x1="0" y1={height * 0.5} x2={width} y2={height * 0.5} stroke="#333" strokeDasharray="4" />
@@ -100,7 +101,7 @@ const RetentionChart: React.FC<{ data: number[], color: string }> = ({ data, col
       <polygon
         fill={color}
         fillOpacity="0.1"
-        points={`0,${height} ${points} ${width},${height}`}
+        points={`0, ${height} ${points} ${width},${height} `}
       />
     </svg>
   );
@@ -108,7 +109,7 @@ const RetentionChart: React.FC<{ data: number[], color: string }> = ({ data, col
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdateConfig, onExit, activeChannel, channels, onChannelChange, onDeleteVideo }) => {
   const [tempConfig, setTempConfig] = useState<ChannelConfig>(config);
-  const [activeTab, setActiveTab] = useState<'insights' | 'settings'>('insights');
+  const [activeTab, setActiveTab] = useState<'insights' | 'settings' | 'costs' | 'cache'>('insights');
   const [videos, setVideos] = useState<StoredVideo[]>([]);
   const [selectedVideo, setSelectedVideo] = useState<StoredVideo | null>(null);
 
@@ -193,13 +194,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
         <div className="flex gap-6 mb-8">
           <button
             onClick={() => setActiveTab('insights')}
-            className={`pb-2 border-b-2 font-medium ${activeTab === 'insights' ? 'border-blue-500 text-white' : 'border-transparent text-gray-500'}`}
+            className={`pb - 2 border - b - 2 font - medium ${activeTab === 'insights' ? 'border-blue-500 text-white' : 'border-transparent text-gray-500'} `}
           >
             Performance Insights
           </button>
           <button
             onClick={() => setActiveTab('settings')}
-            className={`pb-2 border-b-2 font-medium ${activeTab === 'settings' ? 'border-blue-500 text-white' : 'border-transparent text-gray-500'}`}
+            className={`pb - 2 border - b - 2 font - medium ${activeTab === 'settings' ? 'border-blue-500 text-white' : 'border-transparent text-gray-500'} `}
           >
             Production Settings
           </button>
@@ -219,7 +220,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                   <div
                     key={vid.id}
                     onClick={() => setSelectedVideo(vid)}
-                    className={`p-4 border-b border-[#333] cursor-pointer hover:bg-[#2a2a2a] transition-colors ${selectedVideo?.id === vid.id ? 'bg-[#2a2a2a] border-l-4 border-l-blue-500' : ''}`}
+                    className={`p - 4 border - b border - [#333] cursor - pointer hover: bg - [#2a2a2a] transition - colors ${selectedVideo?.id === vid.id ? 'bg-[#2a2a2a] border-l-4 border-l-blue-500' : ''} `}
                   >
                     <h4 className="font-bold text-sm line-clamp-2 mb-1">{vid.title}</h4>
                     <div className="flex justify-between text-xs text-gray-500">

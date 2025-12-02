@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AppState, ChannelConfig, NewsItem, BroadcastSegment, VideoAssets, ViralMetadata, UserProfile, Channel } from './types';
+import { AppState, ChannelConfig, NewsItem, BroadcastSegment, VideoAssets, ViralMetadata, UserProfile, Channel, ScriptLine } from './types';
 import { signInWithGoogle, getSession, signOut, getAllChannels, saveChannel, saveVideoToDB, getNewsByDate, saveNewsToDB, markNewsAsSelected, deleteVideoFromDB, loadConfigFromDB, supabase } from './services/supabaseService';
 import { fetchEconomicNews, generateScript, generateSegmentedAudio, generateBroadcastVisuals, generateViralMetadata, generateThumbnail, generateThumbnailVariants, generateViralHook } from './services/geminiService';
 import { uploadVideoToYouTube, deleteVideoFromYouTube } from './services/youtubeService';
@@ -59,6 +59,7 @@ const App: React.FC = () => {
   const [loginError, setLoginError] = useState<string | null>(null);
   const [thumbnailDataUrl, setThumbnailDataUrl] = useState<string | null>(null);
   const [thumbnailVariant, setThumbnailVariant] = useState<string | null>(null);
+  const [previewScript, setPreviewScript] = useState<ScriptLine[]>([]);
 
   // UI State
   const getYesterday = () => {
@@ -124,7 +125,7 @@ const App: React.FC = () => {
 
   // Save Progress to LocalStorage
   useEffect(() => {
-    if (state === AppState.READY || state === AppState.SELECTING_NEWS) {
+    if (state === AppState.READY || state === AppState.SELECTING_NEWS || state === AppState.PREVIEW || state === AppState.GENERATING_MEDIA) {
       const progress = {
         state,
         allNews,
@@ -278,6 +279,14 @@ const App: React.FC = () => {
 
       const genScript = await generateScript(finalNews, config, viralHook);
       addLog("✅ Script written.");
+
+      // PROGRESSIVE ENHANCEMENT: Show preview immediately
+      setPreviewScript(genScript);
+      setState(AppState.PREVIEW);
+      addLog("👀 Script preview ready - review while media generates");
+
+      // Small delay to let user see preview
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
       // 3. Generate Media (Parallel)
       setState(AppState.GENERATING_MEDIA);
