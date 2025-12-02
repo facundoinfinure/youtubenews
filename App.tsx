@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import toast from 'react-hot-toast';
 import { AppState, ChannelConfig, NewsItem, BroadcastSegment, VideoAssets, ViralMetadata, UserProfile, Channel, ScriptLine, StoredVideo } from './types';
 import { signInWithGoogle, getSession, signOut, getAllChannels, saveChannel, saveVideoToDB, getNewsByDate, saveNewsToDB, markNewsAsSelected, deleteVideoFromDB, loadConfigFromDB, supabase, fetchVideosFromDB } from './services/supabaseService';
 import { fetchEconomicNews, generateScript, generateSegmentedAudio, generateBroadcastVisuals, generateViralMetadata, generateThumbnail, generateThumbnailVariants, generateViralHook, generateVideoSegments } from './services/geminiService';
@@ -415,12 +416,12 @@ const App: React.FC = () => {
       console.log(`[APP] Database deletion successful`);
 
       // Show success message
-      alert("✅ Video deleted successfully!");
+      toast.success('Video deleted successfully!');
 
     } catch (e) {
       console.error("[APP] Delete failed:", e);
       const errorMsg = (e as Error).message || "Unknown error";
-      alert(`❌ Failed to delete video: ${errorMsg}\n\nCheck console for details.`);
+      toast.error(`Failed to delete video: ${errorMsg}`);
       throw e; // Re-throw to ensure AdminDashboard knows it failed
     }
   };

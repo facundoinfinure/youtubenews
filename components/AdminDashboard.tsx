@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import toast from 'react-hot-toast';
 import { ChannelConfig, CharacterProfile, StoredVideo, Channel } from '../types';
 import { fetchVideosFromDB, saveConfigToDB, getAllChannels, saveChannel } from '../services/supabaseService';
 import { CostTracker } from '../services/CostTracker';
@@ -132,7 +133,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
     await saveChannel(updatedChannel);
 
     onUpdateConfig(tempConfig);
-    alert("Configuration Saved & Synced to Database!");
+    toast.success('Configuration saved & synced to database!');
   };
 
   const handleNewChannel = async () => {
@@ -147,7 +148,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
 
     const created = await saveChannel(newChannel);
     if (created) {
-      alert(`Channel "${name}" created!`);
+      toast.success(`Channel "${name}" created!`);
       window.location.reload(); // Reload to fetch new channels
     }
   };
