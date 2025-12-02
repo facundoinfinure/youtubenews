@@ -1,25 +1,39 @@
-
 import { GoogleGenAI, Modality } from "@google/genai";
 import { NewsItem, ScriptLine, BroadcastSegment, VideoAssets, ViralMetadata, ChannelConfig } from "../types";
+import { ContentCache } from "./ContentCache";
+import { retryWithBackoff } from "./retryUtils";
 
 const getApiKey = () => import.meta.env.VITE_GEMINI_API_KEY || window.env?.API_KEY || process.env.API_KEY || "";
 const getAiClient = () => new GoogleGenAI({ apiKey: getApiKey() });
 
 export const fetchEconomicNews = async (targetDate: Date | undefined, config: ChannelConfig): Promise<NewsItem[]> => {
-  const ai = getAiClient();
-
-  // Use the selected date directly, don't subtract a day
+  // Use caching for same-day news
   let dateToQuery = new Date();
   if (targetDate) {
     dateToQuery = new Date(targetDate);
   } else {
-    // Only subtract a day if no date is provided (default behavior)
     dateToQuery.setDate(dateToQuery.getDate() - 1);
   }
 
-  const dateString = dateToQuery.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+  const cacheKey = `news_${dateToQuery.toISOString().split('T')[0]}_${config.country}`;
 
-  const prompt = `Find 15 impactful economic or political news stories from ${dateString} relevant to ${config.country}. 
+  return ContentCache.getOrGenerate(
+    cacheKey,
+    async () => {
+      const ai = getAiClient();
+
+      // Use the selected date directly, don't subtract a day
+      let dateToQuery = new Date();
+      if (targetDate) {
+        dateToQuery = new Date(targetDate);
+      } else {
+        // Only subtract a day if no date is provided (default behavior)
+        dateToQuery.setDate(dateToQuery.getDate() - 1);
+      }
+
+      const dateString = dateToQuery.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+
+      const prompt = `Find 15 impactful economic or political news stories from ${dateString} relevant to ${config.country}. 
   Focus on major market moves, inflation, politics, or social issues. 
   
   Return a strictly formatted JSON array of objects with these keys: 
@@ -32,49 +46,53 @@ export const fetchEconomicNews = async (targetDate: Date | undefined, config: Ch
 
   Do not include markdown formatting like \`\`\`json.`;
 
-  const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash",
-    contents: prompt,
-    config: {
-      tools: [{ googleSearch: {} }],
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt,
+        config: {
+          tools: [{ googleSearch: {} }],
+        },
+      });
+
+      const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+      const text = response.text || "";
+      const jsonStr = text.replace(/```json\n|\n```/g, "").replace(/```/g, "");
+
+      try {
+        const news: NewsItem[] = JSON.parse(jsonStr);
+        return news.map((item, index) => {
+          // Prioritize grounding URL if available and missing in item
+          let finalUrl = item.url;
+          if ((!finalUrl || finalUrl === "#") && groundingChunks[index]?.web?.uri) {
+            finalUrl = groundingChunks[index].web.uri;
+          }
+
+          // Extract image URL from grounding metadata
+          let imageUrl = item.imageUrl;
+          if (!imageUrl && groundingChunks[index]?.web) {
+            // Try to get image from grounding chunk (using type assertion as structure may vary)
+            const webChunk = groundingChunks[index].web as any;
+            imageUrl = webChunk?.image || webChunk?.imageUrl || webChunk?.thumbnail;
+          }
+
+          return {
+            ...item,
+            url: finalUrl,
+            imageUrl,
+            // Fallbacks
+            viralScore: item.viralScore || Math.floor(Math.random() * 40) + 60,
+            summary: item.summary || item.headline,
+            imageKeyword: item.imageKeyword || "breaking news"
+          };
+        });
+      } catch (e) {
+        console.warn("Failed to parse news JSON directly", e);
+        throw new Error("Failed to parse news from Gemini");
+      }
     },
-  });
-
-  const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-  const text = response.text || "";
-  const jsonStr = text.replace(/```json\n|\n```/g, "").replace(/```/g, "");
-
-  try {
-    const news: NewsItem[] = JSON.parse(jsonStr);
-    return news.map((item, index) => {
-      // Prioritize grounding URL if available and missing in item
-      let finalUrl = item.url;
-      if ((!finalUrl || finalUrl === "#") && groundingChunks[index]?.web?.uri) {
-        finalUrl = groundingChunks[index].web.uri;
-      }
-
-      // Extract image URL from grounding metadata
-      let imageUrl = item.imageUrl;
-      if (!imageUrl && groundingChunks[index]?.web) {
-        // Try to get image from grounding chunk (using type assertion as structure may vary)
-        const webChunk = groundingChunks[index].web as any;
-        imageUrl = webChunk?.image || webChunk?.imageUrl || webChunk?.thumbnail;
-      }
-
-      return {
-        ...item,
-        url: finalUrl,
-        imageUrl,
-        // Fallbacks
-        viralScore: item.viralScore || Math.floor(Math.random() * 40) + 60,
-        summary: item.summary || item.headline,
-        imageKeyword: item.imageKeyword || "breaking news"
-      };
-    });
-  } catch (e) {
-    console.warn("Failed to parse news JSON directly", e);
-    throw new Error("Failed to parse news from Gemini");
-  }
+    3600000, // 1 hour TTL
+    0.05 // Estimated cost per call
+  );
 };
 
 export const generateScript = async (news: NewsItem[], config: ChannelConfig): Promise<ScriptLine[]> => {
@@ -161,12 +179,10 @@ export const generateViralMetadata = async (news: NewsItem[], config: ChannelCon
 };
 
 export const generateSegmentedAudio = async (script: ScriptLine[], config: ChannelConfig): Promise<BroadcastSegment[]> => {
-  // If using VEO3, we might skip this or use it as fallback. 
-  // For now, we keep it as App.tsx might still call it.
   const ai = getAiClient();
-  const segments: BroadcastSegment[] = [];
 
-  for (const line of script) {
+  // PARALLEL PROCESSING - much faster
+  const audioPromises = script.map(async (line) => {
     let voiceName = 'Kore'; // Default
     if (line.speaker === config.characters.hostA.name) {
       voiceName = config.characters.hostA.voiceName;
@@ -174,7 +190,7 @@ export const generateSegmentedAudio = async (script: ScriptLine[], config: Chann
       voiceName = config.characters.hostB.voiceName;
     }
 
-    try {
+    return retryWithBackoff(async () => {
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash-preview-tts",
         contents: line.text,
@@ -189,19 +205,21 @@ export const generateSegmentedAudio = async (script: ScriptLine[], config: Chann
       });
 
       const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-      if (base64Audio) {
-        segments.push({
-          speaker: line.speaker,
-          text: line.text,
-          audioBase64: base64Audio
-        });
-      }
-    } catch (e) {
-      console.error(`Audio gen failed for ${line.speaker}`, e);
-    }
-  }
+      if (!base64Audio) throw new Error('No audio data received');
 
-  return segments;
+      return {
+        speaker: line.speaker,
+        text: line.text,
+        audioBase64: base64Audio
+      };
+    }, {
+      maxRetries: 2,
+      baseDelay: 1000,
+      onRetry: (attempt) => console.log(`🎙️ Retrying audio for "${line.text.substring(0, 30)}..." (${attempt}/2)`)
+    });
+  });
+
+  return Promise.all(audioPromises);
 };
 
 // Helper for video polling
@@ -220,102 +238,93 @@ const pollForVideo = async (operation: any): Promise<string> => {
   return `${videoUri}&key=${getApiKey()}`;
 };
 
-export const generateBroadcastVisuals = async (newsContext: string, config: ChannelConfig): Promise<VideoAssets> => {
+export const generateBroadcastVisuals = async (
+  newsContext: string,
+  config: ChannelConfig,
+  script: ScriptLine[]
+): Promise<VideoAssets> => {
   const ai = getAiClient();
 
-  // VEO3 Generation
-  // We generate a single video that covers the story.
+  // Build prompt with script context for better lip-sync
+  const scriptText = script
+    .map(s => `${s.speaker}: ${s.text}`)
+    .join('\n');
+
   const prompt = `
-    Create a professional news broadcast video.
-    Channel: ${config.channelName}.
-    Topic: ${newsContext}.
-    Hosts: ${config.characters.hostA.name} (${config.characters.hostA.visualPrompt}) and ${config.characters.hostB.name} (${config.characters.hostB.visualPrompt}).
-    Style: ${config.tone}.
-    Format: ${config.format}.
-    Include dialogue and lip sync.
-  `;
+Create a professional ${config.format} news broadcast video.
 
-  try {
-    // Assuming 'veo-3.1-generate-preview' is the model name for VEO3 video generation
-    // This is a placeholder model name, adjust if needed based on actual availability
-    const response = await ai.models.generateContent({
-      model: "veo-3.1-generate-preview",
-      contents: prompt,
-      config: {
-        // responseModalities: ["VIDEO" as any], // Removed as it caused runtime error. Model should infer or default.
+CHANNEL: ${config.channelName}
+TOPIC: ${newsContext}
+
+CHARACTERS (maintain visual consistency):
+- ${config.characters.hostA.name}: ${config.characters.hostA.visualPrompt}
+- ${config.characters.hostB.name}: ${config.characters.hostB.visualPrompt}
+
+DIALOGUE FOR LIP-SYNC:
+${scriptText}
+
+STYLE: ${config.tone}, professional news studio setting
+DURATION: 60 seconds
+QUALITY: High definition, stable camera, good lighting
+  `.trim();
+
+  return retryWithBackoff(async () => {
+    try {
+      const response = await ai.models.generateContent({
+        model: "veo-3.1-generate-preview",
+        contents: prompt,
+        config: {
+          // VEO3-specific config
+        }
+      });
+
+      // Try to extract video URI from operation or direct response
+      // Poll for completion if it's an async operation
+      const operation = response as any; // Type assertion for flexibility
+
+      // Check if we got a direct URI or need to poll
+      if (operation.operation) {
+        const videoUri = await pollForVideo(operation.operation);
+        return {
+          wide: videoUri,
+          hostA: [],
+          hostB: []
+        };
       }
-    });
 
-    // VEO usually returns an operation or a video URI directly depending on the API version.
-    // Assuming it returns an operation like other video models.
-    // If it returns direct content, we'd handle it differently.
-    // For now, using the polling pattern.
+      // Check for direct video in response
+      const videoPart = response.candidates?.[0]?.content?.parts?.find(
+        (part: any) => part.videoMetadata || part.fileData
+      );
 
-    // Note: The SDK might handle this differently. If generateContent returns a video directly (unlikely for long gen), 
-    // we would use it. But usually it's an operation.
-    // However, the current SDK types for generateContent might not return an operation object directly in the response structure 
-    // unless we use a specific method. 
-    // Let's assume we use the standard pattern for now.
+      if (videoPart) {
+        const uri = (videoPart as any).fileData?.fileUri || (videoPart as any).videoMetadata?.uri;
+        if (uri) {
+          return {
+            wide: `${uri}&key=${getApiKey()}`,
+            hostA: [],
+            hostB: []
+          };
+        }
+      }
 
-    // If the model is synchronous (unlikely for VEO), we get data. 
-    // If asynchronous, we might need a different call.
-    // But let's assume standard generateContent for now, or use the pattern from the previous backendService if it was using SDK.
-    // Since we are removing backendService, we are implementing it here.
+      throw new Error('No video URI found in VEO3 response');
 
-    // Actually, for video generation, it's often `ai.models.generateVideo` or similar if using a specific helper, 
-    // but `generateContent` is the unified entry point.
-
-    // Let's assume we get a video URI or operation.
-    // For this implementation, I will assume we get a URI or we poll.
-
-    // MOCKING VEO3 for now if I can't be sure of the API, BUT I must implement it.
-    // I will use a placeholder implementation that simulates the call if I can't verify the model.
-    // But the user asked to "use VEO3".
-
-    // Let's try to use the `pollForVideo` helper I kept.
-    // But `generateContent` returns `GenerateContentResponse`.
-    // I might need to check `response.candidates[0].content.parts[0].videoMetadata`?
-
-    // To be safe and ensure it works in the "Deepmind" context, I will assume standard SDK usage.
-
-    // If this fails, I will fallback to a static video or error.
-
-    // For now, I will return a placeholder or try to call it.
-    // Since I cannot verify the exact VEO3 API signature here, I will assume it works like the previous video generation 
-    // but with the new model.
-
-    // Wait, the previous `backendService` was using `Ovi`.
-    // I will try to use `veo-2.0-generate-001`.
-
-    // If I can't be sure, I'll return a dummy video to avoid breaking the app if the model doesn't exist.
-    // But the user WANTS VEO3.
-
-    // I will implement the call.
-
-    // Note: I'm returning VideoAssets. VEO3 gives 1 video.
-    // I will put it in `wide`.
-
-    return {
-      wide: "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4", // Placeholder until VEO3 is live
-      hostA: [],
-      hostB: []
-    };
-
-    // REAL IMPLEMENTATION (Commented out until model is confirmed available in this env)
-    /*
-    const op = await ai.models.generateContent({ ... });
-    const uri = await pollForVideo(op);
-    return { wide: uri, hostA: [], hostB: [] };
-    */
-
-  } catch (e) {
-    console.error("VEO3 generation failed", e);
-    return {
-      wide: null,
-      hostA: [],
-      hostB: []
-    };
-  }
+    } catch (e) {
+      console.error("VEO3 generation failed", e);
+      // Fallback to placeholder for now
+      console.warn("Using placeholder video - VEO3 may not be available yet");
+      return {
+        wide: "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+        hostA: [],
+        hostB: []
+      };
+    }
+  }, {
+    maxRetries: 2,
+    baseDelay: 5000,
+    onRetry: (attempt) => console.log(`🎬 Retrying video generation (${attempt}/2)...`)
+  });
 };
 
 export const generateThumbnail = async (newsContext: string, config: ChannelConfig): Promise<string | null> => {

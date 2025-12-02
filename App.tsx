@@ -3,6 +3,7 @@ import { AppState, ChannelConfig, NewsItem, BroadcastSegment, VideoAssets, Viral
 import { signInWithGoogle, getSession, signOut, getAllChannels, saveChannel, saveVideoToDB, getNewsByDate, saveNewsToDB, markNewsAsSelected, deleteVideoFromDB, loadConfigFromDB, supabase } from './services/supabaseService';
 import { fetchEconomicNews, generateScript, generateSegmentedAudio, generateBroadcastVisuals, generateViralMetadata, generateThumbnail } from './services/geminiService';
 import { uploadVideoToYouTube, deleteVideoFromYouTube } from './services/youtubeService';
+import { ContentCache } from './services/ContentCache';
 import { NewsSelector } from './components/NewsSelector';
 import { BroadcastPlayer } from './components/BroadcastPlayer';
 import { AdminDashboard } from './components/AdminDashboard';
@@ -285,7 +286,7 @@ const App: React.FC = () => {
         });
 
       const mainContext = finalNews[0]?.headline || "News";
-      const videoTask = generateBroadcastVisuals(mainContext, config)
+      const videoTask = generateBroadcastVisuals(mainContext, config, genScript)
         .then(vids => {
           setVideos(vids);
           addLog("✅ Video feeds established.");
@@ -314,6 +315,12 @@ const App: React.FC = () => {
 
       setState(AppState.READY);
       addLog("🚀 Broadcast Ready!");
+
+      // Log cache stats
+      const cacheStats = ContentCache.getStats();
+      if (cacheStats.entries > 0) {
+        addLog(`💰 Cache: ${cacheStats.entries} entries, $${cacheStats.totalCostSaved.toFixed(2)} saved`);
+      }
 
     } catch (error) {
       console.error(error);
