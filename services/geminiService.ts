@@ -157,19 +157,8 @@ export const generateScript = async (news: NewsItem[], config: ChannelConfig, vi
 
   try {
     const text = response.text || "[]";
-    // Cleanup markdown code blocks
-    let cleanText = text.replace(/```json/g, "").replace(/```/g, "");
-
-    // Sanitize control characters that break JSON.parse
-    // Replace problematic control characters with escaped versions
-    cleanText = cleanText.replace(/[\x00-\x1F\x7F]/g, (char) => {
-      // Keep common whitespace characters (tab, newline, carriage return)
-      if (char === '\t') return '\\t';
-      if (char === '\n') return '\\n';
-      if (char === '\r') return '\\r';
-      // Remove other control characters
-      return '';
-    });
+    // Cleanup markdown code blocks and trim
+    const cleanText = text.replace(/```json\n?/g, "").replace(/```/g, "").trim();
 
     return JSON.parse(cleanText) as ScriptLine[];
   } catch (e) {
