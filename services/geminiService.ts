@@ -356,35 +356,29 @@ export const generateVideoSegments = async (
   script: ScriptLine[],
   config: ChannelConfig
 ): Promise<(string | null)[]> => {
-  // TEMPORARY: VEO models are not available in public Gemini API
-  // Return null for all segments to use placeholder/audio-only mode
-  console.warn("⚠️ VEO video generation temporarily disabled - using audio-only mode");
-  return script.map(() => null);
-
-  /* DISABLED UNTIL VEO IS AVAILABLE
   const ai = getAiClient();
-  
+
   // Smart Mode: Only generate unique videos for key moments to save cost/time
   // Key moments: First line (Hook), Last line (CTA), and maybe one in the middle
   // For now, let's try to generate for more segments if they are long enough
-  
+
   const videoPromises = script.map(async (line, index) => {
     // Strategy:
     // 1. Always generate for the first segment (Hook)
     // 2. Always generate for the last segment (CTA)
     // 3. For others, only if they are long enough (> 50 chars) to warrant a video change
     //    AND we haven't generated one recently (simple spacing)
-  
+
     const isKeyMoment = index === 0 || index === script.length - 1;
     const isLongEnough = line.text.length > 50;
     const shouldGenerate = isKeyMoment || (isLongEnough && index % 2 === 0);
-  
+
     if (!shouldGenerate) return null;
-  
+
     const character = line.speaker === config.characters.hostA.name
       ? config.characters.hostA
       : config.characters.hostB;
-  
+
     // LIP-SYNC PROMPT: Explicitly include the text to be spoken
     const prompt = `
   Cinematic news shot of ${character.name} speaking.
@@ -395,7 +389,7 @@ export const generateVideoSegments = async (
   Setting: Professional news studio, ${config.format} format.
   Lighting: Studio lighting, high quality.
     `.trim();
-  
+
     return retryWithBackoff(async () => {
       try {
         const response = await ai.models.generateContent({
@@ -405,18 +399,18 @@ export const generateVideoSegments = async (
             // VEO3-specific config if needed
           }
         });
-  
+
         CostTracker.track('video', getModelForTask('video'), getCostForTask('video'));
-  
+
         const operation = response as any;
         if (operation.operation) {
           return await pollForVideo(operation.operation);
         }
-  
+
         // Direct response handling if applicable
         const videoUri = operation.response?.generatedVideos?.[0]?.video?.uri;
         if (videoUri) return `${videoUri}&key=${getApiKey()}`;
-  
+
         return null;
       } catch (e) {
         console.warn(`Failed to generate video for segment ${index}`, e);
@@ -424,33 +418,21 @@ export const generateVideoSegments = async (
       }
     });
   });
-  
+
   return Promise.all(videoPromises);
-  };
-  */
 };
 export const generateBroadcastVisuals = async (
   newsContext: string,
   config: ChannelConfig,
   script: ScriptLine[]
 ): Promise<VideoAssets> => {
-  // TEMPORARY: VEO models are not available in public Gemini API
-  // Return placeholder immediately to avoid 404 errors
-  console.warn("⚠️ VEO video generation temporarily disabled - using placeholder video");
-  return {
-    wide: "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
-    hostA: [],
-    hostB: []
-  };
-
-  /* DISABLED UNTIL VEO IS AVAILABLE
   const ai = getAiClient();
- 
+
   // Build prompt with script context for better lip-sync
   const scriptText = script
     .map(s => `${s.speaker}: ${s.text}`)
     .join('\n');
- 
+
   const prompt = `
 Create a professional ${config.format} news broadcast video.
  
@@ -468,7 +450,7 @@ STYLE: ${config.tone}, professional news studio setting
 DURATION: 60 seconds
 QUALITY: High definition, stable camera, good lighting
   `.trim();
- 
+
   return retryWithBackoff(async () => {
     try {
       const response = await ai.models.generateContent({
@@ -478,13 +460,13 @@ QUALITY: High definition, stable camera, good lighting
           // VEO3-specific config
         }
       });
- 
+
       CostTracker.track('video', getModelForTask('video'), getCostForTask('video'));
- 
+
       // Try to extract video URI from operation or direct response
       // Poll for completion if it's an async operation
       const operation = response as any; // Type assertion for flexibility
- 
+
       // Check if we got a direct URI or need to poll
       if (operation.operation) {
         const videoUri = await pollForVideo(operation.operation);
@@ -494,12 +476,12 @@ QUALITY: High definition, stable camera, good lighting
           hostB: []
         };
       }
- 
+
       // Check for direct video in response
       const videoPart = response.candidates?.[0]?.content?.parts?.find(
         (part: any) => part.videoMetadata || part.fileData
       );
- 
+
       if (videoPart) {
         const uri = (videoPart as any).fileData?.fileUri || (videoPart as any).videoMetadata?.uri;
         if (uri) {
@@ -510,9 +492,9 @@ QUALITY: High definition, stable camera, good lighting
           };
         }
       }
- 
+
       throw new Error('No video URI found in VEO3 response');
- 
+
     } catch (e) {
       console.error("VEO3 generation failed", e);
       // Fallback to placeholder for now
@@ -528,7 +510,6 @@ QUALITY: High definition, stable camera, good lighting
     baseDelay: 5000,
     onRetry: (attempt) => console.log(`🎬 Retrying video generation (${attempt}/2)...`)
   });
-  */
 };
 
 export const generateThumbnail = async (newsContext: string, config: ChannelConfig): Promise<string | null> => {
