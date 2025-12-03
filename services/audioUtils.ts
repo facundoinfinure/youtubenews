@@ -25,8 +25,9 @@ export async function decodeAudioData(
   _numChannels: number = 1,
 ): Promise<AudioBuffer> {
   // Use Web Audio API's native decodeAudioData which handles MP3, WAV, AAC, etc.
-  // We need to copy the buffer because decodeAudioData detaches it
-  const arrayBuffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+  // Create a new ArrayBuffer copy to avoid SharedArrayBuffer issues and detachment
+  const arrayBuffer = new ArrayBuffer(data.byteLength);
+  new Uint8Array(arrayBuffer).set(data);
   
   return new Promise((resolve, reject) => {
     ctx.decodeAudioData(
