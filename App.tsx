@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { AppState, ChannelConfig, NewsItem, BroadcastSegment, VideoAssets, ViralMetadata, UserProfile, Channel, ScriptLine, StoredVideo } from './types';
-import { signInWithGoogle, getSession, signOut, getAllChannels, saveChannel, saveVideoToDB, getNewsByDate, saveNewsToDB, markNewsAsSelected, deleteVideoFromDB, loadConfigFromDB, supabase, fetchVideosFromDB, saveProduction, getIncompleteProductions, getProductionById, updateProductionStatus, uploadAudioToStorage, getAudioFromStorage, findCachedScript, findCachedAudio, getAllProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction, verifyStorageBucket } from './services/supabaseService';
+import { signInWithGoogle, getSession, signOut, getAllChannels, saveChannel, saveVideoToDB, getNewsByDate, saveNewsToDB, markNewsAsSelected, deleteVideoFromDB, loadConfigFromDB, supabase, fetchVideosFromDB, saveProduction, getIncompleteProductions, getProductionById, updateProductionStatus, uploadAudioToStorage, getAudioFromStorage, findCachedScript, findCachedAudio, getAllProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction, verifyStorageBucket, getCompletedProductionsWithVideoInfo, ProductionWithVideoInfo } from './services/supabaseService';
 import { fetchEconomicNews, generateScript, generateSegmentedAudio, generateSegmentedAudioWithCache, setFindCachedAudioFunction, generateBroadcastVisuals, generateViralMetadata, generateThumbnail, generateThumbnailVariants, generateViralHook, generateVideoSegments } from './services/geminiService';
 import { uploadVideoToYouTube, deleteVideoFromYouTube } from './services/youtubeService';
 import { ContentCache } from './services/ContentCache';
@@ -64,6 +64,7 @@ const App: React.FC = () => {
   const [thumbnailVariant, setThumbnailVariant] = useState<string | null>(null);
   const [previewScript, setPreviewScript] = useState<ScriptLine[]>([]);
   const [storedVideos, setStoredVideos] = useState<StoredVideo[]>([]); // NEW: For home page sidebar
+  const [completedProductions, setCompletedProductions] = useState<ProductionWithVideoInfo[]>([]); // For home page sidebar - completed/published productions
   const [productionProgress, setProductionProgress] = useState({ current: 0, total: 0, step: '' });
   const [currentProductionId, setCurrentProductionId] = useState<string | null>(null); // Track current production
 
@@ -92,6 +93,17 @@ const App: React.FC = () => {
     };
     fetchStoredVids();
   }, [activeChannel]);
+
+  // Fetch completed productions for home page sidebar
+  useEffect(() => {
+    const fetchCompletedProds = async () => {
+      if (activeChannel && user) {
+        const prods = await getCompletedProductionsWithVideoInfo(activeChannel.id, user.email, 10);
+        setCompletedProductions(prods.slice(0, 4)); // Top 4 for sidebar
+      }
+    };
+    fetchCompletedProds();
+  }, [activeChannel, user]);
 
   const addLog = (msg: string) => setLogs(prev => [...prev, msg]);
 
@@ -802,6 +814,12 @@ const App: React.FC = () => {
       // Mark production as completed
       if (productionId) {
         await updateProductionStatus(productionId, 'completed', new Date());
+        
+        // Refresh completed productions list
+        if (activeChannel && user) {
+          const prods = await getCompletedProductionsWithVideoInfo(activeChannel.id, user.email, 10);
+          setCompletedProductions(prods.slice(0, 4));
+        }
       }
 
       // Log cache stats
@@ -917,6 +935,12 @@ const App: React.FC = () => {
       }
 
       window.open(videoUrl, '_blank');
+
+      // Refresh completed productions list after publishing
+      if (activeChannel && user) {
+        const prods = await getCompletedProductionsWithVideoInfo(activeChannel.id, user.email, 10);
+        setCompletedProductions(prods.slice(0, 4));
+      }
     } catch (e) {
       const errorMsg = (e as Error).message || "Unknown error";
       setUploadStatus("❌ Upload Failed: " + errorMsg);
@@ -997,6 +1021,102 @@ const App: React.FC = () => {
     } catch (error) {
       console.error('Error fetching videos for channel:', error);
       setStoredVideos([]);
+    }
+
+    // Fetch completed productions for new channel
+    if (user) {
+      try {
+        const prods = await getCompletedProductionsWithVideoInfo(channel.id, user.email, 10);
+        setCompletedProductions(prods.slice(0, 4));
+      } catch (error) {
+        console.error('Error fetching productions for channel:', error);
+        setCompletedProductions([]);
+      }
+    }
+  };
+
+  // Helper function to format relative date (e.g., "2 days ago")
+  const formatRelativeDate = (dateString: string): string => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    
+    if (diffDays === 0) return 'today';
+    if (diffDays === 1) return '1 day ago';
+    if (diffDays < 7) return `${diffDays} days ago`;
+    if (diffDays < 30) {
+      const weeks = Math.floor(diffDays / 7);
+      return weeks === 1 ? '1 week ago' : `${weeks} weeks ago`;
+    }
+    if (diffDays < 365) {
+      const months = Math.floor(diffDays / 30);
+      return months === 1 ? '1 month ago' : `${months} months ago`;
+    }
+    const years = Math.floor(diffDays / 365);
+    return years === 1 ? '1 year ago' : `${years} years ago`;
+  };
+
+  // Function to publish a completed production
+  const handlePublishProduction = async (production: ProductionWithVideoInfo) => {
+    if (!user || !activeChannel) {
+      toast.error('Missing user or channel information');
+      return;
+    }
+
+    if (!user.accessToken) {
+      toast.error('No access token available. Please sign in again.');
+      return;
+    }
+
+    try {
+      // Load full production data with segments
+      const fullProduction = await getProductionById(production.id);
+      if (!fullProduction) {
+        toast.error('Production not found');
+        return;
+      }
+
+      if (!fullProduction.segments || fullProduction.segments.length === 0) {
+        toast.error('Production has no segments');
+        return;
+      }
+
+      if (!fullProduction.video_assets) {
+        toast.error('Production has no video assets');
+        return;
+      }
+
+      // Load audio for segments
+      const segmentsWithAudio: BroadcastSegment[] = await Promise.all(
+        fullProduction.segments.map(async (seg: any) => {
+          if (seg.audioUrl) {
+            const audioBase64 = await getAudioFromStorage(seg.audioUrl);
+            if (audioBase64) {
+              return {
+                speaker: seg.speaker,
+                text: seg.text,
+                audioBase64,
+                videoUrl: seg.videoUrl
+              };
+            }
+          }
+          throw new Error(`Missing audio for segment: ${seg.text.substring(0, 30)}`);
+        })
+      );
+
+      // Set state to render video
+      setSegments(segmentsWithAudio);
+      setVideos(fullProduction.video_assets);
+      setViralMeta(fullProduction.viral_metadata || null);
+      setThumbnailDataUrl(fullProduction.thumbnail_urls?.[0] || null);
+      setThumbnailVariant(fullProduction.thumbnail_urls?.[1] || null);
+      setState(AppState.READY);
+
+      toast.success('Production loaded. Click PUBLISH in the player to upload to YouTube.');
+    } catch (error) {
+      console.error('Error loading production for publish:', error);
+      toast.error(`Failed to load production: ${(error as Error).message}`);
     }
   };
 
@@ -1328,35 +1448,64 @@ const App: React.FC = () => {
         </div>
 
         <div className="hidden md:block w-[30%] lg:w-[25%] space-y-3">
-          {storedVideos.length > 0 ? storedVideos.map((video) => (
-            <div key={video.id} className="flex gap-2 cursor-pointer group">
-              <div className="w-40 h-24 bg-gray-800 rounded-lg overflow-hidden relative flex-shrink-0">
-                {video.thumbnail_url ? (
-                  <img src={video.thumbnail_url} alt={video.title} className="w-full h-full object-cover" />
-                ) : (
-                  <div className="absolute inset-0 bg-gray-700 group-hover:bg-gray-600 transition"></div>
-                )}
-                <div className="absolute top-1 right-1 bg-black/80 text-white text-xs px-1.5 py-0.5 rounded">
-                  {video.is_posted ? '✅ Posted' : '📝 Draft'}
+          <h3 className="text-lg font-bold mb-2">Why {config.channelName} is trending</h3>
+          {completedProductions.length > 0 ? completedProductions.map((production) => {
+            const title = production.viral_metadata?.title || 'Untitled Production';
+            const tags = production.viral_metadata?.tags || [];
+            const thumbnail = production.thumbnailUrl || production.thumbnail_urls?.[0];
+            const isPublished = production.isPublished;
+            const views = production.videoAnalytics?.views || 0;
+            const publishedDate = production.publishedAt || production.completed_at || production.updated_at;
+
+            return (
+              <div key={production.id} className="flex gap-2 group">
+                <div className="w-40 h-24 bg-gray-800 rounded-lg overflow-hidden relative flex-shrink-0">
+                  {thumbnail ? (
+                    <img src={thumbnail} alt={title} className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="absolute inset-0 bg-gray-700 group-hover:bg-gray-600 transition"></div>
+                  )}
+                  {isPublished && production.videoAnalytics && (
+                    <div className="absolute bottom-1 right-1 bg-black/80 text-white text-xs px-1 rounded">
+                      {views.toLocaleString()} views
+                    </div>
+                  )}
+                  {!isPublished && (
+                    <div className="absolute top-1 right-1 bg-yellow-600/90 text-black text-xs px-1.5 py-0.5 rounded font-bold">
+                      Ready
+                    </div>
+                  )}
                 </div>
-                {video.is_posted && video.analytics && (
-                  <div className="absolute bottom-1 right-1 bg-black/80 text-white text-xs px-1 rounded">
-                    {video.analytics.views.toLocaleString()} views
-                  </div>
-                )}
-              </div>
-              <div className="flex flex-col gap-1">
-                <h4 className="text-sm font-bold line-clamp-2 leading-tight group-hover:text-blue-400">
-                  {video.title}
-                </h4>
-                <div className="text-xs text-gray-400">{config.channelName}</div>
-                <div className="text-xs text-gray-400">
-                  {new Date(video.created_at).toLocaleDateString()}
+                <div className="flex flex-col gap-1 flex-1">
+                  <h4 className="text-sm font-bold line-clamp-2 leading-tight group-hover:text-blue-400">
+                    {title}
+                  </h4>
+                  <div className="text-xs text-gray-400">{config.channelName}</div>
+                  {tags.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-0.5">
+                      {tags.slice(0, 2).map((tag, idx) => (
+                        <span key={idx} className="text-xs text-blue-400">#{tag.replace(/\s+/g, '')}</span>
+                      ))}
+                    </div>
+                  )}
+                  {isPublished && publishedDate ? (
+                    <div className="text-xs text-gray-400">
+                      {views > 0 ? `${views.toLocaleString()} views • ` : ''}
+                      {formatRelativeDate(publishedDate)}
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => handlePublishProduction(production)}
+                      className="text-xs bg-yellow-500 hover:bg-yellow-600 text-black px-2 py-1 rounded font-bold mt-1 transition"
+                    >
+                      Publish
+                    </button>
+                  )}
                 </div>
               </div>
-            </div>
-          )) : (
-            // Fallback placeholders if no videos
+            );
+          }) : (
+            // Fallback placeholders if no productions
             [1, 2, 3, 4].map((i) => (
               <div key={i} className="flex gap-2 cursor-pointer group">
                 <div className="w-40 h-24 bg-gray-800 rounded-lg overflow-hidden relative flex-shrink-0">

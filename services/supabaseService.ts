@@ -817,6 +817,94 @@ export const getPublishedProductions = async (
   return publishedProds.map(normalizeProduction);
 };
 
+/**
+ * Get completed and published productions with video information
+ * Returns productions with metadata about whether they're published and their analytics
+ */
+export interface ProductionWithVideoInfo extends Production {
+  isPublished: boolean;
+  videoId?: string;
+  videoAnalytics?: {
+    views: number;
+    ctr: number;
+    avgViewDuration: string;
+    retentionData: number[];
+  };
+  publishedAt?: string;
+  thumbnailUrl?: string;
+}
+
+export const getCompletedProductionsWithVideoInfo = async (
+  channelId: string,
+  userId?: string,
+  limit: number = 10
+): Promise<ProductionWithVideoInfo[]> => {
+  if (!supabase) return [];
+
+  // Get all completed productions
+  let query = supabase
+    .from('productions')
+    .select('*')
+    .eq('channel_id', channelId)
+    .eq('status', 'completed')
+    .order('updated_at', { ascending: false })
+    .limit(limit);
+
+  if (userId) {
+    query = query.eq('user_id', userId);
+  }
+
+  const { data: productions, error } = await query;
+
+  if (error) {
+    console.error("Error fetching completed productions:", error);
+    return [];
+  }
+
+  // Get all published videos for this channel
+  const { data: videos, error: videosError } = await supabase
+    .from('videos')
+    .select('*')
+    .eq('channel_id', channelId)
+    .order('created_at', { ascending: false });
+
+  if (videosError) {
+    console.error("Error fetching videos:", videosError);
+    // Continue without video info
+  }
+
+  // Match productions with videos by title
+  return (productions || []).map(prod => {
+    const prodData = normalizeProduction(prod);
+    const prodTitle = prodData.viral_metadata?.title || '';
+    
+    // Find matching video
+    const matchingVideo = (videos || []).find((video: any) => {
+      const videoTitle = video.title || '';
+      return videoTitle === prodTitle || 
+             videoTitle.includes(prodTitle) ||
+             prodTitle.includes(videoTitle) ||
+             videoTitle.includes(prodTitle.substring(0, 30));
+    });
+
+    const isPublished = matchingVideo && matchingVideo.youtube_id !== null && matchingVideo.youtube_id !== undefined;
+
+    return {
+      ...prodData,
+      isPublished,
+      videoId: matchingVideo?.id,
+      videoAnalytics: matchingVideo ? {
+        views: matchingVideo.views || 0,
+        ctr: matchingVideo.ctr || 0,
+        avgViewDuration: matchingVideo.avg_view_duration || "0:00",
+        retentionData: matchingVideo.retention_data || []
+      } : undefined,
+      publishedAt: matchingVideo?.created_at,
+      thumbnailUrl: matchingVideo?.thumbnail_url || prodData.thumbnail_urls?.[0]
+    } as ProductionWithVideoInfo;
+  });
+};
+
 export const updateProductionStatus = async (
   id: string,
   status: ProductionStatus,
