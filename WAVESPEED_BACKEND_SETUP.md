@@ -41,7 +41,7 @@ Si despliegas tu frontend en Vercel, puedes usar las Serverless Functions inclui
 Si recibes errores 404 en los endpoints de Vercel:
 
 1. Verifica que el archivo `api/wavespeed-proxy/[...path].ts` exista.
-2. Verifica que `vercel.json` exista en la raíz con la configuración de rewrites.
+2. Asegúrate de que `vercel.json` configure correctamente la función (sin rewrites conflictivos).
 3. Asegúrate de que la variable `WAVESPEED_API_KEY` esté configurada en Vercel.
 4. Revisa los logs en Vercel Dashboard > Functions.
 

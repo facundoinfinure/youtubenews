@@ -74,8 +74,14 @@ export default async function handler(
     console.log(`[${requestId}] Path extracted:`, { 
       raw: req.query.path, 
       processed: wavespeedPath,
-      queryKeys: Object.keys(req.query)
+      queryKeys: Object.keys(req.query),
+      url: req.url
     });
+    
+    // Health check para el proxy mismo
+    if (wavespeedPath === 'health' || wavespeedPath === 'ping') {
+      return res.status(200).json({ status: 'ok', service: 'wavespeed-proxy-vercel' });
+    }
 
     if (!wavespeedPath) {
       console.error(`[${requestId}] ❌ No path provided in request`);

@@ -3,12 +3,5 @@
       "api/wavespeed-proxy/[...path].ts": {
         "maxDuration": 30
       }
-    },
-    "rewrites": [
-      {
-        "source": "/api/wavespeed-proxy/:path*",
-        "destination": "/api/wavespeed-proxy/:path*"
-      }
-    ]
+    }
   }
-  
