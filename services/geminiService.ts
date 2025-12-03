@@ -273,25 +273,34 @@ export const fetchEconomicNews = async (targetDate: Date | undefined, config: Ch
       // Use UTC date string for the prompt to avoid "yesterday" shift in Western Hemisphere
       const dateString = dateToQuery.toLocaleDateString('en-US', { timeZone: 'UTC', month: 'long', day: 'numeric', year: 'numeric' });
 
-      const prompt = `Find EXACTLY 15 impactful economic or political news stories from ${dateString} relevant to ${config.country}. 
-  Focus on major market moves, inflation, politics, or social issues. 
-  
-  Return a strictly formatted JSON array of objects with these keys: 
-  - "headline" (string, in ${config.language})
-  - "source" (string)
-  - "url" (string, use grounding or best guess)
-  - "summary" (string, 1 short sentence in ${config.language})
-  - "viralScore" (number, 1-100 based on controversy or impact)
-  - "imageKeyword" (string, 2-3 words visual description of the topic for image generation, e.g. "bitcoin crash", "stock market bull")
-  - "imageUrl" (string, optional - URL of the article's main image from Google News if available. Use the image URL from the Google News search results.)
+      const prompt = `Search for news from ${dateString} relevant to ${config.country}.
 
-  CRITICAL REQUIREMENTS:
-  1. You MUST return EXACTLY 15 items in the JSON array. Count them carefully.
-  2. If you cannot find 15 unique stories, find related stories, variations, or follow-up stories to reach 15.
-  3. Include imageUrl from Google News search results when available - these images are important for display.
-  4. Do not include markdown formatting like \`\`\`json - return pure JSON only.
-  
-  Example format: [{"headline":"...","source":"...","url":"...","summary":"...","viralScore":85,"imageKeyword":"...","imageUrl":"..."}, ...]`;
+IMPORTANT: Search specifically for news FROM ${dateString}. Do NOT use today's date - use the exact date specified: ${dateString}.
+
+Find EXACTLY 15 impactful economic or political news stories from that date.
+Focus on major market moves, inflation, politics, or social issues.
+
+RESPONSE FORMAT - CRITICAL:
+- Return ONLY a JSON array, no explanations or text before/after
+- Start your response with [ and end with ]
+- Do NOT include any text like "The current date is..." or "I will search for..."
+
+JSON structure for each item:
+- "headline" (string, in ${config.language})
+- "source" (string)
+- "url" (string, use grounding or best guess)
+- "summary" (string, 1 short sentence in ${config.language})
+- "viralScore" (number, 1-100 based on controversy or impact)
+- "imageKeyword" (string, 2-3 words visual description for image generation)
+- "imageUrl" (string, optional - URL of the article's main image if available)
+
+REQUIREMENTS:
+1. Return EXACTLY 15 items
+2. Include imageUrl when available from search results
+3. NO markdown formatting, NO explanatory text
+4. Start response with [ character immediately
+
+Example: [{"headline":"...","source":"...","url":"...","summary":"...","viralScore":85,"imageKeyword":"...","imageUrl":"..."}, ...]`;
 
       const response = await ai.models.generateContent({
         model: getModelForTask('news'),
@@ -305,7 +314,22 @@ export const fetchEconomicNews = async (targetDate: Date | undefined, config: Ch
 
       const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
       const text = response.text || "";
-      const jsonStr = text.replace(/```json\n|\n```/g, "").replace(/```/g, "");
+      
+      // Extract JSON from response - Gemini with googleSearch sometimes returns text before the JSON
+      // Look for the JSON array pattern in the response
+      let jsonStr = text.replace(/```json\n?|\n?```/g, "").trim();
+      
+      // Find the first '[' and last ']' to extract just the JSON array
+      const firstBracket = jsonStr.indexOf('[');
+      const lastBracket = jsonStr.lastIndexOf(']');
+      
+      if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
+        // Log if there was text before the JSON (for debugging)
+        if (firstBracket > 0) {
+          console.log(`⚠️ Stripped ${firstBracket} chars of text before JSON array`);
+        }
+        jsonStr = jsonStr.substring(firstBracket, lastBracket + 1);
+      }
 
       try {
         let news: NewsItem[] = JSON.parse(jsonStr);
