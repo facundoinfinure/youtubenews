@@ -144,6 +144,13 @@ export interface Production {
   user_id?: string;
   version?: number; // Version number (1, 2, 3...)
   parent_production_id?: string; // Link to parent production for versioning
+  // New fields for checkpoint and cost tracking
+  checkpoint_data?: any; // Intermediate state for granular recovery
+  last_checkpoint_at?: string; // Timestamp of last checkpoint
+  failed_steps?: string[]; // Array of failed step identifiers
+  estimated_cost?: number; // Estimated cost before generation
+  actual_cost?: number; // Actual cost after completion
+  cost_breakdown?: Record<string, number>; // Cost breakdown by task type
 }
 
 // Window augmentation for AI Studio key selection & Google Identity & Runtime Env

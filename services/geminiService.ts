@@ -534,44 +534,87 @@ export const generateVideoSegmentsWithInfiniteTalk = async (
   console.log(`👤 [InfiniteTalk Multi] Host A: ${hostAName} - ${hostAVisualPrompt}`);
   console.log(`👤 [InfiniteTalk Multi] Host B: ${hostBName} - ${hostBVisualPrompt}`);
 
-  // Generate videos for each segment (one video per segment)
-  const videoPromises = segments.map(async (segment, index) => {
-    // Get audio URL - it should be in segment.audioUrl after being uploaded
-    const audioUrl = (segment as any).audioUrl;
-    
-    if (!audioUrl) {
-      console.warn(`⚠️ [InfiniteTalk] Segment ${index} has no audio URL, skipping video generation`);
-      return null;
+  // Generate videos in batches with retry logic
+  const BATCH_SIZE = 3; // Process 3 videos at a time to avoid rate limits
+  const videoUrls: (string | null)[] = new Array(segments.length).fill(null);
+  const failedIndices: number[] = [];
+
+  // Process in batches
+  for (let i = 0; i < segments.length; i += BATCH_SIZE) {
+    const batch = segments.slice(i, i + BATCH_SIZE);
+    const batchIndices = batch.map((_, idx) => i + idx);
+
+    console.log(`🎬 [InfiniteTalk] Processing batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(segments.length / BATCH_SIZE)} (segments ${i + 1}-${Math.min(i + BATCH_SIZE, segments.length)})`);
+
+    // Process batch with retry and continue on error
+    const batchResults = await Promise.allSettled(
+      batch.map(async (segment, batchIdx) => {
+        const globalIndex = batchIndices[batchIdx];
+        const audioUrl = (segment as any).audioUrl;
+        
+        if (!audioUrl) {
+          console.warn(`⚠️ [InfiniteTalk] Segment ${globalIndex} has no audio URL, skipping`);
+          return { index: globalIndex, url: null };
+        }
+
+        // Use retry logic for video generation
+        const { retryVideoGeneration } = await import('./retryUtils');
+        const result = await retryVideoGeneration(
+          async () => {
+            const videoResult = await generateInfiniteTalkVideo({
+              channelId,
+              productionId,
+              segmentIndex: globalIndex,
+              audioUrl,
+              referenceImageUrl: config.referenceImageUrl!,
+              speaker: segment.speaker,
+              dialogueText: segment.text,
+              hostAName,
+              hostBName,
+              hostAVisualPrompt,
+              hostBVisualPrompt,
+              resolution: '720p'
+            });
+            return videoResult.url;
+          },
+          {
+            maxRetries: 2,
+            continueOnError: true,
+            onFailure: (error, attempt) => {
+              console.warn(`⚠️ [InfiniteTalk] Segment ${globalIndex} failed (attempt ${attempt}):`, (error as Error).message);
+            }
+          }
+        );
+
+        if (result) {
+          console.log(`✅ [InfiniteTalk] Segment ${globalIndex + 1}/${segments.length} complete`);
+        } else {
+          failedIndices.push(globalIndex);
+        }
+
+        return { index: globalIndex, url: result };
+      })
+    );
+
+    // Process batch results
+    batchResults.forEach((result, batchIdx) => {
+      if (result.status === 'fulfilled') {
+        videoUrls[result.value.index] = result.value.url;
+      } else {
+        const globalIndex = batchIndices[batchIdx];
+        failedIndices.push(globalIndex);
+        console.error(`❌ [InfiniteTalk] Segment ${globalIndex} failed:`, result.reason);
+      }
+    });
+
+    // Small delay between batches to avoid rate limits
+    if (i + BATCH_SIZE < segments.length) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
     }
-
-    try {
-      const result = await generateInfiniteTalkVideo({
-        channelId,
-        productionId,
-        segmentIndex: index,
-        audioUrl,
-        referenceImageUrl: config.referenceImageUrl!,
-        speaker: segment.speaker,
-        dialogueText: segment.text,
-        hostAName,
-        hostBName,
-        hostAVisualPrompt,  // Pass visual description
-        hostBVisualPrompt,  // Pass visual description
-        resolution: '720p'
-      });
-
-      console.log(`✅ [InfiniteTalk] Segment ${index + 1}/${segments.length} complete${result.fromCache ? ' (cached)' : ''}`);
-      return result.url;
-    } catch (error) {
-      console.error(`❌ [InfiniteTalk] Segment ${index} failed:`, (error as Error).message);
-      return null;
-    }
-  });
-
-  const videoUrls = await Promise.all(videoPromises);
+  }
   
   const successCount = videoUrls.filter(url => url !== null).length;
-  console.log(`✅ [InfiniteTalk Multi] Generated ${successCount}/${segments.length} videos`);
+  console.log(`✅ [InfiniteTalk Multi] Generated ${successCount}/${segments.length} videos${failedIndices.length > 0 ? ` (${failedIndices.length} failed)` : ''}`);
 
   return videoUrls;
 };

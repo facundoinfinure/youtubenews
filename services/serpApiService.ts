@@ -8,6 +8,7 @@
 import { NewsItem, ChannelConfig } from "../types";
 import { ContentCache } from "./ContentCache";
 import { CostTracker } from "./CostTracker";
+import { calculateViralScoresBatch, calculateViralScoreWithGPT } from "./openaiService";
 
 // Get proxy URL (auto-detect in production)
 const getProxyUrl = (): string => {
@@ -63,29 +64,71 @@ const serpApiRequest = async (params: Record<string, string>): Promise<any> => {
 };
 
 /**
- * Calculate viral score based on various factors
+ * Calculate viral score using OpenAI analysis (with caching)
+ * Falls back to basic calculation if OpenAI fails
  */
-const calculateViralScore = (item: any): number => {
+const calculateViralScore = async (item: any): Promise<number> => {
+  const headline = item.title || '';
+  const summary = item.snippet || item.title || '';
+  const source = item.source?.name || item.source || 'Unknown';
+  const date = item.date;
+  
+  // Create cache key based on headline (first 100 chars)
+  const cacheKey = `viral_score_${headline.substring(0, 100).toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+  
+  // Try to get from cache first
+  const cached = await ContentCache.get(cacheKey);
+  if (cached !== null && typeof cached === 'number') {
+    return cached;
+  }
+  
+  // Calculate using OpenAI
+  try {
+    const score = await calculateViralScoreWithGPT(headline, summary, source, date);
+    // Cache for 24 hours
+    await ContentCache.set(cacheKey, score, 86400000);
+    return score;
+  } catch (error) {
+    console.warn(`[Viral Score] OpenAI failed, using basic calculation:`, (error as Error).message);
+    // Fallback to basic calculation
+    return calculateBasicViralScore(headline, summary, source, date);
+  }
+};
+
+/**
+ * Basic viral score calculation (fallback)
+ */
+const calculateBasicViralScore = (
+  headline: string,
+  summary: string,
+  source: string,
+  date?: string
+): number => {
   let score = 50; // Base score
   
+  const text = `${headline} ${summary}`.toLowerCase();
+  
   // Boost for certain keywords
-  const headline = (item.title || '').toLowerCase();
   const viralKeywords = ['breaking', 'urgent', 'shocking', 'exclusive', 'just in', 'update'];
   viralKeywords.forEach(keyword => {
-    if (headline.includes(keyword)) score += 10;
+    if (text.includes(keyword)) score += 10;
   });
   
   // Boost for major sources
-  const source = (item.source?.name || '').toLowerCase();
+  const sourceLower = source.toLowerCase();
   const majorSources = ['reuters', 'bloomberg', 'cnn', 'bbc', 'nytimes', 'wsj', 'ap news'];
-  if (majorSources.some(s => source.includes(s))) score += 15;
+  if (majorSources.some(s => sourceLower.includes(s))) score += 15;
   
   // Boost for recent news (within last 6 hours)
-  if (item.date) {
-    const newsDate = new Date(item.date);
-    const hoursAgo = (Date.now() - newsDate.getTime()) / (1000 * 60 * 60);
-    if (hoursAgo < 6) score += 20;
-    else if (hoursAgo < 12) score += 10;
+  if (date) {
+    try {
+      const newsDate = new Date(date);
+      const hoursAgo = (Date.now() - newsDate.getTime()) / (1000 * 60 * 60);
+      if (hoursAgo < 6) score += 20;
+      else if (hoursAgo < 12) score += 10;
+    } catch {
+      // Invalid date, skip
+    }
   }
   
   // Cap at 100
@@ -196,13 +239,27 @@ export const fetchNewsWithSerpAPI = async (
         return true;
       });
       
-      // Process and enhance news items
-      const processedNews: NewsItem[] = uniqueNews.map(item => ({
+      // Process news items and calculate viral scores in batch
+      console.log(`[SerpAPI] 🔥 Calculating viral scores for ${uniqueNews.length} news items...`);
+      
+      // Prepare items for batch scoring
+      const itemsForScoring = uniqueNews.map(item => ({
+        headline: item.headline,
+        summary: item.summary,
+        source: item.source,
+        date: item.date
+      }));
+      
+      // Calculate viral scores in batch (parallel processing)
+      const viralScores = await calculateViralScoresBatch(itemsForScoring);
+      
+      // Process and enhance news items with calculated scores
+      const processedNews: NewsItem[] = uniqueNews.map((item, index) => ({
         headline: item.headline,
         source: item.source,
         url: item.url,
         summary: item.summary,
-        viralScore: calculateViralScore(item),
+        viralScore: viralScores[index] || 50, // Fallback to 50 if score calculation failed
         imageKeyword: extractImageKeyword(item.headline),
         imageUrl: item.imageUrl || undefined
       }));
@@ -211,6 +268,12 @@ export const fetchNewsWithSerpAPI = async (
       const sortedNews = processedNews
         .sort((a, b) => b.viralScore - a.viralScore)
         .slice(0, 15);
+      
+      // Log score distribution
+      const scoreRange = sortedNews.length > 0 
+        ? `${Math.min(...viralScores)}-${Math.max(...viralScores)}`
+        : 'N/A';
+      console.log(`[SerpAPI] 📊 Viral score range: ${scoreRange}`);
       
       console.log(`[SerpAPI] ✅ Processed ${sortedNews.length} news items`);
       

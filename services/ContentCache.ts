@@ -74,6 +74,29 @@ export class ContentCache {
             .forEach(k => localStorage.removeItem(k));
     }
 
+    static get<T>(key: string): T | null {
+        // Check memory cache
+        const cached = this.cache.get(key);
+        if (cached) {
+            return cached.value as T;
+        }
+
+        // Check localStorage
+        const stored = this.loadFromStorage<T>(key, 3600000); // Default 1 hour TTL
+        if (stored) {
+            this.cache.set(key, stored);
+            return stored.value;
+        }
+
+        return null;
+    }
+
+    static set<T>(key: string, value: T, ttl: number = 3600000, cost: number = 0): void {
+        const entry: CacheEntry<T> = { value, timestamp: Date.now(), cost };
+        this.cache.set(key, entry);
+        this.saveToStorage(key, entry);
+    }
+
     static getStats() {
         const totalSaved = Array.from(this.cache.values())
             .reduce((sum, entry) => sum + (entry.cost || 0), 0);

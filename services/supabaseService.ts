@@ -406,6 +406,55 @@ export const getNewsByDate = async (newsDate: Date, channelId: string): Promise<
   }));
 };
 
+/**
+ * Get news IDs that have already been used in other productions for the same date
+ * This allows creating multiple productions per day while preventing duplicate news selection
+ */
+export const getUsedNewsIdsForDate = async (
+  newsDate: Date,
+  channelId: string,
+  excludeProductionId?: string
+): Promise<string[]> => {
+  if (!supabase) return [];
+
+  const dateStr = newsDate.toISOString().split('T')[0];
+
+  // Get all productions for this date and channel
+  let query = supabase
+    .from('productions')
+    .select('selected_news_ids')
+    .eq('news_date', dateStr)
+    .eq('channel_id', channelId)
+    .not('selected_news_ids', 'is', null);
+
+  // Exclude current production if provided (for editing existing production)
+  if (excludeProductionId) {
+    query = query.neq('id', excludeProductionId);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error("Error fetching used news IDs:", error);
+    return [];
+  }
+
+  // Collect all used news IDs from all productions
+  const usedIds = new Set<string>();
+  if (data) {
+    data.forEach((production: any) => {
+      if (production.selected_news_ids && Array.isArray(production.selected_news_ids)) {
+        production.selected_news_ids.forEach((id: string) => {
+          if (id) usedIds.add(id);
+        });
+      }
+    });
+  }
+
+  console.log(`📋 Found ${usedIds.size} news items already used in other productions for ${dateStr}`);
+  return Array.from(usedIds);
+};
+
 export const markNewsAsSelected = async (newsDate: Date, selectedNews: NewsItem[], channelId: string) => {
   if (!supabase) return;
 
@@ -433,13 +482,26 @@ export const uploadImageToStorage = async (imageDataUrl: string, fileName: strin
   if (!supabase) return null;
 
   try {
+    // Check if file already exists (deduplication)
+    const filePath = `channel-images/${fileName}`;
+    const { checkFileExists } = await import('./storageManager');
+    const exists = await checkFileExists('channel-assets', filePath);
+    
+    if (exists) {
+      // File exists, return public URL
+      const { data: urlData } = supabase.storage
+        .from('channel-assets')
+        .getPublicUrl(filePath);
+      console.log(`✅ Image already exists, reusing: ${fileName}`);
+      return urlData.publicUrl;
+    }
+
     // Convert data URL to blob
     const response = await fetch(imageDataUrl);
     const blob = await response.blob();
     
     // Upload to Supabase Storage
     const fileExt = fileName.split('.').pop() || 'png';
-    const filePath = `channel-images/${fileName}`;
 
     const { data, error } = await supabase.storage
       .from('channel-assets')
@@ -479,11 +541,44 @@ export const uploadImageToStorage = async (imageDataUrl: string, fileName: strin
 export const uploadAudioToStorage = async (
   audioBase64: string,
   productionId: string,
-  segmentIndex: number
+  segmentIndex: number,
+  options?: {
+    text?: string;
+    voiceName?: string;
+    channelId?: string;
+    durationSeconds?: number;
+  }
 ): Promise<string | null> => {
   if (!supabase) return null;
 
   try {
+    // Check if file already exists (deduplication)
+    const fileName = `productions/${productionId}/audio/segment-${segmentIndex}.mp3`;
+    const { checkFileExists } = await import('./storageManager');
+    const exists = await checkFileExists('channel-assets', fileName);
+    
+    if (exists) {
+      // File exists, return public URL
+      const { data: urlData } = supabase.storage
+        .from('channel-assets')
+        .getPublicUrl(fileName);
+      console.log(`✅ Audio already exists, reusing: segment-${segmentIndex}`);
+      
+      // Update audio cache if text/voice provided
+      if (options?.text && options?.voiceName && options?.channelId) {
+        await saveCachedAudio(
+          options.channelId,
+          options.text,
+          options.voiceName,
+          urlData.publicUrl,
+          options.durationSeconds,
+          productionId
+        );
+      }
+      
+      return urlData.publicUrl;
+    }
+
     // Convert base64 to blob
     const base64Data = audioBase64.split(',')[1] || audioBase64;
     const byteCharacters = atob(base64Data);
@@ -495,7 +590,6 @@ export const uploadAudioToStorage = async (
     const blob = new Blob([byteArray], { type: 'audio/mpeg' });
 
     // Upload to Supabase Storage
-    const fileName = `productions/${productionId}/audio/segment-${segmentIndex}.mp3`;
     const { data, error } = await supabase.storage
       .from('channel-assets')
       .upload(fileName, blob, {
@@ -521,6 +615,18 @@ export const uploadAudioToStorage = async (
     const { data: urlData } = supabase.storage
       .from('channel-assets')
       .getPublicUrl(data.path);
+
+    // Save to audio cache if text/voice provided
+    if (options?.text && options?.voiceName && options?.channelId) {
+      await saveCachedAudio(
+        options.channelId,
+        options.text,
+        options.voiceName,
+        urlData.publicUrl,
+        options.durationSeconds,
+        productionId
+      );
+    }
 
     return urlData.publicUrl;
   } catch (e) {
@@ -617,7 +723,13 @@ const normalizeProduction = (data: any): Production => ({
   user_id: data.user_id ?? undefined,
   version: data.version ?? undefined,
   parent_production_id: data.parent_production_id ?? undefined,
-  completed_at: data.completed_at ?? undefined
+  completed_at: data.completed_at ?? undefined,
+  checkpoint_data: data.checkpoint_data ?? undefined,
+  last_checkpoint_at: data.last_checkpoint_at ?? undefined,
+  failed_steps: data.failed_steps ?? undefined,
+  estimated_cost: data.estimated_cost ?? undefined,
+  actual_cost: data.actual_cost ?? undefined,
+  cost_breakdown: data.cost_breakdown ?? undefined
 });
 
 export const saveProduction = async (
@@ -648,7 +760,14 @@ export const saveProduction = async (
     progress_step: production.progress_step || 0,
     user_id: userId || null,
     version: production.version || 1,
-    parent_production_id: production.parent_production_id || null
+    parent_production_id: production.parent_production_id || null,
+    // New fields for checkpoint and cost tracking
+    checkpoint_data: production.checkpoint_data || null,
+    last_checkpoint_at: production.last_checkpoint_at || null,
+    failed_steps: production.failed_steps || null,
+    estimated_cost: production.estimated_cost ?? null,
+    actual_cost: production.actual_cost ?? null,
+    cost_breakdown: production.cost_breakdown || null
   };
 
   if (production.id) {
@@ -946,7 +1065,158 @@ export const deleteProduction = async (id: string): Promise<boolean> => {
   return true;
 };
 
-// Cache functions for scripts and audio
+// =============================================================================================
+// CHECKPOINT SYSTEM
+// =============================================================================================
+
+/**
+ * Save a checkpoint with intermediate state for granular recovery
+ */
+export const saveCheckpoint = async (
+  productionId: string,
+  checkpointData: {
+    step: string;
+    completed: string[]; // Array of completed item IDs/indices
+    in_progress?: string[]; // Items currently being processed
+    data?: any; // Additional state data
+  }
+): Promise<boolean> => {
+  if (!supabase) return false;
+
+  try {
+    // Get current checkpoint data
+    const { data: current } = await supabase
+      .from('productions')
+      .select('checkpoint_data')
+      .eq('id', productionId)
+      .single();
+
+    const existingCheckpoints = current?.checkpoint_data || {};
+    const updatedCheckpoints = {
+      ...existingCheckpoints,
+      [checkpointData.step]: {
+        completed: checkpointData.completed,
+        in_progress: checkpointData.in_progress || [],
+        data: checkpointData.data,
+        timestamp: new Date().toISOString()
+      }
+    };
+
+    const { error } = await supabase
+      .from('productions')
+      .update({
+        checkpoint_data: updatedCheckpoints,
+        last_checkpoint_at: new Date().toISOString()
+      })
+      .eq('id', productionId);
+
+    if (error) {
+      console.error("Error saving checkpoint:", error);
+      return false;
+    }
+
+    console.log(`✅ Checkpoint saved: ${checkpointData.step} (${checkpointData.completed.length} completed)`);
+    return true;
+  } catch (e) {
+    console.error("Error in saveCheckpoint:", e);
+    return false;
+  }
+};
+
+/**
+ * Get the last checkpoint data for a production
+ */
+export const getLastCheckpoint = async (productionId: string): Promise<any | null> => {
+  if (!supabase) return null;
+
+  try {
+    const { data, error } = await supabase
+      .from('productions')
+      .select('checkpoint_data, last_checkpoint_at')
+      .eq('id', productionId)
+      .single();
+
+    if (error) {
+      console.error("Error fetching checkpoint:", error);
+      return null;
+    }
+
+    return data?.checkpoint_data || null;
+  } catch (e) {
+    console.error("Error in getLastCheckpoint:", e);
+    return null;
+  }
+};
+
+/**
+ * Mark a step as failed in the production
+ */
+export const markStepFailed = async (
+  productionId: string,
+  step: string,
+  error: string
+): Promise<boolean> => {
+  if (!supabase) return false;
+
+  try {
+    // Get current failed steps
+    const { data: current } = await supabase
+      .from('productions')
+      .select('failed_steps')
+      .eq('id', productionId)
+      .single();
+
+    const existingFailed = current?.failed_steps || [];
+    const failedEntry = {
+      step,
+      error,
+      timestamp: new Date().toISOString()
+    };
+
+    // Check if step already marked as failed
+    const alreadyFailed = existingFailed.some((f: any) => f.step === step);
+    const updatedFailed = alreadyFailed
+      ? existingFailed.map((f: any) => f.step === step ? failedEntry : f)
+      : [...existingFailed, failedEntry];
+
+    const { error: updateError } = await supabase
+      .from('productions')
+      .update({ failed_steps: updatedFailed })
+      .eq('id', productionId);
+
+    if (updateError) {
+      console.error("Error marking step as failed:", updateError);
+      return false;
+    }
+
+    console.log(`⚠️ Step marked as failed: ${step}`);
+    return true;
+  } catch (e) {
+    console.error("Error in markStepFailed:", e);
+    return false;
+  }
+};
+
+// =============================================================================================
+// AUDIO CACHE (Improved with dedicated table)
+// =============================================================================================
+
+/**
+ * Create a hash from text for cache lookup
+ */
+const createTextHash = (text: string): string => {
+  let hash = 0;
+  for (let i = 0; i < text.length; i++) {
+    const char = text.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  return Math.abs(hash).toString(36);
+};
+
+/**
+ * Find cached audio using dedicated audio_cache table (fast lookup)
+ */
 export const findCachedAudio = async (
   text: string,
   voiceName: string,
@@ -955,8 +1225,41 @@ export const findCachedAudio = async (
   if (!supabase) return null;
 
   try {
-    // Search for segments with matching text and voice
-    const { data, error } = await supabase
+    const textHash = createTextHash(text);
+
+    // First try dedicated audio_cache table (fast)
+    const { data: cached, error: cacheError } = await supabase
+      .from('audio_cache')
+      .select('audio_url, use_count')
+      .eq('channel_id', channelId)
+      .eq('text_hash', textHash)
+      .eq('voice_name', voiceName)
+      .order('last_used_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (!cacheError && cached) {
+      // Update use count and last_used_at
+      await supabase
+        .from('audio_cache')
+        .update({
+          use_count: (cached.use_count || 1) + 1,
+          last_used_at: new Date().toISOString()
+        })
+        .eq('channel_id', channelId)
+        .eq('text_hash', textHash)
+        .eq('voice_name', voiceName);
+
+      // Load audio from storage
+      const audioBase64 = await getAudioFromStorage(cached.audio_url);
+      if (audioBase64) {
+        console.log(`✅ Found cached audio in audio_cache table (used ${cached.use_count + 1} times)`);
+        return audioBase64;
+      }
+    }
+
+    // Fallback: Search in productions (for backward compatibility)
+    const { data: productions, error } = await supabase
       .from('productions')
       .select('segments')
       .eq('channel_id', channelId)
@@ -969,17 +1272,18 @@ export const findCachedAudio = async (
       return null;
     }
 
-    if (!data || data.length === 0) return null;
+    if (!productions || productions.length === 0) return null;
 
     // Search through segments for matching text
-    for (const production of data) {
+    for (const production of productions) {
       if (production.segments && Array.isArray(production.segments)) {
         for (const segment of production.segments) {
           if (segment.text === text && segment.audioUrl) {
             // Found matching audio, try to load it
             const audioBase64 = await getAudioFromStorage(segment.audioUrl);
             if (audioBase64) {
-              console.log("✅ Found cached audio for text:", text.substring(0, 30));
+              console.log("✅ Found cached audio in productions (legacy)");
+              // Optionally migrate to audio_cache table
               return audioBase64;
             }
           }
@@ -991,6 +1295,68 @@ export const findCachedAudio = async (
   } catch (e) {
     console.error("Error in findCachedAudio:", e);
     return null;
+  }
+};
+
+/**
+ * Save audio to cache table for fast future lookups
+ */
+export const saveCachedAudio = async (
+  channelId: string,
+  text: string,
+  voiceName: string,
+  audioUrl: string,
+  durationSeconds?: number,
+  productionId?: string
+): Promise<boolean> => {
+  if (!supabase) return false;
+
+  try {
+    const textHash = createTextHash(text);
+
+    // Check if already exists
+    const { data: existing } = await supabase
+      .from('audio_cache')
+      .select('id')
+      .eq('channel_id', channelId)
+      .eq('text_hash', textHash)
+      .eq('voice_name', voiceName)
+      .single();
+
+    if (existing) {
+      // Already cached, just update last_used_at
+      await supabase
+        .from('audio_cache')
+        .update({ last_used_at: new Date().toISOString() })
+        .eq('id', existing.id);
+      return true;
+    }
+
+    // Insert new cache entry
+    const { error } = await supabase
+      .from('audio_cache')
+      .insert({
+        channel_id: channelId,
+        text_hash: textHash,
+        voice_name: voiceName,
+        audio_url: audioUrl,
+        duration_seconds: durationSeconds,
+        text_preview: text.substring(0, 100),
+        production_id: productionId || null,
+        use_count: 1,
+        last_used_at: new Date().toISOString()
+      });
+
+    if (error) {
+      console.error("Error saving cached audio:", error);
+      return false;
+    }
+
+    console.log("✅ Audio saved to cache table");
+    return true;
+  } catch (e) {
+    console.error("Error in saveCachedAudio:", e);
+    return false;
   }
 };
 

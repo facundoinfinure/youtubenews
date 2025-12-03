@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { AppState, ChannelConfig, NewsItem, BroadcastSegment, VideoAssets, ViralMetadata, UserProfile, Channel, ScriptLine, StoredVideo } from './types';
-import { signInWithGoogle, getSession, signOut, getAllChannels, saveChannel, saveVideoToDB, getNewsByDate, saveNewsToDB, markNewsAsSelected, deleteVideoFromDB, loadConfigFromDB, supabase, fetchVideosFromDB, saveProduction, getIncompleteProductions, getProductionById, updateProductionStatus, uploadAudioToStorage, uploadImageToStorage, getAudioFromStorage, findCachedScript, findCachedAudio, getAllProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction, verifyStorageBucket, getCompletedProductionsWithVideoInfo, ProductionWithVideoInfo } from './services/supabaseService';
+import { signInWithGoogle, getSession, signOut, getAllChannels, saveChannel, saveVideoToDB, getNewsByDate, saveNewsToDB, markNewsAsSelected, deleteVideoFromDB, loadConfigFromDB, supabase, fetchVideosFromDB, saveProduction, getIncompleteProductions, getProductionById, updateProductionStatus, uploadAudioToStorage, uploadImageToStorage, getAudioFromStorage, findCachedScript, findCachedAudio, getAllProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction, verifyStorageBucket, getCompletedProductionsWithVideoInfo, ProductionWithVideoInfo, getUsedNewsIdsForDate, saveCheckpoint, getLastCheckpoint, markStepFailed, saveCachedAudio } from './services/supabaseService';
 import { fetchEconomicNews, generateScript, generateSegmentedAudio, generateSegmentedAudioWithCache, setFindCachedAudioFunction, generateBroadcastVisuals, generateViralMetadata, generateThumbnail, generateThumbnailVariants, generateViralHook, generateVideoSegmentsWithInfiniteTalk } from './services/geminiService';
 import { uploadVideoToYouTube, deleteVideoFromYouTube } from './services/youtubeService';
 import { ContentCache } from './services/ContentCache';
+import { CostTracker } from './services/CostTracker';
+import { retryVideoGeneration, retryBatch } from './services/retryUtils';
 import { NewsSelector } from './components/NewsSelector';
 import { BroadcastPlayer } from './components/BroadcastPlayer';
 import { AdminDashboard } from './components/AdminDashboard';
@@ -74,6 +76,7 @@ const App: React.FC = () => {
 
   const [allNews, setAllNews] = useState<NewsItem[]>([]);
   const [selectedNews, setSelectedNews] = useState<NewsItem[]>([]);
+  const [usedNewsIds, setUsedNewsIds] = useState<Set<string>>(new Set()); // Track news IDs already used in other productions
   const [segments, setSegments] = useState<BroadcastSegment[]>([]);
   const [videos, setVideos] = useState<VideoAssets>(EMPTY_VIDEO_ASSETS);
   const [viralMeta, setViralMeta] = useState<ViralMetadata | null>(null);
@@ -419,6 +422,11 @@ const App: React.FC = () => {
   };
 
   const verifyKeyAndStart = async () => {
+    // Reset state for new production
+    setCurrentProductionId(null); // Reset production ID for new production
+    setSelectedNews([]); // Clear previous selection
+    setUsedNewsIds(new Set()); // Clear used news IDs
+    
     try {
       // Check if running in AI Studio environment
       if (window.aistudio) {
@@ -482,6 +490,14 @@ const App: React.FC = () => {
           console.warn(`⚠️ Mismatch: API returned ${fetchedNews.length} but DB has ${verifyNews.length}`);
         }
         fetchedNews = verifyNews; // Use what's actually in DB
+      }
+
+      // Get news IDs already used in other productions for this date
+      const usedIds = await getUsedNewsIdsForDate(dateObj, activeChannel.id, currentProductionId || undefined);
+      setUsedNewsIds(new Set(usedIds));
+      
+      if (usedIds.length > 0) {
+        addLog(`⚠️ ${usedIds.length} stories already used in other productions (will be shown as unavailable).`);
       }
 
       console.log(`📰 Final news count to display: ${fetchedNews.length}`);
@@ -615,10 +631,29 @@ const App: React.FC = () => {
     const TOTAL_STEPS = 6;
     setProductionProgress({ current: 0, total: TOTAL_STEPS, step: 'Starting production...' });
 
+    // Calculate estimated cost before starting
+    const calculateEstimatedCost = (scriptLength: number): number => {
+      let cost = 0;
+      // Viral hook: ~$0.005
+      cost += 0.005;
+      // Script generation: ~$0.01
+      cost += 0.01;
+      // Audio generation: ~$0.015 per 1000 chars, estimate 150 words = ~750 chars per segment
+      cost += (scriptLength * 0.75 * 0.015);
+      // Metadata: ~$0.015
+      cost += 0.015;
+      // Thumbnails: ~$0.14 each (2 variants)
+      cost += 0.28;
+      // Videos: ~$0.30 per 5s segment (estimate 5s per segment)
+      cost += (scriptLength * 0.30);
+      return cost;
+    };
+
     try {
       let productionId: string | null = null;
       let genScript: ScriptLine[] = [];
       let viralHook: string = '';
+      const costBreakdown: Record<string, number> = {};
 
       // Check if resuming from existing production
       if (resumeFromProduction) {
@@ -694,6 +729,30 @@ const App: React.FC = () => {
         setProductionProgress({ current: 2, total: TOTAL_STEPS, step: 'Using saved script...' });
       }
 
+      // Save checkpoint after script generation
+      if (productionId) {
+        await saveCheckpoint(productionId, {
+          step: 'script',
+          completed: ['viral_hook', 'script'],
+          data: { scriptLength: genScript.length }
+        });
+      }
+
+      // Calculate and save estimated cost
+      const estimatedCost = calculateEstimatedCost(genScript.length);
+      if (productionId) {
+        await saveProduction({
+          id: productionId,
+          estimated_cost: estimatedCost
+        } as any);
+      }
+      addLog(`💰 Estimated cost: $${estimatedCost.toFixed(3)}`);
+      setProductionProgress({ 
+        current: 2, 
+        total: TOTAL_STEPS, 
+        step: `Script ready (Est. cost: $${estimatedCost.toFixed(3)})` 
+      });
+
       // PROGRESSIVE ENHANCEMENT: Show preview immediately
       setPreviewScript(genScript);
       setState(AppState.PREVIEW);
@@ -743,10 +802,23 @@ const App: React.FC = () => {
       if (audioSegments.length === 0) {
         // Generate audio with cache support
         addLog("🎙️ Generating audio segments (checking cache first)...");
+        setProductionProgress({ 
+          current: 3, 
+          total: TOTAL_STEPS, 
+          step: `Generating audio: 0/${genScript.length} segments...` 
+        });
+        
+        let completedAudio = 0;
         const audioTask = generateSegmentedAudioWithCache(genScript, config, activeChannel?.id || '')
           .then(async (segs: BroadcastSegment[]) => {
             setSegments(segs);
             const cachedCount = segs.filter((s: BroadcastSegment) => (s as any).fromCache).length;
+            completedAudio = segs.length;
+            setProductionProgress({ 
+              current: 3, 
+              total: TOTAL_STEPS, 
+              step: `Audio complete: ${segs.length} segments (${cachedCount} cached)` 
+            });
             if (cachedCount > 0) {
               addLog(`✅ Audio produced: ${segs.length} segments (${cachedCount} from cache, ${segs.length - cachedCount} new).`);
             } else {
@@ -760,6 +832,20 @@ const App: React.FC = () => {
                 segs.map(async (seg: BroadcastSegment, idx: number) => {
                   // Only upload if not from cache (already in storage)
                   if ((seg as any).fromCache && (seg as any).audioUrl) {
+                    // Save to audio cache if not already cached
+                    if (seg.text && config.characters.hostA.voiceName && config.characters.hostB.voiceName) {
+                      const voiceName = seg.speaker === config.characters.hostA.name 
+                        ? config.characters.hostA.voiceName 
+                        : config.characters.hostB.voiceName;
+                      await saveCachedAudio(
+                        activeChannel.id,
+                        seg.text,
+                        voiceName,
+                        (seg as any).audioUrl,
+                        undefined,
+                        productionId
+                      );
+                    }
                     return {
                       speaker: seg.speaker,
                       text: seg.text,
@@ -767,7 +853,19 @@ const App: React.FC = () => {
                       videoUrl: seg.videoUrl
                     };
                   }
-                  const audioUrl = await uploadAudioToStorage(seg.audioBase64, productionId, idx);
+                  const voiceName = seg.speaker === config.characters.hostA.name 
+                    ? config.characters.hostA.voiceName 
+                    : config.characters.hostB.voiceName;
+                  const audioUrl = await uploadAudioToStorage(
+                    seg.audioBase64, 
+                    productionId, 
+                    idx,
+                    {
+                      text: seg.text,
+                      voiceName,
+                      channelId: activeChannel.id
+                    }
+                  );
                   return {
                     speaker: seg.speaker,
                     text: seg.text,
@@ -776,6 +874,15 @@ const App: React.FC = () => {
                   };
                 })
               );
+              
+              // Save checkpoint after audio generation
+              if (productionId) {
+                await saveCheckpoint(productionId, {
+                  step: 'audio',
+                  completed: segmentsWithUrls.map((_, idx) => `segment_${idx}`),
+                  data: { segmentCount: segmentsWithUrls.length }
+                });
+              }
               
               // Save segments metadata (without audioBase64) to production
               await saveProductionState(productionId, 3, 'in_progress', {
@@ -847,7 +954,17 @@ const App: React.FC = () => {
           audioUrl: (seg as any).audioUrl // Get the URL from when we uploaded
         }));
         
-        // Generate videos using InfiniteTalk Multi
+        // Generate videos using InfiniteTalk Multi (with batch processing and retry)
+        let completedVideos = 0;
+        const updateVideoProgress = (index: number, total: number) => {
+          completedVideos++;
+          setProductionProgress({ 
+            current: 3, 
+            total: TOTAL_STEPS, 
+            step: `Generating videos: ${completedVideos}/${total} complete...` 
+          });
+        };
+
         videoSegments = await generateVideoSegmentsWithInfiniteTalk(
           segmentsForVideo,
           config,
@@ -856,7 +973,35 @@ const App: React.FC = () => {
         );
         
         const generatedCount = videoSegments.filter(v => v !== null).length;
-        addLog(`✅ Generated ${generatedCount}/${audioSegments.length} lip-sync videos.`);
+        const failedCount = videoSegments.length - generatedCount;
+        addLog(`✅ Generated ${generatedCount}/${audioSegments.length} lip-sync videos${failedCount > 0 ? ` (${failedCount} failed - will continue)` : ''}.`);
+        
+        // Mark failed videos in failed_steps
+        if (productionId && failedCount > 0) {
+          const failedIndices = videoSegments
+            .map((url, idx) => url === null ? idx : -1)
+            .filter(idx => idx >= 0);
+          
+          for (const idx of failedIndices) {
+            await markStepFailed(productionId, `video_segment_${idx}`, 'Video generation failed after retries');
+          }
+        }
+
+        // Save checkpoint after video generation
+        if (productionId) {
+          await saveCheckpoint(productionId, {
+            step: 'videos',
+            completed: videoSegments
+              .map((url, idx) => url !== null ? `segment_${idx}` : null)
+              .filter(Boolean) as string[],
+            in_progress: [],
+            data: { 
+              total: videoSegments.length,
+              completed: generatedCount,
+              failed: failedCount
+            }
+          });
+        }
       }
 
       // Step 4: Merge segments
@@ -906,7 +1051,7 @@ const App: React.FC = () => {
         await saveProductionState(productionId, 4, 'in_progress', { videoAssets: backgroundVideos });
       }
 
-      // Step 5: Generate thumbnail variants (after metadata for title context)
+      // Step 5: Generate thumbnail variants (in parallel with video generation if possible)
       // Check if thumbnails already exist before generating
       let thumbnails = { primary: thumbnailDataUrl, variant: thumbnailVariant };
       
@@ -917,8 +1062,17 @@ const App: React.FC = () => {
       } else if (!thumbnails.primary) {
         setProductionProgress({ current: 5, total: TOTAL_STEPS, step: 'Creating thumbnails...' });
         addLog("🎨 Creating thumbnail variants...");
+        // Generate thumbnails (can be done in parallel with other operations)
         thumbnails = await generateThumbnailVariants(mainContext, config, metadata);
         addLog(`✅ Thumbnails ready (${thumbnails.variant ? '2 variants for A/B testing' : '1 thumbnail'})`);
+        
+        // Save checkpoint after thumbnails
+        if (productionId) {
+          await saveCheckpoint(productionId, {
+            step: 'thumbnails',
+            completed: ['primary', thumbnails.variant ? 'variant' : ''].filter(Boolean) as string[]
+          });
+        }
       } else {
         addLog("✅ Using existing thumbnails from state.");
       }
@@ -936,6 +1090,25 @@ const App: React.FC = () => {
           }
         }
       }
+
+      // Calculate actual cost from CostTracker
+      const costStats = CostTracker.getStats(1); // Last 1 day
+      const actualCost = costStats.totalCost;
+      const costBreakdown = costStats.breakdown.reduce((acc: Record<string, number>, item: any) => {
+        acc[item.task] = item.cost;
+        return acc;
+      }, {});
+
+      // Save actual cost to production
+      if (productionId) {
+        await saveProduction({
+          id: productionId,
+          actual_cost: actualCost,
+          cost_breakdown: costBreakdown
+        } as any);
+      }
+
+      addLog(`💰 Actual cost: $${actualCost.toFixed(3)}${estimatedCost ? ` (estimated: $${estimatedCost.toFixed(3)})` : ''}`);
 
       // Step 6: Complete!
       setProductionProgress({ current: 6, total: TOTAL_STEPS, step: 'Broadcast ready!' });
@@ -986,10 +1159,23 @@ const App: React.FC = () => {
         return;
       }
 
+      // Set current production ID so it's excluded from used news calculation
+      setCurrentProductionId(fullProduction.id);
+
       // Restore news selection (we need to fetch news items by IDs)
       const dateObj = parseSelectedDate(fullProduction.news_date);
       setSelectedDate(fullProduction.news_date);
       const allNewsItems = await getNewsByDate(dateObj, activeChannel.id);
+      
+      // Get used news IDs (excluding current production)
+      const usedIds = await getUsedNewsIdsForDate(dateObj, activeChannel.id, fullProduction.id);
+      setUsedNewsIds(new Set(usedIds));
+
+      // Restore checkpoint data if available
+      const checkpoint = await getLastCheckpoint(fullProduction.id);
+      if (checkpoint) {
+        console.log('📋 Restored checkpoint data:', Object.keys(checkpoint));
+      }
       
       // Match selected news by IDs (UUIDs) if available, otherwise fall back to headlines for backward compatibility
       const selected = allNewsItems.filter(n => {
@@ -1443,6 +1629,7 @@ const App: React.FC = () => {
                   news={allNews}
                   date={parseSelectedDate(selectedDate)}
                   onConfirmSelection={handleNewsSelection}
+                  usedNewsIds={usedNewsIds}
                 />
               </div>
 
@@ -1499,8 +1686,8 @@ const App: React.FC = () => {
                 {productionProgress.total > 0 && (
                   <div className="w-full max-w-md mb-4">
                     <div className="flex justify-between text-xs mb-2 text-gray-400">
-                      <span>{productionProgress.step}</span>
-                      <span>{productionProgress.current}/{productionProgress.total}</span>
+                      <span className="truncate">{productionProgress.step}</span>
+                      <span className="ml-2">{productionProgress.current}/{productionProgress.total}</span>
                     </div>
                     <div className="h-2 bg-gray-800 rounded-full overflow-hidden">
                       <div
@@ -1514,9 +1701,31 @@ const App: React.FC = () => {
                   </div>
                 )}
 
-                <div className="text-gray-400 font-mono text-sm max-w-lg mx-auto">
+                <div className="text-gray-400 font-mono text-sm max-w-lg mx-auto mb-4">
                   {logs[logs.length - 1] || "Initializing..."}
                 </div>
+
+                {/* Pause Button */}
+                {(state === AppState.GENERATING_MEDIA || state === AppState.GENERATING_SCRIPT) && currentProductionId && (
+                  <button
+                    onClick={async () => {
+                      if (currentProductionId) {
+                        // Save final checkpoint before pausing
+                        await saveCheckpoint(currentProductionId, {
+                          step: 'paused',
+                          completed: [],
+                          data: { pausedAt: new Date().toISOString() }
+                        });
+                        addLog("⏸️ Production paused. You can resume from the dashboard.");
+                        setState(AppState.IDLE);
+                        toast.success('Production paused. Resume from dashboard when ready.');
+                      }
+                    }}
+                    className="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 text-white rounded-lg font-bold text-sm transition-colors"
+                  >
+                    ⏸️ Pause
+                  </button>
+                )}
               </div>
             )}
           </div>

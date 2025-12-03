@@ -6,9 +6,10 @@ interface NewsSelectorProps {
   news: NewsItem[];
   onConfirmSelection: (selectedNews: NewsItem[]) => void;
   date: Date;
+  usedNewsIds?: Set<string>; // News IDs already used in other productions
 }
 
-export const NewsSelector: React.FC<NewsSelectorProps> = ({ news, onConfirmSelection, date }) => {
+export const NewsSelector: React.FC<NewsSelectorProps> = ({ news, onConfirmSelection, date, usedNewsIds = new Set() }) => {
   const [selectedIndices, setSelectedIndices] = useState<number[]>([]);
 
   // Reset selection when news changes
@@ -17,6 +18,12 @@ export const NewsSelector: React.FC<NewsSelectorProps> = ({ news, onConfirmSelec
   }, [news]);
 
   const toggleSelection = (index: number) => {
+    const item = news[index];
+    // Don't allow selection of already used news
+    if (item.id && usedNewsIds.has(item.id)) {
+      return;
+    }
+    
     if (selectedIndices.includes(index)) {
       setSelectedIndices(selectedIndices.filter(i => i !== index));
     } else {
@@ -51,6 +58,11 @@ export const NewsSelector: React.FC<NewsSelectorProps> = ({ news, onConfirmSelec
           <p className="text-gray-400 text-sm">
             Wire reports for <span className="text-white font-mono">{date.toLocaleDateString()}</span>.
             Select <span className="text-yellow-400 font-bold">2 to 5 stories</span> for the broadcast.
+            {usedNewsIds.size > 0 && (
+              <span className="block mt-1 text-xs text-red-400">
+                ⚠️ {usedNewsIds.size} story{usedNewsIds.size !== 1 ? 'ies' : ''} already used in other productions (shown in red)
+              </span>
+            )}
           </p>
         </div>
         <div className="text-right">
@@ -64,7 +76,8 @@ export const NewsSelector: React.FC<NewsSelectorProps> = ({ news, onConfirmSelec
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
         {news.map((item, idx) => {
           const isSelected = selectedIndices.includes(idx);
-          const isDisabled = !isSelected && selectedIndices.length >= 5;
+          const isUsed = item.id ? usedNewsIds.has(item.id) : false;
+          const isDisabled = isUsed || (!isSelected && selectedIndices.length >= 5);
 
           return (
             <div
@@ -74,6 +87,7 @@ export const NewsSelector: React.FC<NewsSelectorProps> = ({ news, onConfirmSelec
                 relative rounded-lg overflow-hidden border-2 cursor-pointer transition-all duration-200 group
                 ${isSelected ? 'border-yellow-500 bg-[#1f1f1f] transform scale-[1.02]' : 'border-[#333] bg-[#1a1a1a] hover:border-gray-500'}
                 ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}
+                ${isUsed ? 'border-red-500/50 bg-[#1a0a0a]' : ''}
               `}
             >
               {/* News Image - use real URL if available, fallback to gradient */}
@@ -105,7 +119,11 @@ export const NewsSelector: React.FC<NewsSelectorProps> = ({ news, onConfirmSelec
                 <p className="text-xs text-gray-400 line-clamp-3 mb-3">{item.summary}</p>
 
                 <div className="flex items-center justify-between mt-auto">
-                  {isSelected ? (
+                  {isUsed ? (
+                    <div className="bg-red-500/20 text-red-400 text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1 border border-red-500/50">
+                      ⚠️ ALREADY USED
+                    </div>
+                  ) : isSelected ? (
                     <div className="bg-yellow-500 text-black text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1">
                       ✓ SELECTED
                     </div>

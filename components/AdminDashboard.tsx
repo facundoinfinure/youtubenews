@@ -137,6 +137,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [storageUsage, setStorageUsage] = useState<{
+    totalFiles: number;
+    totalSize: number;
+    files: Array<{ name: string; size: number }>;
+  } | null>(null);
+  const [isLoadingStorage, setIsLoadingStorage] = useState(false);
+  const [cleanupResult, setCleanupResult] = useState<{
+    deleted: number;
+    freedSpace: number;
+    errors: string[];
+  } | null>(null);
+  const [prodCosts, setProdCosts] = useState<{
+    total: number;
+    avg: number;
+    count: number;
+  } | null>(null);
 
   // Sync tempConfig when config changes (e.g., when switching channels)
   useEffect(() => {
@@ -180,6 +196,38 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
       }
     }
   }, [activeTab, activeChannel, user, productionFilter]);
+
+  // Load storage usage when cache tab is active
+  useEffect(() => {
+    if (activeTab === 'cache') {
+      const loadStorageUsage = async () => {
+        setIsLoadingStorage(true);
+        try {
+          const { getStorageUsage } = await import('../services/storageManager');
+          const usage = await getStorageUsage('channel-assets');
+          setStorageUsage(usage);
+        } catch (e) {
+          console.error('Error loading storage usage:', e);
+          setStorageUsage(null);
+        } finally {
+          setIsLoadingStorage(false);
+        }
+      };
+      loadStorageUsage();
+    }
+  }, [activeTab]);
+
+  // Load production costs when costs tab is active
+  useEffect(() => {
+    if (activeTab === 'costs' && activeChannel && user) {
+      getAllProductions(activeChannel.id, user.email, 100).then(allProds => {
+        const completedProds = allProds.filter(p => p.status === 'completed' && p.actual_cost);
+        const total = completedProds.reduce((sum, p) => sum + (p.actual_cost || 0), 0);
+        const avg = completedProds.length > 0 ? total / completedProds.length : 0;
+        setProdCosts({ total, avg, count: completedProds.length });
+      });
+    }
+  }, [activeTab, activeChannel, user]);
 
   const handleSave = async () => {
     if (!activeChannel) return;
@@ -366,6 +414,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
               }`}
           >
             Productions {productions.length > 0 && `(${productions.length})`}
+          </button>
+          <button
+            onClick={() => setActiveTab('costs')}
+            className={`pb-3 px-2 border-b-2 font-semibold text-sm transition-all duration-200 ${activeTab === 'costs'
+              ? 'border-blue-500 text-white'
+              : 'border-transparent text-gray-500 hover:text-gray-300'
+              }`}
+          >
+            Costs & Analytics
+          </button>
+          <button
+            onClick={() => setActiveTab('cache')}
+            className={`pb-3 px-2 border-b-2 font-semibold text-sm transition-all duration-200 ${activeTab === 'cache'
+              ? 'border-blue-500 text-white'
+              : 'border-transparent text-gray-500 hover:text-gray-300'
+              }`}
+          >
+            Cache & Storage
           </button>
         </div>
 
@@ -1141,6 +1207,177 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
           </div>
         </div>
       )}
+
+        {/* COSTS & ANALYTICS TAB */}
+        {activeTab === 'costs' && (
+          <div className="space-y-6">
+            <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
+              <h2 className="text-xl font-bold mb-4">Cost Analytics</h2>
+              {(() => {
+                const costStats = CostTracker.getStats(30);
+                const cacheStats = ContentCache.getStats();
+                return (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="bg-black/30 p-4 rounded-lg">
+                      <div className="text-xs text-gray-400 uppercase mb-1">Total Cost (30d)</div>
+                      <div className="text-2xl font-bold text-white">${costStats.totalCost.toFixed(3)}</div>
+                      <div className="text-xs text-gray-500 mt-1">${(costStats.totalCost / 30).toFixed(3)}/day avg</div>
+                    </div>
+                    <div className="bg-black/30 p-4 rounded-lg">
+                      <div className="text-xs text-gray-400 uppercase mb-1">Cache Savings</div>
+                      <div className="text-2xl font-bold text-green-400">${costStats.estimatedSavings.toFixed(2)}</div>
+                      <div className="text-xs text-gray-500 mt-1">{costStats.cacheHitRate.toFixed(1)}% hit rate</div>
+                    </div>
+                    <div className="bg-black/30 p-4 rounded-lg">
+                      <div className="text-xs text-gray-400 uppercase mb-1">Cache Entries</div>
+                      <div className="text-2xl font-bold text-blue-400">{cacheStats.entries}</div>
+                      <div className="text-xs text-gray-500 mt-1">${cacheStats.totalCostSaved.toFixed(2)} saved</div>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
+              <h3 className="text-lg font-bold mb-4">Cost Breakdown by Task</h3>
+              {(() => {
+                const costStats = CostTracker.getStats(30);
+                return (
+                  <div className="space-y-2">
+                    {costStats.breakdown.map((item: any) => (
+                      <div key={item.task} className="flex justify-between items-center p-3 bg-black/30 rounded">
+                        <div>
+                          <div className="font-semibold text-white">{item.task}</div>
+                          <div className="text-xs text-gray-400">{item.count} calls ({item.cached} cached)</div>
+                        </div>
+                        <div className="text-lg font-bold text-yellow-400">${item.cost.toFixed(3)}</div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Production Costs */}
+            {prodCosts && (
+              <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
+                <h3 className="text-lg font-bold mb-4">Production Costs</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-black/30 p-4 rounded-lg">
+                    <div className="text-xs text-gray-400 uppercase mb-1">Total Production Cost</div>
+                    <div className="text-2xl font-bold text-white">${prodCosts.total.toFixed(3)}</div>
+                    <div className="text-xs text-gray-500 mt-1">{prodCosts.count} completed productions</div>
+                  </div>
+                  <div className="bg-black/30 p-4 rounded-lg">
+                    <div className="text-xs text-gray-400 uppercase mb-1">Avg per Production</div>
+                    <div className="text-2xl font-bold text-blue-400">${prodCosts.avg.toFixed(3)}</div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* CACHE & STORAGE TAB */}
+        {activeTab === 'cache' && (
+          <div className="space-y-6">
+            <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
+              <h2 className="text-xl font-bold mb-4">Cache Statistics</h2>
+              {(() => {
+                const cacheStats = ContentCache.getStats();
+                const costStats = CostTracker.getStats(30);
+                return (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="bg-black/30 p-4 rounded-lg">
+                      <div className="text-xs text-gray-400 uppercase mb-1">Cache Entries</div>
+                      <div className="text-2xl font-bold text-white">{cacheStats.entries}</div>
+                      <div className="text-xs text-gray-500 mt-1">Active cache items</div>
+                    </div>
+                    <div className="bg-black/30 p-4 rounded-lg">
+                      <div className="text-xs text-gray-400 uppercase mb-1">Total Savings</div>
+                      <div className="text-2xl font-bold text-green-400">${cacheStats.totalCostSaved.toFixed(2)}</div>
+                      <div className="text-xs text-gray-500 mt-1">From cache hits</div>
+                    </div>
+                    <div className="bg-black/30 p-4 rounded-lg">
+                      <div className="text-xs text-gray-400 uppercase mb-1">Cache Hit Rate</div>
+                      <div className="text-2xl font-bold text-blue-400">{costStats.cacheHitRate.toFixed(1)}%</div>
+                      <div className="text-xs text-gray-500 mt-1">{costStats.cachedCount} of {costStats.totalCount} calls</div>
+                    </div>
+                    <div className="bg-black/30 p-4 rounded-lg">
+                      <div className="text-xs text-gray-400 uppercase mb-1">Estimated Savings</div>
+                      <div className="text-2xl font-bold text-yellow-400">${costStats.estimatedSavings.toFixed(2)}</div>
+                      <div className="text-xs text-gray-500 mt-1">Last 30 days</div>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
+              <h3 className="text-lg font-bold mb-4">Storage Management</h3>
+              <div className="space-y-4">
+                {isLoadingStorage ? (
+                  <div className="text-center py-8 text-gray-400">Loading storage info...</div>
+                ) : storageUsage ? (
+                  <>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="bg-black/30 p-4 rounded-lg">
+                        <div className="text-xs text-gray-400 uppercase mb-1">Total Files</div>
+                        <div className="text-2xl font-bold text-white">{storageUsage.totalFiles}</div>
+                      </div>
+                      <div className="bg-black/30 p-4 rounded-lg">
+                        <div className="text-xs text-gray-400 uppercase mb-1">Total Size</div>
+                        <div className="text-2xl font-bold text-blue-400">
+                          {(storageUsage.totalSize / 1024 / 1024).toFixed(2)} MB
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        if (!confirm('Are you sure you want to clean up files older than 30 days? This cannot be undone.')) {
+                          return;
+                        }
+                        setIsLoadingStorage(true);
+                        try {
+                          const { cleanupOldFiles, getStorageUsage } = await import('../services/storageManager');
+                          const result = await cleanupOldFiles('channel-assets', 30, false);
+                          setCleanupResult(result);
+                          toast.success(`Cleaned up ${result.deleted} files, freed ${(result.freedSpace / 1024 / 1024).toFixed(2)} MB`);
+                          const usage = await getStorageUsage('channel-assets');
+                          setStorageUsage(usage);
+                        } catch (e) {
+                          toast.error(`Cleanup failed: ${(e as Error).message}`);
+                        } finally {
+                          setIsLoadingStorage(false);
+                        }
+                      }}
+                      className="w-full bg-red-600 hover:bg-red-500 px-4 py-2 rounded-lg font-bold transition-colors"
+                    >
+                      🗑️ Cleanup Old Files (>30 days)
+                    </button>
+                    {cleanupResult && (
+                      <div className="bg-green-900/30 border border-green-500/50 p-3 rounded text-sm">
+                        <div className="font-bold text-green-400">Cleanup Complete</div>
+                        <div className="text-gray-300">
+                          Deleted: {cleanupResult.deleted} files<br />
+                          Freed: {(cleanupResult.freedSpace / 1024 / 1024).toFixed(2)} MB
+                          {cleanupResult.errors.length > 0 && (
+                            <div className="text-red-400 mt-2">
+                              Errors: {cleanupResult.errors.length}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="text-center py-8 text-gray-400">Storage info unavailable</div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 };

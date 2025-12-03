@@ -459,6 +459,148 @@ export const generateImageWithDALLE = async (
   }
 };
 
+// =============================================================================================
+// VIRAL SCORE ANALYSIS (GPT-4o)
+// =============================================================================================
+
+/**
+ * Calculate viral score for a news item using GPT-4o analysis
+ * Analyzes multiple factors: emotional impact, controversy, relevance, click-worthiness, etc.
+ */
+export const calculateViralScoreWithGPT = async (
+  headline: string,
+  summary: string,
+  source: string,
+  date?: string
+): Promise<number> => {
+  const prompt = `You are an expert at predicting viral content performance on social media and YouTube.
+
+Analyze this news story and calculate a viral score from 0-100:
+
+HEADLINE: "${headline}"
+SUMMARY: "${summary}"
+SOURCE: "${source}"
+${date ? `DATE: ${date}` : ''}
+
+Evaluate these factors (0-100 scale):
+1. **Emotional Impact** (shock, anger, joy, fear) - How strong is the emotional reaction?
+2. **Controversy/Polarization** - Will this divide opinions and generate debate?
+3. **Relevance/Timeliness** - How current and relevant is this to today's audience?
+4. **Click-worthiness** - How compelling is the headline? Does it create curiosity?
+5. **Shareability** - Would people want to share this? Does it make them look informed/entertaining?
+6. **Uniqueness** - Is this breaking news or a fresh angle on a story?
+7. **Source Credibility** - Major trusted sources (CNN, BBC, NYT, Reuters) get bonus points
+
+Return ONLY a JSON object with this exact format:
+{
+  "viral_score": <number 0-100>,
+  "reasoning": "<brief explanation>",
+  "factors": {
+    "emotional_impact": <0-100>,
+    "controversy": <0-100>,
+    "relevance": <0-100>,
+    "click_worthiness": <0-100>,
+    "shareability": <0-100>,
+    "uniqueness": <0-100>,
+    "source_credibility": <0-100>
+  }
+}
+
+Be strict: Average news = 40-60, Breaking/controversial = 70-85, Highly viral = 85-100.`;
+
+  try {
+    const response = await openaiRequest('chat/completions', {
+      model: 'gpt-4o',
+      messages: [{ role: 'user', content: prompt }],
+      response_format: { type: 'json_object' },
+      temperature: 0.3 // Lower temperature for more consistent scoring
+    }, { timeout: 15000 }); // Shorter timeout for faster processing
+
+    CostTracker.track('viralScore', 'gpt-4o', 0.002); // ~$0.002 per analysis
+
+    const content = response.choices[0]?.message?.content || '{}';
+    const analysis = JSON.parse(content);
+    
+    const score = Math.round(analysis.viral_score || 50);
+    console.log(`[Viral Score] 📊 "${headline.substring(0, 50)}..." = ${score} (${analysis.reasoning?.substring(0, 50) || 'analyzed'})`);
+    
+    // Ensure score is between 0-100
+    return Math.max(0, Math.min(100, score));
+  } catch (error: any) {
+    console.error(`[Viral Score] ❌ GPT analysis failed:`, error.message);
+    // Fallback to basic calculation
+    return calculateBasicViralScore(headline, summary, source, date);
+  }
+};
+
+/**
+ * Batch calculate viral scores for multiple news items
+ * Uses parallel processing for efficiency
+ */
+export const calculateViralScoresBatch = async (
+  newsItems: Array<{ headline: string; summary: string; source: string; date?: string }>
+): Promise<number[]> => {
+  console.log(`[Viral Score] 🔥 Analyzing ${newsItems.length} news items with GPT-4o...`);
+  
+  // Process in parallel (up to 10 at a time to avoid rate limits)
+  const batchSize = 10;
+  const scores: number[] = [];
+  
+  for (let i = 0; i < newsItems.length; i += batchSize) {
+    const batch = newsItems.slice(i, i + batchSize);
+    const batchScores = await Promise.all(
+      batch.map(item => calculateViralScoreWithGPT(item.headline, item.summary, item.source, item.date))
+    );
+    scores.push(...batchScores);
+    
+    // Small delay between batches to avoid rate limits
+    if (i + batchSize < newsItems.length) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+  }
+  
+  console.log(`[Viral Score] ✅ Analyzed ${scores.length} items. Range: ${Math.min(...scores)}-${Math.max(...scores)}`);
+  return scores;
+};
+
+/**
+ * Fallback basic viral score calculation (used if GPT fails)
+ */
+const calculateBasicViralScore = (
+  headline: string,
+  summary: string,
+  source: string,
+  date?: string
+): number => {
+  let score = 50; // Base score
+  
+  const text = `${headline} ${summary}`.toLowerCase();
+  
+  // Viral keywords
+  const viralKeywords = ['breaking', 'urgent', 'shocking', 'exclusive', 'just in', 'update', 'revealed', 'exposed'];
+  viralKeywords.forEach(keyword => {
+    if (text.includes(keyword)) score += 10;
+  });
+  
+  // Major sources
+  const majorSources = ['reuters', 'bloomberg', 'cnn', 'bbc', 'nytimes', 'wsj', 'ap news', 'associated press'];
+  if (majorSources.some(s => source.toLowerCase().includes(s))) score += 15;
+  
+  // Recency
+  if (date) {
+    try {
+      const newsDate = new Date(date);
+      const hoursAgo = (Date.now() - newsDate.getTime()) / (1000 * 60 * 60);
+      if (hoursAgo < 6) score += 20;
+      else if (hoursAgo < 12) score += 10;
+    } catch {
+      // Invalid date, skip
+    }
+  }
+  
+  return Math.min(score, 100);
+};
+
 /**
  * Check if OpenAI proxy is configured
  */
