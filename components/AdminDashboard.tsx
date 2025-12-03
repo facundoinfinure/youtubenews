@@ -1105,108 +1105,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
             </div>
           </div>
         )}
-      </div>
-
-      {/* New Channel Modal */}
-      {showNewChannelModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 overflow-y-auto p-4">
-          <div className="bg-[#1a1a1a] border border-[#333] rounded-xl p-6 max-w-2xl w-full mx-4 my-8">
-            <h3 className="text-xl font-bold mb-4">Create New Channel</h3>
-            <div className="space-y-4">
-              <div>
-                <label className="text-sm text-gray-400 block mb-1">Channel Name</label>
-                <input
-                  type="text"
-                  value={newChannelName}
-                  onChange={(e) => setNewChannelName(e.target.value)}
-                  className="w-full bg-[#111] border border-[#333] p-2 rounded text-white focus:outline-none focus:border-blue-500"
-                  placeholder="Enter channel name..."
-                  autoFocus
-                />
-              </div>
-
-              {/* Reference Image Section in Modal */}
-              <div className="border-t border-[#333] pt-4">
-                <h4 className="text-sm font-bold mb-2 text-purple-400">🖼️ Imagen de Referencia (Opcional)</h4>
-                <p className="text-xs text-gray-500 mb-3">
-                  Crea o carga una imagen del escenario con los personajes para mantener coherencia visual.
-                </p>
-
-                {/* Current Image Preview */}
-                {tempConfig.referenceImageUrl && (
-                  <div className="mb-3">
-                    <img 
-                      src={tempConfig.referenceImageUrl} 
-                      alt="Reference scene" 
-                      className="max-w-full h-auto rounded-lg border border-[#333] max-h-48"
-                    />
-                  </div>
-                )}
-
-                <div className="space-y-3">
-                  <div>
-                    <label className="text-xs text-gray-400 block mb-1">
-                      Descripción del Escenario (opcional):
-                    </label>
-                    <textarea
-                      value={sceneDescription}
-                      onChange={(e) => setSceneDescription(e.target.value)}
-                      placeholder="Ej: Estudio moderno con paredes de madera, iluminación profesional..."
-                      className="w-full bg-[#111] border border-[#333] p-2 rounded text-white text-sm h-20"
-                    />
-                  </div>
-
-                  <div className="flex gap-2">
-                    <button
-                      onClick={handleGenerateReferenceImage}
-                      disabled={isGeneratingImage || isUploadingImage}
-                      className="flex-1 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed px-3 py-2 rounded text-sm font-bold transition-all"
-                    >
-                      {isGeneratingImage ? 'Generando...' : '🎨 Generar con IA'}
-                    </button>
-                    
-                    <button
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={isGeneratingImage || isUploadingImage}
-                      className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed px-3 py-2 rounded text-sm font-bold transition-all"
-                    >
-                      {isUploadingImage ? 'Subiendo...' : '📤 Cargar'}
-                    </button>
-                    
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept="image/*"
-                      onChange={handleUploadReferenceImage}
-                      className="hidden"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex gap-3 justify-end pt-4 border-t border-[#333]">
-                <button
-                  onClick={() => {
-                    setShowNewChannelModal(false);
-                    setNewChannelName('');
-                    setSceneDescription('');
-                  }}
-                  className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleNewChannel}
-                  disabled={!newChannelName.trim()}
-                  className="px-4 py-2 bg-green-600 hover:bg-green-500 rounded text-sm font-bold disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Create Channel
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
         {/* COSTS & ANALYTICS TAB */}
         {activeTab === 'costs' && (
@@ -1353,7 +1251,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                       }}
                       className="w-full bg-red-600 hover:bg-red-500 px-4 py-2 rounded-lg font-bold transition-colors"
                     >
-                      🗑️ Cleanup Old Files (&gt;30 days)
+                      🗑️ Cleanup Old Files ({'>'}30 days)
                     </button>
                     {cleanupResult && (
                       <div className="bg-green-900/30 border border-green-500/50 p-3 rounded text-sm">
@@ -1378,6 +1276,107 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
           </div>
         )}
       </div>
+
+      {/* New Channel Modal */}
+      {showNewChannelModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 overflow-y-auto p-4">
+          <div className="bg-[#1a1a1a] border border-[#333] rounded-xl p-6 max-w-2xl w-full mx-4 my-8">
+            <h3 className="text-xl font-bold mb-4">Create New Channel</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm text-gray-400 block mb-1">Channel Name</label>
+                <input
+                  type="text"
+                  value={newChannelName}
+                  onChange={(e) => setNewChannelName(e.target.value)}
+                  className="w-full bg-[#111] border border-[#333] p-2 rounded text-white focus:outline-none focus:border-blue-500"
+                  placeholder="Enter channel name..."
+                  autoFocus
+                />
+              </div>
+
+              {/* Reference Image Section in Modal */}
+              <div className="border-t border-[#333] pt-4">
+                <h4 className="text-sm font-bold mb-2 text-purple-400">🖼️ Imagen de Referencia (Opcional)</h4>
+                <p className="text-xs text-gray-500 mb-3">
+                  Crea o carga una imagen del escenario con los personajes para mantener coherencia visual.
+                </p>
+
+                {/* Current Image Preview */}
+                {tempConfig.referenceImageUrl && (
+                  <div className="mb-3">
+                    <img 
+                      src={tempConfig.referenceImageUrl} 
+                      alt="Reference scene" 
+                      className="max-w-full h-auto rounded-lg border border-[#333] max-h-48"
+                    />
+                  </div>
+                )}
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1">
+                      Descripción del Escenario (opcional):
+                    </label>
+                    <textarea
+                      value={sceneDescription}
+                      onChange={(e) => setSceneDescription(e.target.value)}
+                      placeholder="Ej: Estudio moderno con paredes de madera, iluminación profesional..."
+                      className="w-full bg-[#111] border border-[#333] p-2 rounded text-white text-sm h-20"
+                    />
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleGenerateReferenceImage}
+                      disabled={isGeneratingImage || isUploadingImage}
+                      className="flex-1 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed px-3 py-2 rounded text-sm font-bold transition-all"
+                    >
+                      {isGeneratingImage ? 'Generando...' : '🎨 Generar con IA'}
+                    </button>
+                    
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={isGeneratingImage || isUploadingImage}
+                      className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed px-3 py-2 rounded text-sm font-bold transition-all"
+                    >
+                      {isUploadingImage ? 'Subiendo...' : '📤 Cargar'}
+                    </button>
+                    
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleUploadReferenceImage}
+                      className="hidden"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-3 justify-end pt-4 border-t border-[#333]">
+                <button
+                  onClick={() => {
+                    setShowNewChannelModal(false);
+                    setNewChannelName('');
+                    setSceneDescription('');
+                  }}
+                  className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleNewChannel}
+                  disabled={!newChannelName.trim()}
+                  className="px-4 py-2 bg-green-600 hover:bg-green-500 rounded text-sm font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Create Channel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
