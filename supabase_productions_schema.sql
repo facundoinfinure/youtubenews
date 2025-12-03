@@ -17,7 +17,9 @@ create table if not exists productions (
   video_assets jsonb, -- VideoAssets with URLs
   thumbnail_urls jsonb, -- Array of thumbnail URLs
   progress_step integer default 0,
-  user_id text -- Store user email for filtering
+  user_id text, -- Store user email for filtering
+  version integer default 1, -- Version number (1, 2, 3...)
+  parent_production_id uuid references productions(id) on delete set null -- Link to parent production for versioning
 );
 
 -- Create indexes for faster lookups
@@ -26,6 +28,7 @@ create index if not exists idx_productions_status on productions(status);
 create index if not exists idx_productions_news_date on productions(news_date);
 create index if not exists idx_productions_user on productions(user_id);
 create index if not exists idx_productions_updated on productions(updated_at desc);
+create index if not exists idx_productions_parent on productions(parent_production_id);
 
 -- Enable RLS for productions
 alter table productions enable row level security;

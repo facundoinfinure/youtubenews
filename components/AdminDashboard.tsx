@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { ChannelConfig, CharacterProfile, StoredVideo, Channel, UserProfile, Production } from '../types';
-import { fetchVideosFromDB, saveConfigToDB, getAllChannels, saveChannel, uploadImageToStorage, getIncompleteProductions, getAllProductions } from '../services/supabaseService';
+import { fetchVideosFromDB, saveConfigToDB, getAllChannels, saveChannel, uploadImageToStorage, getIncompleteProductions, getAllProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction } from '../services/supabaseService';
 import { generateReferenceImage } from '../services/geminiService';
 import { CostTracker } from '../services/CostTracker';
 import { ContentCache } from '../services/ContentCache';
@@ -120,6 +120,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
   const [isLoadingVideos, setIsLoadingVideos] = useState(false);
   const [productions, setProductions] = useState<Production[]>([]);
   const [isLoadingProductions, setIsLoadingProductions] = useState(false);
+  const [expandedProductions, setExpandedProductions] = useState<Set<string>>(new Set());
+  const [selectedProductionForVersions, setSelectedProductionForVersions] = useState<string | null>(null);
+  const [productionVersions, setProductionVersions] = useState<Production[]>([]);
   const [productionFilter, setProductionFilter] = useState<'all' | 'incomplete' | 'completed' | 'failed'>('incomplete');
   const [showNewChannelModal, setShowNewChannelModal] = useState(false);
   const [newChannelName, setNewChannelName] = useState('');
@@ -705,6 +708,45 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                 </h3>
                 <div className="flex gap-2">
                   <button
+                    onClick={() => {
+                      const input = document.createElement('input');
+                      input.type = 'file';
+                      input.accept = '.json';
+                      input.onchange = async (e) => {
+                        const file = (e.target as HTMLInputElement).files?.[0];
+                        if (!file || !activeChannel || !user) return;
+                        
+                        try {
+                          const text = await file.text();
+                          const imported = await importProduction(text, activeChannel.id, user.email);
+                          if (imported) {
+                            toast.success('Production imported successfully!');
+                            // Refresh productions list
+                            if (productionFilter === 'all') {
+                              const allProds = await getAllProductions(activeChannel.id, user.email, 100);
+                              setProductions(allProds);
+                            } else if (productionFilter === 'incomplete') {
+                              const incomplete = await getIncompleteProductions(activeChannel.id, user.email);
+                              setProductions(incomplete);
+                            } else {
+                              const allProds = await getAllProductions(activeChannel.id, user.email, 100);
+                              setProductions(allProds.filter(p => p.status === productionFilter));
+                            }
+                          } else {
+                            toast.error('Failed to import production');
+                          }
+                        } catch (error) {
+                          console.error('Import error:', error);
+                          toast.error('Failed to import production: Invalid file format');
+                        }
+                      };
+                      input.click();
+                    }}
+                    className="bg-green-600 text-white border border-green-500 hover:bg-green-700 px-3 py-1.5 rounded-lg text-sm font-bold transition-all duration-200 hover:scale-105 active:scale-95"
+                  >
+                    📤 Import Production
+                  </button>
+                  <button
                     onClick={() => setProductionFilter('all')}
                     className={`px-3 py-1 rounded text-sm font-semibold transition-all ${
                       productionFilter === 'all'
@@ -795,6 +837,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                                 : production.status === 'failed' ? '❌ Failed'
                                 : '📝 Draft'}
                             </span>
+                            {production.version && production.version > 1 && (
+                              <span className="px-2 py-1 rounded text-xs font-bold bg-purple-500/20 text-purple-400 border border-purple-500/30">
+                                v{production.version}
+                              </span>
+                            )}
                             <span className="text-gray-500 text-xs">
                               {new Date(production.news_date).toLocaleDateString()}
                             </span>
@@ -818,18 +865,78 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                             </div>
                           )}
                         </div>
-                        <div className="flex gap-2">
+                        <div className="flex gap-2 flex-wrap">
                           {onResumeProduction && (production.status === 'in_progress' || production.status === 'draft') && (
                             <button
                               onClick={() => {
                                 onResumeProduction(production);
                                 onExit(); // Exit dashboard to show production
                               }}
-                              className="bg-blue-600 text-white border border-blue-500 hover:bg-blue-700 px-4 py-2 rounded-lg text-sm font-bold transition-all duration-200 hover:scale-105 active:scale-95"
+                              className="bg-blue-600 text-white border border-blue-500 hover:bg-blue-700 px-3 py-1.5 rounded-lg text-xs font-bold transition-all duration-200 hover:scale-105 active:scale-95"
                             >
                               ▶️ Resume
                             </button>
                           )}
+                          <button
+                            onClick={async () => {
+                              try {
+                                const jsonData = await exportProduction(production.id);
+                                if (jsonData) {
+                                  const blob = new Blob([jsonData], { type: 'application/json' });
+                                  const url = URL.createObjectURL(blob);
+                                  const a = document.createElement('a');
+                                  a.href = url;
+                                  a.download = `production-${production.id}-${production.news_date}.json`;
+                                  document.body.appendChild(a);
+                                  a.click();
+                                  document.body.removeChild(a);
+                                  URL.revokeObjectURL(url);
+                                  toast.success('Production exported!');
+                                } else {
+                                  toast.error('Failed to export production');
+                                }
+                              } catch (error) {
+                                console.error('Export error:', error);
+                                toast.error('Failed to export production');
+                              }
+                            }}
+                            className="bg-purple-600 text-white border border-purple-500 hover:bg-purple-700 px-3 py-1.5 rounded-lg text-xs font-bold transition-all duration-200 hover:scale-105 active:scale-95"
+                            title="Export production to JSON"
+                          >
+                            📥 Export
+                          </button>
+                          <button
+                            onClick={async () => {
+                              try {
+                                const newVersion = await createProductionVersion(production.id, user?.email);
+                                if (newVersion) {
+                                  toast.success(`New version (v${newVersion.version}) created!`);
+                                  // Refresh productions list
+                                  if (activeChannel && user) {
+                                    if (productionFilter === 'all') {
+                                      const allProds = await getAllProductions(activeChannel.id, user.email, 100);
+                                      setProductions(allProds);
+                                    } else if (productionFilter === 'incomplete') {
+                                      const incomplete = await getIncompleteProductions(activeChannel.id, user.email);
+                                      setProductions(incomplete);
+                                    } else {
+                                      const allProds = await getAllProductions(activeChannel.id, user.email, 100);
+                                      setProductions(allProds.filter(p => p.status === productionFilter));
+                                    }
+                                  }
+                                } else {
+                                  toast.error('Failed to create version');
+                                }
+                              } catch (error) {
+                                console.error('Version creation error:', error);
+                                toast.error('Failed to create version');
+                              }
+                            }}
+                            className="bg-orange-600 text-white border border-orange-500 hover:bg-orange-700 px-3 py-1.5 rounded-lg text-xs font-bold transition-all duration-200 hover:scale-105 active:scale-95"
+                            title="Create a new version of this production"
+                          >
+                            🔄 New Version
+                          </button>
                           {production.status === 'completed' && (
                             <span className="text-green-400 text-xs flex items-center gap-1">
                               ✓ Completed

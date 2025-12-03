@@ -138,6 +138,8 @@ export interface Production {
   thumbnail_urls?: string[];
   progress_step: number;
   user_id?: string;
+  version?: number; // Version number (1, 2, 3...)
+  parent_production_id?: string; // Link to parent production for versioning
 }
 
 // Window augmentation for AI Studio key selection & Google Identity & Runtime Env

@@ -450,7 +450,9 @@ export const saveProduction = async (
     video_assets: production.video_assets || null,
     thumbnail_urls: production.thumbnail_urls || null,
     progress_step: production.progress_step || 0,
-    user_id: userId || null
+    user_id: userId || null,
+    version: production.version || 1,
+    parent_production_id: production.parent_production_id || null
   };
 
   if (production.id) {
@@ -692,6 +694,206 @@ export const findCachedScript = async (
     return null;
   } catch (error) {
     console.error("Error in findCachedScript:", error);
+    return null;
+  }
+};
+
+// Versioning functions
+export const createProductionVersion = async (
+  parentProductionId: string,
+  userId?: string
+): Promise<Production | null> => {
+  if (!supabase) return null;
+
+  try {
+    // Get parent production
+    const parent = await getProductionById(parentProductionId);
+    if (!parent) {
+      console.error("Parent production not found");
+      return null;
+    }
+
+    // Get the next version number
+    const { data: versions, error: versionError } = await supabase
+      .from('productions')
+      .select('version')
+      .or(`id.eq.${parentProductionId},parent_production_id.eq.${parentProductionId}`)
+      .order('version', { ascending: false })
+      .limit(1);
+
+    if (versionError) {
+      console.error("Error fetching versions:", versionError);
+      return null;
+    }
+
+    const nextVersion = versions && versions.length > 0
+      ? (Math.max(...versions.map(v => v.version || 1)) + 1)
+      : (parent.version || 1) + 1;
+
+    // Create new version based on parent
+    const newProduction: Partial<Production> = {
+      channel_id: parent.channel_id,
+      news_date: parent.news_date,
+      status: 'draft',
+      selected_news_ids: parent.selected_news_ids || [],
+      script: parent.script || null,
+      viral_hook: parent.viral_hook || null,
+      viral_metadata: parent.viral_metadata || null,
+      segments: null, // Start fresh for new version
+      video_assets: null,
+      thumbnail_urls: null,
+      progress_step: 0,
+      version: nextVersion,
+      parent_production_id: parentProductionId
+    };
+
+    return await saveProduction(newProduction, userId);
+  } catch (error) {
+    console.error("Error creating production version:", error);
+    return null;
+  }
+};
+
+export const getProductionVersions = async (
+  parentProductionId: string
+): Promise<Production[]> => {
+  if (!supabase) return [];
+
+  try {
+    const { data, error } = await supabase
+      .from('productions')
+      .select('*')
+      .or(`id.eq.${parentProductionId},parent_production_id.eq.${parentProductionId}`)
+      .order('version', { ascending: true });
+
+    if (error) {
+      console.error("Error fetching production versions:", error);
+      return [];
+    }
+
+    return (data || []) as Production[];
+  } catch (error) {
+    console.error("Error in getProductionVersions:", error);
+    return [];
+  }
+};
+
+// Export/Import functions
+export const exportProduction = async (productionId: string): Promise<string | null> => {
+  if (!supabase) return null;
+
+  try {
+    const production = await getProductionById(productionId);
+    if (!production) {
+      console.error("Production not found for export");
+      return null;
+    }
+
+    // Load audio from storage if segments exist
+    let segmentsWithAudio: BroadcastSegment[] = [];
+    if (production.segments && production.segments.length > 0 && production.id) {
+      segmentsWithAudio = await Promise.all(
+        production.segments.map(async (seg: any) => {
+          if (seg.audioUrl) {
+            const audioBase64 = await getAudioFromStorage(seg.audioUrl);
+            return {
+              speaker: seg.speaker,
+              text: seg.text,
+              audioBase64: audioBase64 || '',
+              videoUrl: seg.videoUrl
+            };
+          }
+          return {
+            speaker: seg.speaker,
+            text: seg.text,
+            audioBase64: '',
+            videoUrl: seg.videoUrl
+          };
+        })
+      );
+    }
+
+    // Create export object
+    const exportData = {
+      ...production,
+      segments: segmentsWithAudio.length > 0 ? segmentsWithAudio : production.segments,
+      exportedAt: new Date().toISOString(),
+      version: '1.0' // Export format version
+    };
+
+    return JSON.stringify(exportData, null, 2);
+  } catch (error) {
+    console.error("Error exporting production:", error);
+    return null;
+  }
+};
+
+export const importProduction = async (
+  jsonData: string,
+  channelId: string,
+  userId?: string
+): Promise<Production | null> => {
+  if (!supabase) return null;
+
+  try {
+    const importedData = JSON.parse(jsonData);
+    
+    // Validate required fields
+    if (!importedData.news_date || !importedData.selected_news_ids) {
+      console.error("Invalid production data: missing required fields");
+      return null;
+    }
+
+    // Create new production from imported data
+    const newProduction: Partial<Production> = {
+      channel_id: channelId,
+      news_date: importedData.news_date,
+      status: 'draft' as ProductionStatus, // Start as draft for review
+      selected_news_ids: importedData.selected_news_ids || [],
+      script: importedData.script || null,
+      viral_hook: importedData.viral_hook || null,
+      viral_metadata: importedData.viral_metadata || null,
+      segments: null, // We'll need to upload audio separately
+      video_assets: importedData.video_assets || null,
+      thumbnail_urls: importedData.thumbnail_urls || null,
+      progress_step: importedData.progress_step || 0,
+      version: 1, // New production starts at version 1
+      parent_production_id: null // Import creates a new production, not a version
+    };
+
+    const savedProduction = await saveProduction(newProduction, userId);
+
+    // If audio segments exist, upload them to storage
+    if (savedProduction && importedData.segments && Array.isArray(importedData.segments)) {
+      const segmentsWithUrls = await Promise.all(
+        importedData.segments.map(async (seg: BroadcastSegment, idx: number) => {
+          if (seg.audioBase64) {
+            const audioUrl = await uploadAudioToStorage(seg.audioBase64, savedProduction.id, idx);
+            return {
+              speaker: seg.speaker,
+              text: seg.text,
+              audioUrl,
+              videoUrl: seg.videoUrl
+            };
+          }
+          return {
+            speaker: seg.speaker,
+            text: seg.text,
+            videoUrl: seg.videoUrl
+          };
+        })
+      );
+
+      // Update production with audio URLs
+      await saveProduction({
+        ...savedProduction,
+        segments: segmentsWithUrls as any
+      }, userId);
+    }
+
+    return savedProduction;
+  } catch (error) {
+    console.error("Error importing production:", error);
     return null;
   }
 };

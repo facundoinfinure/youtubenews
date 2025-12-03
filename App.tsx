@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { AppState, ChannelConfig, NewsItem, BroadcastSegment, VideoAssets, ViralMetadata, UserProfile, Channel, ScriptLine, StoredVideo } from './types';
-import { signInWithGoogle, getSession, signOut, getAllChannels, saveChannel, saveVideoToDB, getNewsByDate, saveNewsToDB, markNewsAsSelected, deleteVideoFromDB, loadConfigFromDB, supabase, fetchVideosFromDB, saveProduction, getIncompleteProductions, getProductionById, updateProductionStatus, uploadAudioToStorage, getAudioFromStorage, findCachedScript, findCachedAudio, getAllProductions } from './services/supabaseService';
+import { signInWithGoogle, getSession, signOut, getAllChannels, saveChannel, saveVideoToDB, getNewsByDate, saveNewsToDB, markNewsAsSelected, deleteVideoFromDB, loadConfigFromDB, supabase, fetchVideosFromDB, saveProduction, getIncompleteProductions, getProductionById, updateProductionStatus, uploadAudioToStorage, getAudioFromStorage, findCachedScript, findCachedAudio, getAllProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction } from './services/supabaseService';
 import { fetchEconomicNews, generateScript, generateSegmentedAudio, generateSegmentedAudioWithCache, setFindCachedAudioFunction, generateBroadcastVisuals, generateViralMetadata, generateThumbnail, generateThumbnailVariants, generateViralHook, generateVideoSegments } from './services/geminiService';
 import { uploadVideoToYouTube, deleteVideoFromYouTube } from './services/youtubeService';
 import { ContentCache } from './services/ContentCache';
@@ -562,15 +562,39 @@ const App: React.FC = () => {
       }
 
       // NEW: Granular Video Generation
-      const videoSegmentsTask = generateVideoSegments(genScript, config);
+      // Check if videos already exist before generating
+      let videoSegments: (string | null)[] = [];
+      let backgroundVideos: VideoAssets = { wide: null, hostA: [], hostB: [] };
+      
+      if (resumeFromProduction?.video_assets && resumeFromProduction.video_assets.wide) {
+        // Validate existing video assets - check if URLs are still valid
+        addLog("🔍 Validating existing video assets...");
+        const existingVideos = resumeFromProduction.video_assets as VideoAssets;
+        
+        // For now, we'll trust the stored assets. In future, could validate URLs
+        backgroundVideos = existingVideos;
+        setVideos(existingVideos);
+        
+        // Check if segment videos exist
+        if (resumeFromProduction.segments) {
+          videoSegments = resumeFromProduction.segments.map((seg: any) => seg.videoUrl || null);
+          addLog("✅ Using existing video assets.");
+        }
+      }
+      
+      const videoSegmentsTask = videoSegments.length === 0 
+        ? generateVideoSegments(genScript, config)
+        : Promise.resolve(videoSegments);
 
       const mainContext = finalNews[0]?.headline || "News";
-      const backgroundVideoTask = generateBroadcastVisuals(mainContext, config, genScript)
-        .then(vids => {
-          setVideos(vids);
-          addLog("✅ Video feeds established.");
-          return vids;
-        });
+      const backgroundVideoTask = backgroundVideos.wide
+        ? Promise.resolve(backgroundVideos)
+        : generateBroadcastVisuals(mainContext, config, genScript)
+            .then(vids => {
+              setVideos(vids);
+              addLog("✅ Video feeds established.");
+              return vids;
+            });
 
       const metaTask = generateViralMetadata(finalNews, config, parseSelectedDate(selectedDate))
         .then(async (meta) => {
@@ -585,11 +609,14 @@ const App: React.FC = () => {
           return meta;
         });
 
-      const [videoSegments, backgroundVideos, metadata] = await Promise.all([
+      const [videoSegmentsResult, backgroundVideosResult, metadata] = await Promise.all([
         videoSegmentsTask,
         backgroundVideoTask,
         metaTask
       ]);
+      
+      videoSegments = videoSegmentsResult;
+      backgroundVideos = backgroundVideosResult;
 
       // Step 4: Merge segments
       setProductionProgress({ current: 4, total: TOTAL_STEPS, step: 'Merging media segments...' });
@@ -611,17 +638,30 @@ const App: React.FC = () => {
       }
 
       // Step 5: Generate thumbnail variants (after metadata for title context)
-      setProductionProgress({ current: 5, total: TOTAL_STEPS, step: 'Creating thumbnails...' });
-      addLog("🎨 Creating thumbnail variants...");
-      const thumbnails = await generateThumbnailVariants(mainContext, config, metadata);
-      setThumbnailDataUrl(thumbnails.primary);
-      setThumbnailVariant(thumbnails.variant);
-      addLog(`✅ Thumbnails ready (${thumbnails.variant ? '2 variants for A/B testing' : '1 thumbnail'})`);
+      // Check if thumbnails already exist before generating
+      let thumbnails = { primary: thumbnailDataUrl, variant: thumbnailVariant };
+      
+      if (!thumbnails.primary && resumeFromProduction?.thumbnail_urls && resumeFromProduction.thumbnail_urls.length > 0) {
+        addLog("✅ Using existing thumbnails.");
+        thumbnails.primary = resumeFromProduction.thumbnail_urls[0];
+        thumbnails.variant = resumeFromProduction.thumbnail_urls[1] || null;
+        setThumbnailDataUrl(thumbnails.primary);
+        setThumbnailVariant(thumbnails.variant || null);
+      } else if (!thumbnails.primary) {
+        setProductionProgress({ current: 5, total: TOTAL_STEPS, step: 'Creating thumbnails...' });
+        addLog("🎨 Creating thumbnail variants...");
+        thumbnails = await generateThumbnailVariants(mainContext, config, metadata);
+        setThumbnailDataUrl(thumbnails.primary);
+        setThumbnailVariant(thumbnails.variant || null);
+        addLog(`✅ Thumbnails ready (${thumbnails.variant ? '2 variants for A/B testing' : '1 thumbnail'})`);
 
-      // Save thumbnails
-      if (productionId) {
-        const thumbnailUrls = [thumbnails.primary, thumbnails.variant].filter(Boolean) as string[];
-        await saveProductionState(productionId, 5, 'in_progress', { thumbnailUrls });
+        // Save thumbnails
+        if (productionId) {
+          const thumbnailUrls = [thumbnails.primary, thumbnails.variant].filter(Boolean) as string[];
+          await saveProductionState(productionId, 5, 'in_progress', { thumbnailUrls });
+        }
+      } else {
+        addLog("✅ Using existing thumbnails from state.");
       }
 
       // Step 6: Complete!
