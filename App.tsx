@@ -156,7 +156,7 @@ const App: React.FC = () => {
 
   // Save Progress to LocalStorage
   useEffect(() => {
-    if (state === AppState.READY || state === AppState.SELECTING_NEWS || state === AppState.PREVIEW || state === AppState.GENERATING_MEDIA) {
+    if (state === AppState.READY || state === AppState.SELECTING_NEWS || state === AppState.PREVIEW || state === AppState.GENERATING_MEDIA || state === AppState.ADMIN_DASHBOARD) {
       const progress = {
         state,
         allNews,
@@ -225,6 +225,22 @@ const App: React.FC = () => {
   useEffect(() => {
     const handleVisibilityChange = async () => {
       if (document.hidden && state !== AppState.IDLE && state !== AppState.LOGIN && activeChannel && user) {
+        // Save ADMIN_DASHBOARD state to localStorage
+        if (state === AppState.ADMIN_DASHBOARD) {
+          const progress = {
+            state,
+            allNews,
+            selectedNews,
+            segments,
+            videos,
+            viralMeta,
+            selectedDate,
+            logs
+          };
+          localStorage.setItem('chimpNewsProgress', JSON.stringify(progress));
+          console.log("💾 Saved ADMIN_DASHBOARD state before tab hidden");
+          return; // Don't save production state for admin dashboard
+        }
         // Save current production state to DB before losing it
         if (currentProductionId || (state !== AppState.SELECTING_NEWS && selectedNews.length > 0)) {
           const dateObj = parseSelectedDate(selectedDate);
@@ -257,14 +273,19 @@ const App: React.FC = () => {
       }
       // When tab becomes visible again, restore state from localStorage if needed
       // This prevents the app from switching to home when user returns
-      if (!document.hidden && state === AppState.IDLE && user && activeChannel) {
-        // Only restore if we're at IDLE (home) and there's saved state
+      if (!document.hidden && user && activeChannel) {
+        // Restore if we're at IDLE (home) or if we were in ADMIN_DASHBOARD
         const saved = localStorage.getItem('chimpNewsProgress');
         if (saved) {
           try {
             const parsed = JSON.parse(saved);
-            // Only restore if the saved state is not IDLE (meaning there was work in progress)
-            if (parsed.state && parsed.state !== AppState.IDLE && parsed.state !== AppState.LOGIN) {
+            // Restore if the saved state is ADMIN_DASHBOARD (always restore) or other non-IDLE states
+            if (parsed.state === AppState.ADMIN_DASHBOARD) {
+              // Always restore ADMIN_DASHBOARD state
+              setState(parsed.state);
+              console.log("🔄 Restored ADMIN_DASHBOARD state when tab became visible");
+            } else if (state === AppState.IDLE && parsed.state && parsed.state !== AppState.IDLE && parsed.state !== AppState.LOGIN) {
+              // Only restore other states if we're currently at IDLE
               setAllNews(parsed.allNews || []);
               setSelectedNews(parsed.selectedNews || []);
               setSegments(parsed.segments || []);
@@ -441,6 +462,8 @@ const App: React.FC = () => {
       return;
     }
 
+    // Clear logs when starting a new production
+    setLogs([]);
     setVideos({ wide: null, hostA: [], hostB: [] });
     setSegments([]);
     setViralMeta(null);
@@ -931,7 +954,7 @@ const App: React.FC = () => {
   const handleChannelSwitch = async (channel: Channel) => {
     if (!channel) return;
     
-    // Reset all state when switching channels
+    // Reset all state when switching channels (including logs to avoid showing logs from deleted productions)
     setActiveChannel(channel);
     setConfig(channel.config);
     setState(AppState.IDLE);
@@ -940,11 +963,15 @@ const App: React.FC = () => {
     setSegments([]);
     setVideos({ wide: null, hostA: [], hostB: [] });
     setViralMeta(null);
-    setLogs([]);
+    setLogs([]); // Clear logs when switching channels
     setThumbnailDataUrl(null);
     setThumbnailVariant(null);
     setPreviewScript([]);
     setUploadStatus(null);
+    setCurrentProductionId(null); // Clear production ID when switching channels
+    
+    // Clear localStorage to avoid restoring stale state
+    localStorage.removeItem('chimpNewsProgress');
 
     // Fetch videos for new channel
     try {
@@ -1051,7 +1078,11 @@ const App: React.FC = () => {
           {/* Admin Toggle */}
           {user && (
             <button
-              onClick={() => setState(AppState.ADMIN_DASHBOARD)}
+              onClick={() => {
+                // Clear logs when entering admin dashboard to avoid showing logs from deleted productions
+                setLogs([]);
+                setState(AppState.ADMIN_DASHBOARD);
+              }}
               className="btn-secondary"
             >
               ADMIN

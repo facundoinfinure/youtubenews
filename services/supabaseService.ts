@@ -591,7 +591,7 @@ export const fetchVideosFromDB = async (channelId: string): Promise<StoredVideo[
     youtube_id: row.youtube_id,
     viral_score: row.viral_score,
     thumbnail_url: row.thumbnail_url,
-    is_posted: row.is_posted || false, // Default to false if not set
+    is_posted: row.is_posted ?? (row.youtube_id !== null && row.youtube_id !== undefined), // Use is_posted if exists, otherwise calculate from youtube_id
     analytics: {
       views: row.views || 0,
       ctr: row.ctr || 0,
@@ -783,12 +783,12 @@ export const getPublishedProductions = async (
     return [];
   }
 
-  // Get all published videos for this channel
+  // Get all published videos for this channel (videos with youtube_id are considered posted)
   const { data: videos, error: videosError } = await supabase
     .from('videos')
     .select('*')
     .eq('channel_id', channelId)
-    .eq('is_posted', true)
+    .not('youtube_id', 'is', null)
     .order('created_at', { ascending: false });
 
   if (videosError) {
