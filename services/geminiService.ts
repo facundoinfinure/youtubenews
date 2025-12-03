@@ -233,7 +233,7 @@ export const fetchEconomicNews = async (targetDate: Date | undefined, config: Ch
     dateToQuery.setDate(dateToQuery.getDate() - 1);
   }
 
-  const cacheKey = `news_${dateToQuery.toISOString().split('T')[0]}_${config.country}_v2`;
+  const cacheKey = `news_${dateToQuery.toISOString().split('T')[0]}_${config.country}_v3`;
 
   return ContentCache.getOrGenerate(
     cacheKey,
@@ -269,9 +269,15 @@ export const fetchEconomicNews = async (targetDate: Date | undefined, config: Ch
   - "summary" (string, 1 short sentence in ${config.language})
   - "viralScore" (number, 1-100 based on controversy or impact)
   - "imageKeyword" (string, 2-3 words visual description of the topic for image generation, e.g. "bitcoin crash", "stock market bull")
+  - "imageUrl" (string, optional - URL of the article's main image from Google News if available. Use the image URL from the Google News search results.)
 
-  IMPORTANT: You MUST return 15 items. Do not return fewer.
-  Do not include markdown formatting like \`\`\`json.`;
+  CRITICAL REQUIREMENTS:
+  1. You MUST return EXACTLY 15 items in the JSON array. Count them carefully.
+  2. If you cannot find 15 unique stories, find related stories, variations, or follow-up stories to reach 15.
+  3. Include imageUrl from Google News search results when available - these images are important for display.
+  4. Do not include markdown formatting like \`\`\`json - return pure JSON only.
+  
+  Example format: [{"headline":"...","source":"...","url":"...","summary":"...","viralScore":85,"imageKeyword":"...","imageUrl":"..."}, ...]`;
 
       const response = await ai.models.generateContent({
         model: getModelForTask('news'),
@@ -288,34 +294,88 @@ export const fetchEconomicNews = async (targetDate: Date | undefined, config: Ch
       const jsonStr = text.replace(/```json\n|\n```/g, "").replace(/```/g, "");
 
       try {
-        const news: NewsItem[] = JSON.parse(jsonStr);
+        let news: NewsItem[] = JSON.parse(jsonStr);
 
         // CRITICAL: Validate we got 15 items as requested
         if (news.length < 15) {
           console.warn(`⚠️ Only received ${news.length} news items, expected 15`);
-          console.warn(`Response text (first 200 chars): ${text.substring(0, 200)}`);
-          throw new Error(`Insufficient news items: got ${news.length}, expected 15. The API may not have enough data for this date.`);
+          console.warn(`Response text (first 500 chars): ${text.substring(0, 500)}`);
+          
+          // Log warning but continue with what we have - better than failing completely
+          if (news.length === 0) {
+            throw new Error(`No news items returned. The API may not have data for this date.`);
+          }
+          
+          // If we have fewer than 15 but at least some items, log and continue
+          // The UI will display whatever we have
+          console.log(`📝 Continuing with ${news.length} news items (expected 15)`);
         }
+
+        // Create a map of URLs to grounding chunks for better matching
+        const urlToGroundingMap = new Map<string, any>();
+        groundingChunks.forEach((chunk: any) => {
+          if (chunk?.web?.uri) {
+            urlToGroundingMap.set(chunk.web.uri, chunk);
+          }
+        });
 
         const processedNews = news.map((item, index) => {
           // Prioritize grounding URL if available and missing in item
           let finalUrl = item.url;
-          if ((!finalUrl || finalUrl === "#") && groundingChunks[index]?.web?.uri) {
-            finalUrl = groundingChunks[index].web.uri;
+          let matchedGrounding: any = null;
+          
+          // Try to match by index first
+          if (groundingChunks[index]?.web?.uri) {
+            matchedGrounding = groundingChunks[index];
+            if ((!finalUrl || finalUrl === "#")) {
+              finalUrl = groundingChunks[index].web.uri;
+            }
+          } else if (finalUrl && urlToGroundingMap.has(finalUrl)) {
+            // Try to match by URL
+            matchedGrounding = urlToGroundingMap.get(finalUrl);
+          } else if (groundingChunks.length > 0) {
+            // Fallback: use first available grounding chunk
+            matchedGrounding = groundingChunks[0];
+            if ((!finalUrl || finalUrl === "#") && matchedGrounding?.web?.uri) {
+              finalUrl = matchedGrounding.web.uri;
+            }
           }
 
-          // Extract image URL from grounding metadata
+          // Extract image URL from grounding metadata - improved extraction
           let imageUrl = item.imageUrl;
-          if (!imageUrl && groundingChunks[index]?.web) {
-            // Try to get image from grounding chunk (using type assertion as structure may vary)
-            const webChunk = groundingChunks[index].web as any;
-            imageUrl = webChunk?.image || webChunk?.imageUrl || webChunk?.thumbnail;
+          if (!imageUrl && matchedGrounding?.web) {
+            const webChunk = matchedGrounding.web as any;
+            // Try multiple possible image fields
+            imageUrl = webChunk?.image || 
+                      webChunk?.imageUrl || 
+                      webChunk?.thumbnail || 
+                      webChunk?.ogImage ||
+                      webChunk?.metaImage ||
+                      webChunk?.previewImage;
+            
+            if (imageUrl) {
+              console.log(`✅ Found image for "${item.headline}": ${imageUrl}`);
+            }
+          }
+          
+          // Also check grounding metadata at root level
+          if (!imageUrl && matchedGrounding) {
+            const meta = matchedGrounding as any;
+            imageUrl = meta?.image || meta?.imageUrl || meta?.thumbnail;
+            if (imageUrl) {
+              console.log(`✅ Found image (root level) for "${item.headline}": ${imageUrl}`);
+            }
+          }
+          
+          // Log if no image found for debugging
+          if (!imageUrl) {
+            console.log(`⚠️ No image found for "${item.headline}" - will use placeholder`);
           }
 
           return {
             ...item,
             url: finalUrl,
-            imageUrl,
+            imageUrl: imageUrl || undefined, // Ensure undefined instead of empty string
             // Fallbacks
             viralScore: item.viralScore || Math.floor(Math.random() * 40) + 60,
             summary: item.summary || item.headline,
