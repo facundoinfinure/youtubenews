@@ -373,8 +373,16 @@ export const BroadcastPlayer: React.FC<BroadcastPlayerProps> = ({
         const canvas = document.createElement('canvas');
         canvas.width = canvasWidth;
         canvas.height = canvasHeight;
-        const ctx = canvas.getContext('2d');
+        const ctx = canvas.getContext('2d', { 
+            alpha: false, 
+            desynchronized: false,
+            willReadFrequently: false 
+        });
         if (!ctx) throw new Error("No canvas");
+        
+        // Enable high-quality rendering
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
 
         const offlineCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
         const dest = offlineCtx.createMediaStreamDestination();
@@ -429,21 +437,86 @@ export const BroadcastPlayer: React.FC<BroadcastPlayerProps> = ({
         outroNode.start(currentTime);
 
         const totalDurationSec = currentTime + (OUTRO_DURATION / 1000);
-        const canvasStream = canvas.captureStream(30);
+        
+        // Helper function to get the best codec with quality settings
+        const getBestCodec = (): MediaRecorderOptions => {
+            // Calculate target bitrate based on resolution
+            const pixels = canvasWidth * canvasHeight;
+            // Target bitrate: ~8-12 Mbps for 720p, ~15-20 Mbps for 1080p
+            const targetBitrate = isShorts 
+                ? 12_000_000  // 12 Mbps for 720x1280 (shorts)
+                : 15_000_000; // 15 Mbps for 1280x720 (landscape)
+            
+            // Try VP9 with quality settings (best quality)
+            if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9')) {
+                return {
+                    mimeType: 'video/webm;codecs=vp9',
+                    videoBitsPerSecond: targetBitrate,
+                    audioBitsPerSecond: 192_000 // High quality audio
+                };
+            }
+            
+            // Fallback to VP8 with quality settings
+            if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8')) {
+                return {
+                    mimeType: 'video/webm;codecs=vp8',
+                    videoBitsPerSecond: targetBitrate,
+                    audioBitsPerSecond: 192_000
+                };
+            }
+            
+            // Fallback to H.264 if available (better compatibility)
+            if (MediaRecorder.isTypeSupported('video/webm;codecs=h264')) {
+                return {
+                    mimeType: 'video/webm;codecs=h264',
+                    videoBitsPerSecond: targetBitrate,
+                    audioBitsPerSecond: 192_000
+                };
+            }
+            
+            // Last resort: default WebM
+            return {
+                mimeType: 'video/webm',
+                videoBitsPerSecond: targetBitrate,
+                audioBitsPerSecond: 192_000
+            };
+        };
+        
+        // Capture at 60 fps for smoother motion
+        const frameRate = 60;
+        const canvasStream = canvas.captureStream(frameRate);
+        
+        // Configure video track for high quality
+        const videoTrack = canvasStream.getVideoTracks()[0];
+        if (videoTrack && 'applyConstraints' in videoTrack) {
+            videoTrack.applyConstraints({
+                width: canvasWidth,
+                height: canvasHeight,
+                frameRate: frameRate
+            }).catch(err => console.warn('Could not apply video constraints:', err));
+        }
+        
         const mixedStream = new MediaStream([...canvasStream.getVideoTracks(), ...dest.stream.getAudioTracks()]);
-        const mediaRecorder = new MediaRecorder(mixedStream, { mimeType: 'video/webm;codecs=vp9' });
+        const recorderOptions = getBestCodec();
+        console.log('🎥 Using codec:', recorderOptions.mimeType, 'at', Math.round((recorderOptions.videoBitsPerSecond || 0) / 1_000_000) + ' Mbps');
+        
+        const mediaRecorder = new MediaRecorder(mixedStream, recorderOptions);
 
         const chunks: BlobPart[] = [];
 
         return new Promise((resolve, reject) => {
-            mediaRecorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+            mediaRecorder.ondataavailable = e => { 
+                if (e.data.size > 0) chunks.push(e.data); 
+            };
             mediaRecorder.onstop = () => {
-                const blob = new Blob(chunks, { type: 'video/webm' });
+                const blob = new Blob(chunks, { type: recorderOptions.mimeType || 'video/webm' });
+                console.log('✅ Video render complete. Size:', (blob.size / 1_000_000).toFixed(2), 'MB');
                 resolve(blob);
             };
             mediaRecorder.onerror = (e) => reject(e);
 
-            mediaRecorder.start();
+            // Start with timeslice for better data handling (every 1 second)
+            mediaRecorder.start(1000);
             const startTime = Date.now();
             const dataArray = new Uint8Array(downloadAnalyser.frequencyBinCount);
 
@@ -484,6 +557,11 @@ export const BroadcastPlayer: React.FC<BroadcastPlayerProps> = ({
                     return;
                 }
 
+                // Clear canvas for each frame to prevent artifacts
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = '#000000';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
                 if (elapsedSec < introSec) {
                     // Intro - use image or logo
                     const progress = elapsedSec / introSec;
@@ -500,7 +578,16 @@ export const BroadcastPlayer: React.FC<BroadcastPlayerProps> = ({
                         ctx.fillStyle = `rgba(0,0,0,${1 - progress})`;
                         ctx.fillRect(0, 0, canvas.width, canvas.height);
                     } else if (vIntro) {
-                        if (vIntro.paused) vIntro.play();
+                        // Sync intro video to timeline
+                        if (vIntro.paused) {
+                            vIntro.currentTime = elapsedSec % (vIntro.duration || 10);
+                            vIntro.play().catch(() => {});
+                        } else {
+                            const targetTime = elapsedSec % (vIntro.duration || 10);
+                            if (Math.abs(vIntro.currentTime - targetTime) > 0.2) {
+                                vIntro.currentTime = targetTime;
+                            }
+                        }
                         const hRatio = canvas.width / vIntro.videoWidth;
                         const vRatio = canvas.height / vIntro.videoHeight;
                         const ratio = Math.max(hRatio, vRatio);
@@ -542,7 +629,17 @@ export const BroadcastPlayer: React.FC<BroadcastPlayerProps> = ({
                         ctx.fillStyle = `rgba(0,0,0,${progress})`;
                         ctx.fillRect(0, 0, canvas.width, canvas.height);
                     } else if (vOutro) {
-                        if (vOutro.paused) vOutro.play();
+                        // Sync outro video to timeline
+                        const outroElapsed = elapsedSec - outroStartSec;
+                        if (vOutro.paused) {
+                            vOutro.currentTime = outroElapsed % (vOutro.duration || 10);
+                            vOutro.play().catch(() => {});
+                        } else {
+                            const targetTime = outroElapsed % (vOutro.duration || 10);
+                            if (Math.abs(vOutro.currentTime - targetTime) > 0.2) {
+                                vOutro.currentTime = targetTime;
+                            }
+                        }
                         const hRatio = canvas.width / vOutro.videoWidth;
                         const vRatio = canvas.height / vOutro.videoHeight;
                         const ratio = Math.max(hRatio, vRatio);
@@ -601,8 +698,27 @@ export const BroadcastPlayer: React.FC<BroadcastPlayerProps> = ({
                         const centerShift_x = (canvas.width - activeVid.videoWidth * ratio) / 2;
                         const centerShift_y = (canvas.height - activeVid.videoHeight * ratio) / 2;
 
-                        if (isTalking && activeVid.paused) activeVid.play();
-                        else if (!isTalking && !activeVid.paused) activeVid.pause();
+                        // Sync video playback to timeline for consistent rendering
+                        if (isTalking) {
+                            if (activeVid.paused) {
+                                // Calculate video position within segment for looping
+                                const segmentProgress = (elapsedSec - currentSeg.start) / (currentSeg.end - currentSeg.start);
+                                const videoDuration = activeVid.duration || 10; // Fallback if duration not available
+                                activeVid.currentTime = (segmentProgress * videoDuration) % videoDuration;
+                                activeVid.play().catch(() => {});
+                            } else {
+                                // Keep video in sync during playback
+                                const segmentProgress = (elapsedSec - currentSeg.start) / (currentSeg.end - currentSeg.start);
+                                const videoDuration = activeVid.duration || 10;
+                                const targetTime = (segmentProgress * videoDuration) % videoDuration;
+                                // Only update if significantly out of sync (>0.1s) to avoid jitter
+                                if (Math.abs(activeVid.currentTime - targetTime) > 0.1) {
+                                    activeVid.currentTime = targetTime;
+                                }
+                            }
+                        } else if (!activeVid.paused) {
+                            activeVid.pause();
+                        }
 
                         ctx.drawImage(activeVid,
                             0, 0, activeVid.videoWidth, activeVid.videoHeight,
@@ -617,8 +733,20 @@ export const BroadcastPlayer: React.FC<BroadcastPlayerProps> = ({
                         const centerShift_y = (canvas.height - wideImage.height * ratio) / 2;
                         ctx.drawImage(wideImage, centerShift_x, centerShift_y, wideImage.width * ratio, wideImage.height * ratio);
                     } else if (vWide) {
-                        if (isTalking && vWide.paused) vWide.play();
-                        else if (!isTalking && !vWide.paused) vWide.pause();
+                        // Sync wide video to timeline for smooth looping
+                        if (isTalking || !currentSeg) {
+                            if (vWide.paused) {
+                                vWide.currentTime = elapsedSec % (vWide.duration || 10);
+                                vWide.play().catch(() => {});
+                            } else {
+                                const targetTime = elapsedSec % (vWide.duration || 10);
+                                if (Math.abs(vWide.currentTime - targetTime) > 0.2) {
+                                    vWide.currentTime = targetTime;
+                                }
+                            }
+                        } else if (!vWide.paused) {
+                            vWide.pause();
+                        }
                         const hRatio = canvas.width / vWide.videoWidth;
                         const vRatio = canvas.height / vWide.videoHeight;
                         const ratio = Math.max(hRatio, vRatio);
