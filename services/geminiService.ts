@@ -4,7 +4,17 @@ import { ContentCache } from "./ContentCache";
 import { retryWithBackoff } from "./retryUtils";
 import { getModelForTask, getCostForTask, getWavespeedModel } from "./modelStrategy";
 import { CostTracker } from "./CostTracker";
-import { getChannelIntroOutro, saveChannelIntroOutro } from "./supabaseService";
+import { 
+  getChannelIntroOutro, 
+  saveChannelIntroOutro,
+  saveGeneratedVideo,
+  findCachedVideo,
+  findCachedVideoByDialogue,
+  getCachedChannelVideos,
+  createPromptHash,
+  VideoType,
+  VideoProvider
+} from "./supabaseService";
 import { createWavespeedVideoTask, pollWavespeedTask, createWavespeedImageTask, pollWavespeedImageTask } from "./wavespeedProxy";
 
 const getApiKey = () => import.meta.env.VITE_GEMINI_API_KEY || window.env?.API_KEY || process.env.API_KEY || "";
@@ -48,6 +58,135 @@ const createPlaceholderImage = (width: number = 1024, height: number = 1024): st
 const createWavespeedTask = async (prompt: string, aspectRatio: '16:9' | '9:16', referenceImageUrl?: string): Promise<string> => {
   const model = getWavespeedModel();
   return createWavespeedVideoTask(prompt, aspectRatio, referenceImageUrl, model);
+};
+
+// =============================================================================================
+// VIDEO GENERATION WITH CACHE AND FALLBACK
+// =============================================================================================
+
+interface VideoGenerationOptions {
+  channelId: string;
+  productionId?: string;
+  videoType: VideoType;
+  segmentIndex?: number;
+  prompt: string;
+  dialogueText?: string;
+  aspectRatio: '16:9' | '9:16';
+  referenceImageUrl?: string;
+}
+
+/**
+ * Generate a video with intelligent caching and provider fallback
+ * Order: Cache -> WaveSpeed -> VEO 3
+ * Saves to cache after successful generation
+ */
+const generateVideoWithCacheAndFallback = async (
+  options: VideoGenerationOptions
+): Promise<{ url: string | null; provider: VideoProvider; fromCache: boolean }> => {
+  const { channelId, productionId, videoType, segmentIndex, prompt, dialogueText, aspectRatio, referenceImageUrl } = options;
+  const promptHash = createPromptHash(prompt);
+
+  // Step 1: Check cache first
+  let cachedVideo = null;
+  
+  if (dialogueText) {
+    // For lip-sync videos, match by dialogue text
+    cachedVideo = await findCachedVideoByDialogue(channelId, videoType, dialogueText, aspectRatio);
+  } else {
+    // For non-dialogue videos (intro/outro), match by prompt hash
+    cachedVideo = await findCachedVideo(channelId, videoType, promptHash, aspectRatio);
+  }
+
+  if (cachedVideo && cachedVideo.video_url) {
+    console.log(`✅ [Video Cache] Using cached ${videoType} video`);
+    return { url: cachedVideo.video_url, provider: cachedVideo.provider as VideoProvider, fromCache: true };
+  }
+
+  // Step 2: Try WaveSpeed first (primary provider for lip-sync)
+  if (shouldUseWavespeed()) {
+    try {
+      console.log(`🎬 [WaveSpeed] Generating ${videoType} video...`);
+      const taskId = await createWavespeedTask(prompt, aspectRatio, referenceImageUrl);
+      const videoUrl = await pollWavespeedTask(taskId);
+      
+      if (videoUrl) {
+        CostTracker.track('video', getWavespeedModel(), getCostForTask('video'));
+        
+        // Save to cache
+        await saveGeneratedVideo({
+          channel_id: channelId,
+          production_id: productionId || null,
+          video_type: videoType,
+          segment_index: segmentIndex ?? null,
+          prompt_hash: promptHash,
+          dialogue_text: dialogueText || null,
+          video_url: videoUrl,
+          provider: 'wavespeed',
+          aspect_ratio: aspectRatio,
+          duration_seconds: null,
+          status: 'completed',
+          error_message: null,
+          reference_image_hash: referenceImageUrl ? createPromptHash(referenceImageUrl.substring(0, 100)) : null,
+          expires_at: null
+        });
+
+        console.log(`✅ [WaveSpeed] ${videoType} video generated and cached`);
+        return { url: videoUrl, provider: 'wavespeed', fromCache: false };
+      }
+    } catch (wavespeedError) {
+      console.warn(`⚠️ [WaveSpeed] Failed for ${videoType}:`, (wavespeedError as Error).message);
+      // Continue to VEO 3 fallback
+    }
+  }
+
+  // Step 3: Fallback to VEO 3
+  try {
+    console.log(`🎬 [VEO 3] Fallback: Generating ${videoType} video...`);
+    const ai = getAiClient();
+    const operation = await ai.models.generateVideos({
+      model: getModelForTask('video'),
+      prompt: prompt,
+      config: {
+        aspectRatio: aspectRatio,
+        ...(referenceImageUrl ? { referenceImage: referenceImageUrl } : {})
+      }
+    });
+
+    CostTracker.track('video', getModelForTask('video'), getCostForTask('video'));
+
+    if (operation) {
+      const videoUrl = await pollForVideo(operation);
+      
+      if (videoUrl) {
+        // Save to cache
+        await saveGeneratedVideo({
+          channel_id: channelId,
+          production_id: productionId || null,
+          video_type: videoType,
+          segment_index: segmentIndex ?? null,
+          prompt_hash: promptHash,
+          dialogue_text: dialogueText || null,
+          video_url: videoUrl,
+          provider: 'veo3',
+          aspect_ratio: aspectRatio,
+          duration_seconds: null,
+          status: 'completed',
+          error_message: null,
+          reference_image_hash: referenceImageUrl ? createPromptHash(referenceImageUrl.substring(0, 100)) : null,
+          expires_at: null
+        });
+
+        console.log(`✅ [VEO 3] ${videoType} video generated and cached`);
+        return { url: videoUrl, provider: 'veo3', fromCache: false };
+      }
+    }
+  } catch (veo3Error) {
+    console.error(`❌ [VEO 3] Failed for ${videoType}:`, (veo3Error as Error).message);
+  }
+
+  // All providers failed
+  console.error(`❌ All video providers failed for ${videoType}`);
+  return { url: null, provider: 'other', fromCache: false };
 };
 
 export const fetchEconomicNews = async (targetDate: Date | undefined, config: ChannelConfig): Promise<NewsItem[]> => {
@@ -492,10 +631,12 @@ const pollForVideo = async (operation: any): Promise<string> => {
 
 /**
  * Generate intro video (generic, no dialogue) - reusable per channel
+ * Uses intelligent caching: Cache -> WaveSpeed -> VEO 3
  */
 export const generateIntroVideo = async (
   config: ChannelConfig,
-  channelId: string
+  channelId: string,
+  productionId?: string
 ): Promise<string | null> => {
   const referenceImageContext = config.referenceImageUrl 
     ? `\nCRITICAL REFERENCE IMAGE: Use the provided reference image as the EXACT visual template. Match the exact podcast studio setting, character appearances, lighting, and composition from the reference image.\n` 
@@ -530,36 +671,27 @@ IMPORTANT: This is an intro video with NO dialogue. The hosts should be visible 
 
   return retryWithBackoff(async () => {
     try {
-      if (shouldUseWavespeed()) {
-        console.log(`[Wavespeed] Generating intro video for channel ${channelId}`);
-        const taskId = await createWavespeedTask(prompt, config.format, config.referenceImageUrl);
-        const videoUrl = await pollWavespeedTask(taskId);
-        CostTracker.track('video', getWavespeedModel(), getCostForTask('video'));
-        
-        // Save to channel cache
+      const result = await generateVideoWithCacheAndFallback({
+        channelId,
+        productionId,
+        videoType: 'intro',
+        prompt,
+        aspectRatio: config.format,
+        referenceImageUrl: config.referenceImageUrl
+      });
+
+      if (result.url) {
+        // Save to channel cache (legacy support)
         const { outroUrl } = await getChannelIntroOutro(channelId);
-        await saveChannelIntroOutro(channelId, videoUrl, outroUrl);
+        await saveChannelIntroOutro(channelId, result.url, outroUrl);
         
-        return videoUrl;
-      } else {
-        // Fallback to VEO
-        const ai = getAiClient();
-        const operation = await ai.models.generateVideos({
-          model: getModelForTask('video'),
-          prompt: prompt,
-          config: {
-            aspectRatio: config.format === '9:16' ? '9:16' : '16:9',
-            ...(config.referenceImageUrl ? { referenceImage: config.referenceImageUrl } : {})
-          }
-        });
-        CostTracker.track('video', getModelForTask('video'), getCostForTask('video'));
-        if (operation) {
-          const videoUrl = await pollForVideo(operation);
-          // Save to channel cache
-          const { outroUrl } = await getChannelIntroOutro(channelId);
-          await saveChannelIntroOutro(channelId, videoUrl, outroUrl);
-          return videoUrl;
+        if (result.fromCache) {
+          console.log(`✅ [Intro] Using cached video`);
+        } else {
+          console.log(`✅ [Intro] Generated with ${result.provider}`);
         }
+        
+        return result.url;
       }
       return null;
     } catch (e) {
@@ -575,10 +707,12 @@ IMPORTANT: This is an intro video with NO dialogue. The hosts should be visible 
 
 /**
  * Generate outro video (generic, no dialogue) - reusable per channel
+ * Uses intelligent caching: Cache -> WaveSpeed -> VEO 3
  */
 export const generateOutroVideo = async (
   config: ChannelConfig,
-  channelId: string
+  channelId: string,
+  productionId?: string
 ): Promise<string | null> => {
   const referenceImageContext = config.referenceImageUrl 
     ? `\nCRITICAL REFERENCE IMAGE: Use the provided reference image as the EXACT visual template. Match the exact podcast studio setting, character appearances, lighting, and composition from the reference image.\n` 
@@ -613,36 +747,27 @@ IMPORTANT: This is an outro video with NO dialogue. The hosts should be visible 
 
   return retryWithBackoff(async () => {
     try {
-      if (shouldUseWavespeed()) {
-        console.log(`[Wavespeed] Generating outro video for channel ${channelId}`);
-        const taskId = await createWavespeedTask(prompt, config.format, config.referenceImageUrl);
-        const videoUrl = await pollWavespeedTask(taskId);
-        CostTracker.track('video', getWavespeedModel(), getCostForTask('video'));
-        
-        // Save to channel cache
+      const result = await generateVideoWithCacheAndFallback({
+        channelId,
+        productionId,
+        videoType: 'outro',
+        prompt,
+        aspectRatio: config.format,
+        referenceImageUrl: config.referenceImageUrl
+      });
+
+      if (result.url) {
+        // Save to channel cache (legacy support)
         const { introUrl } = await getChannelIntroOutro(channelId);
-        await saveChannelIntroOutro(channelId, introUrl, videoUrl);
+        await saveChannelIntroOutro(channelId, introUrl, result.url);
         
-        return videoUrl;
-      } else {
-        // Fallback to VEO
-        const ai = getAiClient();
-        const operation = await ai.models.generateVideos({
-          model: getModelForTask('video'),
-          prompt: prompt,
-          config: {
-            aspectRatio: config.format === '9:16' ? '9:16' : '16:9',
-            ...(config.referenceImageUrl ? { referenceImage: config.referenceImageUrl } : {})
-          }
-        });
-        CostTracker.track('video', getModelForTask('video'), getCostForTask('video'));
-        if (operation) {
-          const videoUrl = await pollForVideo(operation);
-          // Save to channel cache
-          const { introUrl } = await getChannelIntroOutro(channelId);
-          await saveChannelIntroOutro(channelId, introUrl, videoUrl);
-          return videoUrl;
+        if (result.fromCache) {
+          console.log(`✅ [Outro] Using cached video`);
+        } else {
+          console.log(`✅ [Outro] Generated with ${result.provider}`);
         }
+        
+        return result.url;
       }
       return null;
     } catch (e) {
@@ -658,12 +783,16 @@ IMPORTANT: This is an outro video with NO dialogue. The hosts should be visible 
 
 /**
  * Generate video of a single host with lip-sync for specific dialogue
+ * Uses intelligent caching: Cache -> WaveSpeed -> VEO 3
  */
 const generateHostVideoWithLipSync = async (
   hostName: string,
   character: any,
   dialogueText: string,
   config: ChannelConfig,
+  channelId: string,
+  productionId?: string,
+  segmentIndex?: number,
   cameraAngle: string = 'front-facing',
   action: string = 'Speaking naturally to camera'
 ): Promise<string | null> => {
@@ -693,29 +822,29 @@ CRITICAL REQUIREMENTS:
 - Setting must be an indoor podcast studio, not an outdoor or generic scene
   `.trim();
 
+  // Determine video type based on host
+  const videoType: VideoType = hostName === config.characters.hostA.name ? 'host_a' : 'host_b';
+
   return retryWithBackoff(async () => {
     try {
-      if (shouldUseWavespeed()) {
-        console.log(`[Wavespeed] Generating video for ${hostName} with lip-sync`);
-        const taskId = await createWavespeedTask(prompt, config.format, config.referenceImageUrl);
-        const videoUrl = await pollWavespeedTask(taskId);
-        CostTracker.track('video', getWavespeedModel(), getCostForTask('video'));
-        return videoUrl;
-      } else {
-        // Fallback to VEO
-        const ai = getAiClient();
-        const operation = await ai.models.generateVideos({
-          model: getModelForTask('video'),
-          prompt: prompt,
-          config: {
-            aspectRatio: config.format === '9:16' ? '9:16' : '16:9',
-            ...(config.referenceImageUrl ? { referenceImage: config.referenceImageUrl } : {})
-          }
-        });
-        CostTracker.track('video', getModelForTask('video'), getCostForTask('video'));
-        if (operation) {
-          return await pollForVideo(operation);
+      const result = await generateVideoWithCacheAndFallback({
+        channelId,
+        productionId,
+        videoType,
+        segmentIndex,
+        prompt,
+        dialogueText, // Include dialogue for cache matching
+        aspectRatio: config.format,
+        referenceImageUrl: config.referenceImageUrl
+      });
+
+      if (result.url) {
+        if (result.fromCache) {
+          console.log(`✅ [${hostName}] Using cached video`);
+        } else {
+          console.log(`✅ [${hostName}] Generated with ${result.provider}`);
         }
+        return result.url;
       }
       return null;
     } catch (e) {
@@ -731,10 +860,14 @@ CRITICAL REQUIREMENTS:
 
 /**
  * Generate video of both hosts together with lip-sync for dialogue
+ * Uses intelligent caching: Cache -> WaveSpeed -> VEO 3
  */
 const generateTwoHostsVideoWithLipSync = async (
   dialogueText: string,
-  config: ChannelConfig
+  config: ChannelConfig,
+  channelId: string,
+  productionId?: string,
+  segmentIndex?: number
 ): Promise<string | null> => {
   const referenceImageContext = config.referenceImageUrl 
     ? `\nCRITICAL REFERENCE IMAGE: Use the provided reference image as the EXACT visual template. Match the exact podcast studio setting, character appearances (2 chimpanzees in podcast studio), lighting, and composition from the reference image.\n` 
@@ -769,27 +902,24 @@ CRITICAL REQUIREMENTS:
 
   return retryWithBackoff(async () => {
     try {
-      if (shouldUseWavespeed()) {
-        console.log(`[Wavespeed] Generating video of both hosts with lip-sync`);
-        const taskId = await createWavespeedTask(prompt, config.format, config.referenceImageUrl);
-        const videoUrl = await pollWavespeedTask(taskId);
-        CostTracker.track('video', getWavespeedModel(), getCostForTask('video'));
-        return videoUrl;
-      } else {
-        // Fallback to VEO
-        const ai = getAiClient();
-        const operation = await ai.models.generateVideos({
-          model: getModelForTask('video'),
-          prompt: prompt,
-          config: {
-            aspectRatio: config.format === '9:16' ? '9:16' : '16:9',
-            ...(config.referenceImageUrl ? { referenceImage: config.referenceImageUrl } : {})
-          }
-        });
-        CostTracker.track('video', getModelForTask('video'), getCostForTask('video'));
-        if (operation) {
-          return await pollForVideo(operation);
+      const result = await generateVideoWithCacheAndFallback({
+        channelId,
+        productionId,
+        videoType: 'both_hosts',
+        segmentIndex,
+        prompt,
+        dialogueText, // Include dialogue for cache matching
+        aspectRatio: config.format,
+        referenceImageUrl: config.referenceImageUrl
+      });
+
+      if (result.url) {
+        if (result.fromCache) {
+          console.log(`✅ [Both Hosts] Using cached video`);
+        } else {
+          console.log(`✅ [Both Hosts] Generated with ${result.provider}`);
         }
+        return result.url;
       }
       return null;
     } catch (e) {
@@ -843,12 +973,15 @@ const groupSegmentsBySpeaker = (script: ScriptLine[]): Array<{ speaker: string; 
 
 export const generateVideoSegments = async (
   script: ScriptLine[],
-  config: ChannelConfig
+  config: ChannelConfig,
+  channelId: string,
+  productionId?: string
 ): Promise<(string | null)[]> => {
   // Group consecutive segments by speaker to generate longer videos with lip-sync
   const groupedSegments = groupSegmentsBySpeaker(script);
   
   console.log(`[Video Generation] Grouped ${script.length} segments into ${groupedSegments.length} video groups`);
+  console.log(`[Video Generation] Using cache-first strategy: Cache -> WaveSpeed -> VEO 3`);
   
   // Track character variations for visual variety
   const characterVariationCount: Record<string, number> = {
@@ -867,8 +1000,8 @@ export const generateVideoSegments = async (
     'Speaking to camera with professional, authoritative presence'
   ];
   
-  // Generate videos for each group
-  const videoPromises = groupedSegments.map(async (group) => {
+  // Generate videos for each group (with incremental saving to cache)
+  const videoPromises = groupedSegments.map(async (group, groupIndex) => {
     const isWideShot = group.speaker === 'Both' || group.speaker.includes('Both');
     
     // Determine character
@@ -884,12 +1017,18 @@ export const generateVideoSegments = async (
     const cameraAngle = cameraAngles[variationNumber];
     const action = actions[variationNumber];
     
-    // Generate video with lip-sync
+    // Generate video with lip-sync (includes caching and fallback)
     let videoUrl: string | null = null;
     
     if (isWideShot) {
       // Both hosts together
-      videoUrl = await generateTwoHostsVideoWithLipSync(group.text, config);
+      videoUrl = await generateTwoHostsVideoWithLipSync(
+        group.text, 
+        config,
+        channelId,
+        productionId,
+        group.startIndex
+      );
     } else {
       // Single host
       videoUrl = await generateHostVideoWithLipSync(
@@ -897,10 +1036,16 @@ export const generateVideoSegments = async (
         character,
         group.text,
         config,
+        channelId,
+        productionId,
+        group.startIndex,
         cameraAngle,
         action
       );
     }
+    
+    // Log progress after each video is generated/cached
+    console.log(`[Video Generation] Segment group ${groupIndex + 1}/${groupedSegments.length} complete`);
     
     // Return video URL for all segments in this group
     return {
@@ -922,32 +1067,39 @@ export const generateVideoSegments = async (
     }
   });
   
-  console.log(`[Video Generation] Generated ${videoResults.filter(r => r.videoUrl).length} videos for ${script.length} segments`);
+  const cachedCount = videoResults.filter(r => r.videoUrl).length;
+  console.log(`[Video Generation] Completed: ${cachedCount} videos for ${script.length} segments`);
   
   return segmentVideos;
 };
 /**
  * Generate or retrieve intro/outro videos for a channel
  * This function now only handles intro/outro caching, not the main content videos
+ * Uses intelligent caching: Cache -> WaveSpeed -> VEO 3
  */
 export const generateBroadcastVisuals = async (
   newsContext: string,
   config: ChannelConfig,
   script: ScriptLine[],
-  channelId: string
+  channelId: string,
+  productionId?: string
 ): Promise<VideoAssets> => {
   console.log(`[Broadcast Visuals] Getting intro/outro videos for channel ${channelId}`);
+  console.log(`[Broadcast Visuals] Using cache-first strategy: Cache -> WaveSpeed -> VEO 3`);
   
-  // Get cached intro/outro from database
-  const { introUrl, outroUrl } = await getChannelIntroOutro(channelId);
+  // Check generated_videos cache first (new system)
+  const cachedChannelVideos = await getCachedChannelVideos(channelId, config.format);
   
-  let finalIntroUrl = introUrl;
-  let finalOutroUrl = outroUrl;
+  // Also check legacy channel cache
+  const { introUrl: legacyIntroUrl, outroUrl: legacyOutroUrl } = await getChannelIntroOutro(channelId);
+  
+  let finalIntroUrl = cachedChannelVideos.intro?.video_url || legacyIntroUrl;
+  let finalOutroUrl = cachedChannelVideos.outro?.video_url || legacyOutroUrl;
   
   // Generate intro if not cached
   if (!finalIntroUrl) {
     console.log(`[Broadcast Visuals] No cached intro found, generating new intro...`);
-    finalIntroUrl = await generateIntroVideo(config, channelId);
+    finalIntroUrl = await generateIntroVideo(config, channelId, productionId);
   } else {
     console.log(`[Broadcast Visuals] ✅ Using cached intro video`);
   }
@@ -955,7 +1107,7 @@ export const generateBroadcastVisuals = async (
   // Generate outro if not cached
   if (!finalOutroUrl) {
     console.log(`[Broadcast Visuals] No cached outro found, generating new outro...`);
-    finalOutroUrl = await generateOutroVideo(config, channelId);
+    finalOutroUrl = await generateOutroVideo(config, channelId, productionId);
   } else {
     console.log(`[Broadcast Visuals] ✅ Using cached outro video`);
   }

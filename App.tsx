@@ -750,13 +750,13 @@ const App: React.FC = () => {
       }
       
       const videoSegmentsTask = videoSegments.length === 0 
-        ? generateVideoSegments(genScript, config)
+        ? generateVideoSegments(genScript, config, activeChannel.id, productionId || undefined)
         : Promise.resolve(videoSegments);
 
       const mainContext = finalNews[0]?.headline || "News";
       const backgroundVideoTask = backgroundVideos.wide
         ? Promise.resolve(backgroundVideos)
-        : generateBroadcastVisuals(mainContext, config, genScript, activeChannel.id)
+        : generateBroadcastVisuals(mainContext, config, genScript, activeChannel.id, productionId || undefined)
             .then(vids => {
               setVideos(vids);
               addLog("✅ Intro/outro videos ready.");

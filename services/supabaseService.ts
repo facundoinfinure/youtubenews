@@ -1261,3 +1261,305 @@ export const importProduction = async (
     return null;
   }
 };
+
+// =============================================================================================
+// GENERATED VIDEOS CACHE
+// =============================================================================================
+
+export type VideoType = 'intro' | 'outro' | 'host_a' | 'host_b' | 'both_hosts' | 'segment';
+export type VideoProvider = 'wavespeed' | 'veo3' | 'other';
+
+export interface GeneratedVideo {
+  id: string;
+  created_at: string;
+  channel_id: string;
+  production_id: string | null;
+  video_type: VideoType;
+  segment_index: number | null;
+  prompt_hash: string;
+  dialogue_text: string | null;
+  video_url: string;
+  provider: VideoProvider;
+  aspect_ratio: string;
+  duration_seconds: number | null;
+  status: 'pending' | 'generating' | 'completed' | 'failed';
+  error_message: string | null;
+  reference_image_hash: string | null;
+  expires_at: string | null;
+}
+
+/**
+ * Create a simple hash from a string (for prompt matching)
+ */
+export const createPromptHash = (prompt: string): string => {
+  let hash = 0;
+  for (let i = 0; i < prompt.length; i++) {
+    const char = prompt.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  return Math.abs(hash).toString(36);
+};
+
+/**
+ * Save a generated video to the cache
+ */
+export const saveGeneratedVideo = async (
+  video: Omit<GeneratedVideo, 'id' | 'created_at'>
+): Promise<GeneratedVideo | null> => {
+  if (!supabase) return null;
+
+  try {
+    const { data, error } = await supabase
+      .from('generated_videos')
+      .insert({
+        channel_id: video.channel_id,
+        production_id: video.production_id,
+        video_type: video.video_type,
+        segment_index: video.segment_index,
+        prompt_hash: video.prompt_hash,
+        dialogue_text: video.dialogue_text,
+        video_url: video.video_url,
+        provider: video.provider,
+        aspect_ratio: video.aspect_ratio || '16:9',
+        duration_seconds: video.duration_seconds,
+        status: video.status || 'completed',
+        error_message: video.error_message,
+        reference_image_hash: video.reference_image_hash,
+        expires_at: video.expires_at
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Error saving generated video:", error);
+      return null;
+    }
+
+    console.log(`✅ Saved generated video: ${video.video_type} (${video.provider})`);
+    return data as GeneratedVideo;
+  } catch (e) {
+    console.error("Error in saveGeneratedVideo:", e);
+    return null;
+  }
+};
+
+/**
+ * Find a cached video by prompt hash
+ */
+export const findCachedVideo = async (
+  channelId: string,
+  videoType: VideoType,
+  promptHash: string,
+  aspectRatio?: string
+): Promise<GeneratedVideo | null> => {
+  if (!supabase) return null;
+
+  try {
+    let query = supabase
+      .from('generated_videos')
+      .select('*')
+      .eq('channel_id', channelId)
+      .eq('video_type', videoType)
+      .eq('prompt_hash', promptHash)
+      .eq('status', 'completed')
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    if (aspectRatio) {
+      query = query.eq('aspect_ratio', aspectRatio);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error("Error finding cached video:", error);
+      return null;
+    }
+
+    if (data && data.length > 0) {
+      console.log(`✅ Found cached ${videoType} video`);
+      return data[0] as GeneratedVideo;
+    }
+
+    return null;
+  } catch (e) {
+    console.error("Error in findCachedVideo:", e);
+    return null;
+  }
+};
+
+/**
+ * Find a cached video by dialogue text (for lip-sync videos)
+ */
+export const findCachedVideoByDialogue = async (
+  channelId: string,
+  videoType: VideoType,
+  dialogueText: string,
+  aspectRatio?: string
+): Promise<GeneratedVideo | null> => {
+  if (!supabase) return null;
+
+  try {
+    let query = supabase
+      .from('generated_videos')
+      .select('*')
+      .eq('channel_id', channelId)
+      .eq('video_type', videoType)
+      .eq('dialogue_text', dialogueText)
+      .eq('status', 'completed')
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    if (aspectRatio) {
+      query = query.eq('aspect_ratio', aspectRatio);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error("Error finding cached video by dialogue:", error);
+      return null;
+    }
+
+    if (data && data.length > 0) {
+      console.log(`✅ Found cached ${videoType} video for dialogue: "${dialogueText.substring(0, 30)}..."`);
+      return data[0] as GeneratedVideo;
+    }
+
+    return null;
+  } catch (e) {
+    console.error("Error in findCachedVideoByDialogue:", e);
+    return null;
+  }
+};
+
+/**
+ * Get all videos for a production
+ */
+export const getProductionVideos = async (
+  productionId: string
+): Promise<GeneratedVideo[]> => {
+  if (!supabase) return [];
+
+  try {
+    const { data, error } = await supabase
+      .from('generated_videos')
+      .select('*')
+      .eq('production_id', productionId)
+      .eq('status', 'completed')
+      .order('segment_index', { ascending: true });
+
+    if (error) {
+      console.error("Error fetching production videos:", error);
+      return [];
+    }
+
+    return (data || []) as GeneratedVideo[];
+  } catch (e) {
+    console.error("Error in getProductionVideos:", e);
+    return [];
+  }
+};
+
+/**
+ * Get channel intro/outro videos from cache
+ */
+export const getCachedChannelVideos = async (
+  channelId: string,
+  aspectRatio: string = '16:9'
+): Promise<{ intro: GeneratedVideo | null; outro: GeneratedVideo | null }> => {
+  if (!supabase) return { intro: null, outro: null };
+
+  try {
+    const { data, error } = await supabase
+      .from('generated_videos')
+      .select('*')
+      .eq('channel_id', channelId)
+      .in('video_type', ['intro', 'outro'])
+      .eq('aspect_ratio', aspectRatio)
+      .eq('status', 'completed')
+      .is('production_id', null) // Channel-level videos don't have production_id
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error("Error fetching channel videos:", error);
+      return { intro: null, outro: null };
+    }
+
+    const intro = data?.find(v => v.video_type === 'intro') || null;
+    const outro = data?.find(v => v.video_type === 'outro') || null;
+
+    return { intro, outro };
+  } catch (e) {
+    console.error("Error in getCachedChannelVideos:", e);
+    return { intro: null, outro: null };
+  }
+};
+
+/**
+ * Mark a video as failed
+ */
+export const markVideoFailed = async (
+  channelId: string,
+  videoType: VideoType,
+  promptHash: string,
+  errorMessage: string,
+  productionId?: string
+): Promise<void> => {
+  if (!supabase) return;
+
+  try {
+    await supabase
+      .from('generated_videos')
+      .insert({
+        channel_id: channelId,
+        production_id: productionId || null,
+        video_type: videoType,
+        prompt_hash: promptHash,
+        video_url: '', // No URL for failed videos
+        provider: 'other',
+        status: 'failed',
+        error_message: errorMessage
+      });
+  } catch (e) {
+    console.error("Error marking video as failed:", e);
+  }
+};
+
+/**
+ * Delete old cached videos (cleanup)
+ */
+export const cleanupOldVideos = async (
+  channelId: string,
+  keepDays: number = 30
+): Promise<number> => {
+  if (!supabase) return 0;
+
+  try {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - keepDays);
+
+    const { data, error } = await supabase
+      .from('generated_videos')
+      .delete()
+      .eq('channel_id', channelId)
+      .lt('created_at', cutoffDate.toISOString())
+      .not('video_type', 'in', '("intro","outro")') // Keep intro/outro forever
+      .select();
+
+    if (error) {
+      console.error("Error cleaning up old videos:", error);
+      return 0;
+    }
+
+    const count = data?.length || 0;
+    if (count > 0) {
+      console.log(`🧹 Cleaned up ${count} old cached videos`);
+    }
+    return count;
+  } catch (e) {
+    console.error("Error in cleanupOldVideos:", e);
+    return 0;
+  }
+};
