@@ -25,39 +25,22 @@ export const verifyStorageBucket = async (): Promise<boolean> => {
   }
 
   try {
-    // Try to list buckets to check if channel-assets exists
-    const { data: buckets, error } = await supabase.storage.listBuckets();
+    // First, try a simple operation to see if bucket exists (most reliable)
+    // This works even if listBuckets() fails due to permissions
+    const { data: testData, error: testError } = await supabase.storage
+      .from('channel-assets')
+      .list('', { limit: 1 });
     
-    if (error) {
-      // If we can't list buckets, try a simple operation to see if bucket exists
-      const { error: testError } = await supabase.storage
-        .from('channel-assets')
-        .list('', { limit: 1 });
-      
-      if (testError) {
-        if (testError.message?.includes('Bucket not found') || testError.message?.includes('not found')) {
-          console.error("❌ Storage bucket 'channel-assets' not found!");
-          console.error("📋 To create it:");
-          console.error("   1. Go to Supabase Dashboard > Storage");
-          console.error("   2. Click 'New bucket'");
-          console.error("   3. Name: 'channel-assets'");
-          console.error("   4. Set as Public: YES");
-          console.error("   5. Click 'Create bucket'");
-          console.error("   Or see: supabase_storage_setup.sql for detailed instructions");
-          return false;
-        }
-        // Other errors might be permissions, but bucket might exist
-        console.warn("⚠️ Could not verify bucket (may be permissions issue):", testError.message);
-        return false;
-      }
-      // No error means bucket exists
+    // If we can list (even if empty), the bucket exists
+    if (!testError) {
+      console.log("✅ Storage bucket 'channel-assets' verified");
       return true;
     }
 
-    // Check if bucket exists in the list
-    const bucketExists = buckets?.some(bucket => bucket.name === 'channel-assets');
-    
-    if (!bucketExists) {
+    // If error is specifically "Bucket not found", it doesn't exist
+    if (testError.message?.includes('Bucket not found') || 
+        testError.message?.includes('not found') ||
+        testError.message?.includes('does not exist')) {
       console.error("❌ Storage bucket 'channel-assets' not found!");
       console.error("📋 To create it:");
       console.error("   1. Go to Supabase Dashboard > Storage");
@@ -69,11 +52,28 @@ export const verifyStorageBucket = async (): Promise<boolean> => {
       return false;
     }
 
-    console.log("✅ Storage bucket 'channel-assets' verified");
-    return true;
+    // If we get here, it might be a permissions issue
+    // Try listing buckets as a fallback
+    const { data: buckets, error: listError } = await supabase.storage.listBuckets();
+    
+    if (!listError && buckets) {
+      const bucketExists = buckets.some(bucket => bucket.name === 'channel-assets');
+      if (bucketExists) {
+        console.log("✅ Storage bucket 'channel-assets' verified (via listBuckets)");
+        return true;
+      }
+    }
+
+    // If we can't verify but error doesn't say "not found", assume it might exist
+    // (could be permissions issue) and return true to avoid blocking the app
+    console.warn("⚠️ Could not fully verify bucket (may be permissions issue):", testError.message);
+    console.warn("⚠️ Assuming bucket exists. If uploads fail, check bucket permissions.");
+    return true; // Assume it exists if we can't verify (better UX than blocking)
   } catch (e) {
     console.error("Error verifying storage bucket:", e);
-    return false;
+    // On error, assume bucket exists to avoid blocking the app
+    console.warn("⚠️ Error during verification, assuming bucket exists");
+    return true;
   }
 };
 

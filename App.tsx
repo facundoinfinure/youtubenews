@@ -180,6 +180,7 @@ const App: React.FC = () => {
   }, []);
 
   // Restore progress after login and check for abandoned productions
+  // Only run once when user first logs in, not on every state change
   useEffect(() => {
     if (user && state === AppState.IDLE && activeChannel) {
       // First check for abandoned productions in DB
@@ -195,11 +196,14 @@ const App: React.FC = () => {
       checkAbandonedProductions();
 
       // Also restore from localStorage as fallback
+      // Only restore if we're truly at IDLE (not in the middle of something)
       const saved = localStorage.getItem('chimpNewsProgress');
       if (saved) {
         try {
           const parsed = JSON.parse(saved);
-          if (parsed.state === AppState.READY || parsed.state === AppState.SELECTING_NEWS) {
+          // Only restore if the saved state indicates work was in progress
+          if (parsed.state === AppState.READY || parsed.state === AppState.SELECTING_NEWS || 
+              parsed.state === AppState.PREVIEW || parsed.state === AppState.GENERATING_MEDIA) {
             setAllNews(parsed.allNews || []);
             setSelectedNews(parsed.selectedNews || []);
             setSegments(parsed.segments || []);
@@ -215,7 +219,7 @@ const App: React.FC = () => {
         }
       }
     }
-  }, [user, activeChannel]);
+  }, [user, activeChannel]); // Only depend on user and activeChannel, not state
 
   // Persist state when tab becomes hidden (visibility change)
   useEffect(() => {
@@ -248,6 +252,31 @@ const App: React.FC = () => {
             setCurrentProductionId(saved.id);
             console.log("💾 Production state saved before tab hidden");
             // Silent save - no toast to avoid interrupting user
+          }
+        }
+      }
+      // When tab becomes visible again, restore state from localStorage if needed
+      // This prevents the app from switching to home when user returns
+      if (!document.hidden && state === AppState.IDLE && user && activeChannel) {
+        // Only restore if we're at IDLE (home) and there's saved state
+        const saved = localStorage.getItem('chimpNewsProgress');
+        if (saved) {
+          try {
+            const parsed = JSON.parse(saved);
+            // Only restore if the saved state is not IDLE (meaning there was work in progress)
+            if (parsed.state && parsed.state !== AppState.IDLE && parsed.state !== AppState.LOGIN) {
+              setAllNews(parsed.allNews || []);
+              setSelectedNews(parsed.selectedNews || []);
+              setSegments(parsed.segments || []);
+              setVideos(parsed.videos || { wide: null, hostA: [], hostB: [] });
+              setViralMeta(parsed.viralMeta || null);
+              setSelectedDate(parsed.selectedDate || getYesterday());
+              setLogs(parsed.logs || []);
+              setState(parsed.state);
+              console.log("🔄 Restored state when tab became visible");
+            }
+          } catch (e) {
+            console.error("Failed to restore state on visibility change", e);
           }
         }
       }
