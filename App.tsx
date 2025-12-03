@@ -389,6 +389,13 @@ const App: React.FC = () => {
   };
 
   const startProduction = async (finalNews: NewsItem[], resumeFromProduction?: any) => {
+    if (!activeChannel) {
+      setState(AppState.ERROR);
+      addLog("❌ No active channel selected. Please select a channel first.");
+      toast.error('No active channel selected. Please select a channel first.');
+      return;
+    }
+
     setVideos({ wide: null, hostA: [], hostB: [] });
     setSegments([]);
     setViralMeta(null);
