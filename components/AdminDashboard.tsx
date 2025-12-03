@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { ChannelConfig, CharacterProfile, StoredVideo, Channel, UserProfile, Production } from '../types';
-import { fetchVideosFromDB, saveConfigToDB, getAllChannels, saveChannel, uploadImageToStorage, getIncompleteProductions, getAllProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction } from '../services/supabaseService';
+import { fetchVideosFromDB, saveConfigToDB, getAllChannels, saveChannel, uploadImageToStorage, getIncompleteProductions, getAllProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction } from '../services/supabaseService';
 import { generateReferenceImage } from '../services/geminiService';
 import { CostTracker } from '../services/CostTracker';
 import { ContentCache } from '../services/ContentCache';
@@ -937,6 +937,42 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                           >
                             🔄 New Version
                           </button>
+                          {(production.status === 'in_progress' || production.status === 'draft') && (
+                            <button
+                              onClick={async () => {
+                                if (confirm('Are you sure you want to delete this production? This action cannot be undone.')) {
+                                  try {
+                                    const success = await deleteProduction(production.id);
+                                    if (success) {
+                                      toast.success('Production deleted successfully!');
+                                      // Refresh productions list
+                                      if (activeChannel && user) {
+                                        if (productionFilter === 'all') {
+                                          const allProds = await getAllProductions(activeChannel.id, user.email, 100);
+                                          setProductions(allProds);
+                                        } else if (productionFilter === 'incomplete') {
+                                          const incomplete = await getIncompleteProductions(activeChannel.id, user.email);
+                                          setProductions(incomplete);
+                                        } else {
+                                          const allProds = await getAllProductions(activeChannel.id, user.email, 100);
+                                          setProductions(allProds.filter(p => p.status === productionFilter));
+                                        }
+                                      }
+                                    } else {
+                                      toast.error('Failed to delete production');
+                                    }
+                                  } catch (error) {
+                                    console.error('Delete error:', error);
+                                    toast.error('Failed to delete production');
+                                  }
+                                }
+                              }}
+                              className="bg-red-600 text-white border border-red-500 hover:bg-red-700 px-3 py-1.5 rounded-lg text-xs font-bold transition-all duration-200 hover:scale-105 active:scale-95"
+                              title="Delete this production"
+                            >
+                              🗑️ Delete
+                            </button>
+                          )}
                           {production.status === 'completed' && (
                             <span className="text-green-400 text-xs flex items-center gap-1">
                               ✓ Completed

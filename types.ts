@@ -1,5 +1,6 @@
 
 export interface NewsItem {
+  id?: string; // UUID from database
   headline: string;
   source: string;
   url: string;

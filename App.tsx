@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { AppState, ChannelConfig, NewsItem, BroadcastSegment, VideoAssets, ViralMetadata, UserProfile, Channel, ScriptLine, StoredVideo } from './types';
-import { signInWithGoogle, getSession, signOut, getAllChannels, saveChannel, saveVideoToDB, getNewsByDate, saveNewsToDB, markNewsAsSelected, deleteVideoFromDB, loadConfigFromDB, supabase, fetchVideosFromDB, saveProduction, getIncompleteProductions, getProductionById, updateProductionStatus, uploadAudioToStorage, getAudioFromStorage, findCachedScript, findCachedAudio, getAllProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction } from './services/supabaseService';
+import { signInWithGoogle, getSession, signOut, getAllChannels, saveChannel, saveVideoToDB, getNewsByDate, saveNewsToDB, markNewsAsSelected, deleteVideoFromDB, loadConfigFromDB, supabase, fetchVideosFromDB, saveProduction, getIncompleteProductions, getProductionById, updateProductionStatus, uploadAudioToStorage, getAudioFromStorage, findCachedScript, findCachedAudio, getAllProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction } from './services/supabaseService';
 import { fetchEconomicNews, generateScript, generateSegmentedAudio, generateSegmentedAudioWithCache, setFindCachedAudioFunction, generateBroadcastVisuals, generateViralMetadata, generateThumbnail, generateThumbnailVariants, generateViralHook, generateVideoSegments } from './services/geminiService';
 import { uploadVideoToYouTube, deleteVideoFromYouTube } from './services/youtubeService';
 import { ContentCache } from './services/ContentCache';
@@ -214,14 +214,17 @@ const App: React.FC = () => {
         // Save current production state to DB before losing it
         if (currentProductionId || (state !== AppState.SELECTING_NEWS && selectedNews.length > 0)) {
           const dateObj = parseSelectedDate(selectedDate);
-          const newsIds = selectedNews.map(n => n.headline).filter(Boolean) as string[];
+          // Use actual news item IDs (UUIDs) if available, otherwise fall back to empty array
+          const newsIds = selectedNews
+            .map(n => n.id)
+            .filter((id): id is string => Boolean(id)) as string[];
           
           const productionData = {
             id: currentProductionId || undefined,
             channel_id: activeChannel.id,
             news_date: dateObj.toISOString().split('T')[0],
             status: 'in_progress' as const,
-            selected_news_ids: newsIds,
+            selected_news_ids: newsIds.length > 0 ? newsIds : [], // Store UUIDs, empty array if no IDs available
             progress_step: productionProgress.current,
             user_id: user.email,
             script: previewScript.length > 0 ? previewScript : undefined,
@@ -361,14 +364,17 @@ const App: React.FC = () => {
     if (!activeChannel || !user) return null;
 
     const dateObj = parseSelectedDate(selectedDate);
-    const newsIds = selectedNews.map(n => n.headline).filter(Boolean) as string[]; // Using headlines as IDs for now
+    // Use actual news item IDs (UUIDs) if available, otherwise fall back to empty array to avoid UUID type errors
+    const newsIds = selectedNews
+      .map(n => n.id)
+      .filter((id): id is string => Boolean(id)) as string[];
 
     const productionData = {
       id: productionId || undefined,
       channel_id: activeChannel.id,
       news_date: dateObj.toISOString().split('T')[0],
       status,
-      selected_news_ids: newsIds,
+      selected_news_ids: newsIds.length > 0 ? newsIds : [], // Store UUIDs, empty array if no IDs available
       progress_step: step,
       user_id: user.email,
       ...updates
@@ -757,10 +763,14 @@ const App: React.FC = () => {
       setSelectedDate(fullProduction.news_date);
       const allNewsItems = await getNewsByDate(dateObj, activeChannel.id);
       
-      // Match selected news by headlines (since we're using headlines as IDs for now)
-      const selected = allNewsItems.filter(n => 
-        fullProduction.selected_news_ids?.includes(n.headline)
-      );
+      // Match selected news by IDs (UUIDs) if available, otherwise fall back to headlines for backward compatibility
+      const selected = allNewsItems.filter(n => {
+        if (n.id && fullProduction.selected_news_ids) {
+          return fullProduction.selected_news_ids.includes(n.id);
+        }
+        // Fallback: match by headline for old productions that stored headlines
+        return fullProduction.selected_news_ids?.includes(n.headline);
+      });
       
       setSelectedNews(selected);
       setAllNews(allNewsItems);

@@ -310,6 +310,7 @@ export const getNewsByDate = async (newsDate: Date, channelId: string): Promise<
   console.log(`📰 Retrieved ${data.length} news items from database for date ${dateStr}`);
   
   return data.map((row: any) => ({
+    id: row.id, // Include UUID from database
     headline: row.headline,
     source: row.source,
     url: row.url,
@@ -668,6 +669,22 @@ export const updateProductionStatus = async (
 
   if (error) {
     console.error("Error updating production status:", error);
+    return false;
+  }
+
+  return true;
+};
+
+export const deleteProduction = async (id: string): Promise<boolean> => {
+  if (!supabase) return false;
+
+  const { error } = await supabase
+    .from('productions')
+    .delete()
+    .eq('id', id);
+
+  if (error) {
+    console.error("Error deleting production:", error);
     return false;
   }
 
