@@ -129,7 +129,36 @@ export const wavespeedRequest = async (
 };
 
 /**
+ * Get the Wavespeed API endpoint for a given model
+ * Wavespeed API v3 uses model-specific endpoints
+ */
+const getWavespeedEndpoint = (model: string, resolution: '480p' | '720p' = '720p'): string => {
+  // Map model names to API endpoints
+  const modelEndpoints: Record<string, string> = {
+    'wan-i2v-720p': `api/v3/wavespeed-ai/wan-2.1/i2v-720p`,
+    'wan-i2v-480p': `api/v3/wavespeed-ai/wan-2.1/i2v-480p`,
+    'wan-2.1-i2v-720p': `api/v3/wavespeed-ai/wan-2.1/i2v-720p`,
+    'wan-2.1-i2v-480p': `api/v3/wavespeed-ai/wan-2.1/i2v-480p`,
+    'wan-2.2-i2v-720p': `api/v3/wavespeed-ai/wan-2.2/i2v-720p`,
+    'wan-2.2-i2v-480p': `api/v3/wavespeed-ai/wan-2.2/i2v-480p`,
+  };
+  
+  return modelEndpoints[model] || `api/v3/wavespeed-ai/wan-2.1/i2v-${resolution}`;
+};
+
+/**
+ * Get video size based on aspect ratio for Wavespeed API
+ */
+const getVideoSize = (aspectRatio: '16:9' | '9:16', resolution: '480p' | '720p' = '720p'): string => {
+  if (resolution === '720p') {
+    return aspectRatio === '16:9' ? '1280*720' : '720*1280';
+  }
+  return aspectRatio === '16:9' ? '832*480' : '480*832';
+};
+
+/**
  * Create a Wavespeed video generation task
+ * Uses Wavespeed API v3 endpoints
  */
 export const createWavespeedVideoTask = async (
   prompt: string,
@@ -137,30 +166,39 @@ export const createWavespeedVideoTask = async (
   referenceImageUrl?: string,
   model?: string
 ): Promise<string> => {
-  const endpoint = 'v1/tasks';
+  const modelName = model || 'wan-i2v-720p';
+  const endpoint = getWavespeedEndpoint(modelName);
   
+  // Wavespeed API v3 request format
   const requestBody: any = {
-    model: model || 'wan-i2v-720p',
     prompt: prompt,
-    aspect_ratio: aspectRatio === '9:16' ? '9:16' : '16:9',
+    negative_prompt: "",
+    size: getVideoSize(aspectRatio),
+    num_inference_steps: 30,
+    duration: 5,
+    guidance_scale: 5,
+    flow_shift: 3,
+    seed: -1,
+    enable_safety_checker: false
   };
 
   if (referenceImageUrl) {
-    // Handle data URIs
+    // Handle data URIs and URLs - Wavespeed API v3 uses 'image' (singular) not 'images'
     if (referenceImageUrl.startsWith('data:')) {
       console.log(`[Wavespeed] 📸 Reference image is a data URI (${referenceImageUrl.length} chars)`);
     } else {
       console.log(`[Wavespeed] 📸 Using reference image URL: ${referenceImageUrl.substring(0, 80)}...`);
     }
-    requestBody.images = [referenceImageUrl];
+    requestBody.image = referenceImageUrl;
     console.log(`[Wavespeed] ✅ Reference image added to video generation request`);
   } else {
     console.warn(`[Wavespeed] ⚠️ No reference image provided - video may not match the intended podcast studio scene`);
   }
 
-  console.log(`[Wavespeed] 🚀 Creating video generation task with model: ${model || 'wan-i2v-720p'}`);
+  console.log(`[Wavespeed] 🚀 Creating video generation task with model: ${modelName}`);
   console.log(`[Wavespeed] 📝 Prompt length: ${prompt.length} chars`);
   console.log(`[Wavespeed] 📐 Aspect ratio: ${aspectRatio}`);
+  console.log(`[Wavespeed] 🔗 Endpoint: ${endpoint}`);
 
   const response = await wavespeedRequest(endpoint, {
     method: 'POST',
@@ -176,7 +214,8 @@ export const createWavespeedVideoTask = async (
   const data = await response.json();
   console.log(`[Wavespeed] 📦 Response data:`, JSON.stringify(data, null, 2));
   
-  const taskId = data.task_id || data.id || data.data?.id || data.data?.task_id;
+  // Wavespeed API v3 returns data.id as the request/task ID
+  const taskId = data.data?.id || data.id || data.requestId || data.request_id;
   
   if (!taskId) {
     console.error(`[Wavespeed] ❌ No task ID found in response:`, data);
@@ -189,13 +228,16 @@ export const createWavespeedVideoTask = async (
 
 /**
  * Poll a Wavespeed task for completion
+ * Uses Wavespeed API v3 endpoint: /api/v3/predictions/{taskId}/result
  */
 export const pollWavespeedTask = async (taskId: string): Promise<string> => {
-  const endpoint = `v1/tasks/${taskId}`;
+  // Wavespeed API v3 uses this endpoint for polling task results
+  const endpoint = `api/v3/predictions/${taskId}/result`;
   const maxRetries = 60; // 5 minutes max
   let retries = 0;
 
   console.log(`[Wavespeed] 🔄 Starting to poll task: ${taskId}`);
+  console.log(`[Wavespeed] 🔗 Polling endpoint: ${endpoint}`);
 
   while (retries < maxRetries) {
     await new Promise(resolve => setTimeout(resolve, 5000));
@@ -206,6 +248,12 @@ export const pollWavespeedTask = async (taskId: string): Promise<string> => {
 
     if (!response.ok) {
       const errorText = await response.text();
+      // For 404 or similar, the task might still be processing
+      if (response.status === 404 && retries < 10) {
+        console.log(`[Wavespeed] ⏳ Task not ready yet, waiting... (${retries + 1}/${maxRetries})`);
+        retries++;
+        continue;
+      }
       console.error(`[Wavespeed] ❌ Polling error (${response.status}): ${errorText}`);
       throw new Error(`Wavespeed polling error: ${response.status} - ${errorText}`);
     }
@@ -214,13 +262,15 @@ export const pollWavespeedTask = async (taskId: string): Promise<string> => {
     console.log(`[Wavespeed] 📊 Poll attempt ${retries + 1}/${maxRetries} - Status: ${data.status || data.data?.status || 'unknown'}`);
     
     const status = data.status || data.data?.status;
+    
+    // Wavespeed API v3 returns video URL in different possible fields
     const rawVideoUrl = 
+      data.data?.outputs?.[0] ||
+      data.outputs?.[0] ||
       data.result?.video_url || 
       data.data?.result?.video_url ||
       data.video_url ||
-      data.data?.video_url ||
-      (data.outputs && data.outputs[0]) ||
-      (data.data?.outputs && data.data.outputs[0]);
+      data.data?.video_url;
     
     let videoUrl: string | null = null;
     if (rawVideoUrl) {
@@ -234,7 +284,7 @@ export const pollWavespeedTask = async (taskId: string): Promise<string> => {
       }
     }
     
-    if (status === "completed") {
+    if (status === "completed" || status === "success") {
       if (videoUrl && typeof videoUrl === 'string') {
         console.log(`[Wavespeed] ✅ Video generation completed! URL: ${videoUrl.substring(0, 100)}...`);
         return videoUrl;
@@ -242,11 +292,11 @@ export const pollWavespeedTask = async (taskId: string): Promise<string> => {
         console.error(`[Wavespeed] ❌ Task completed but no valid video URL found. Response:`, JSON.stringify(data, null, 2));
         throw new Error(`Wavespeed task completed but no valid video URL was returned. Task ID: ${taskId}`);
       }
-    } else if (status === "failed" || data.data?.status === "failed") {
+    } else if (status === "failed" || status === "error") {
       const errorMsg = data.error || data.data?.error || data.message || "Unknown error";
       console.error(`[Wavespeed] ❌ Task failed: ${errorMsg}`);
       throw new Error(`Wavespeed task failed: ${errorMsg}`);
-    } else if (status === "processing" || status === "pending" || !status) {
+    } else if (status === "processing" || status === "pending" || status === "queued" || !status) {
       console.log(`[Wavespeed] ⏳ Task still processing... (${retries + 1}/${maxRetries})`);
     } else {
       console.warn(`[Wavespeed] ⚠️ Unknown status: ${status}, continuing to poll...`);

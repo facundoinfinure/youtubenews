@@ -5,13 +5,15 @@ const WAVESPEED_BASE_URL = 'https://api.wavespeed.ai';
 /**
  * Wavespeed API Proxy para Vercel Serverless Functions
  * 
- * Este endpoint actúa como proxy dinámico para todas las rutas de Wavespeed.
+ * Este endpoint actúa como proxy dinámico para todas las rutas de Wavespeed API v3.
  * 
- * Uso:
- * - POST /api/wavespeed-proxy/v1/tasks
- * - GET /api/wavespeed-proxy/v1/tasks/:taskId
- * - POST /api/wavespeed-proxy/api/v3/google/nano-banana-pro/edit
- * - GET /api/wavespeed-proxy/api/v3/predictions/:taskId/result
+ * Uso (Wavespeed API v3):
+ * - POST /api/wavespeed-proxy/api/v3/wavespeed-ai/wan-2.1/i2v-720p (crear video I2V 720p)
+ * - POST /api/wavespeed-proxy/api/v3/wavespeed-ai/wan-2.1/i2v-480p (crear video I2V 480p)
+ * - POST /api/wavespeed-proxy/api/v3/google/nano-banana-pro/edit (editar imagen)
+ * - GET /api/wavespeed-proxy/api/v3/predictions/:taskId/result (obtener resultado)
+ * 
+ * Documentación: https://wavespeed.ai/docs/docs
  * 
  * NOTA: Si este endpoint no funciona en producción, considera usar el backend separado
  * en la carpeta backend/ que puede desplegarse en Railway, Render, o Fly.io
