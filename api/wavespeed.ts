@@ -5,18 +5,14 @@ const WAVESPEED_BASE_URL = 'https://api.wavespeed.ai';
 /**
  * Wavespeed API Proxy para Vercel Serverless Functions
  * 
- * Este endpoint actúa como proxy dinámico para todas las rutas de Wavespeed API v3.
+ * Este endpoint actúa como proxy para la API de Wavespeed.
+ * La ruta de Wavespeed se pasa como query parameter 'path'
  * 
- * Uso (Wavespeed API v3):
- * - POST /api/wavespeed-proxy/api/v3/wavespeed-ai/wan-2.1/i2v-720p (crear video I2V 720p)
- * - POST /api/wavespeed-proxy/api/v3/wavespeed-ai/wan-2.1/i2v-480p (crear video I2V 480p)
- * - POST /api/wavespeed-proxy/api/v3/google/nano-banana-pro/edit (editar imagen)
- * - GET /api/wavespeed-proxy/api/v3/predictions/:taskId/result (obtener resultado)
+ * Uso:
+ * - POST /api/wavespeed?path=api/v3/wavespeed-ai/wan-2.1/i2v-720p
+ * - GET /api/wavespeed?path=api/v3/predictions/{taskId}/result
  * 
  * Documentación: https://wavespeed.ai/docs/docs
- * 
- * NOTA: Si este endpoint no funciona en producción, considera usar el backend separado
- * en la carpeta backend/ que puede desplegarse en Railway, Render, o Fly.io
  */
 
 export default async function handler(
@@ -28,24 +24,8 @@ export default async function handler(
   
   console.log(`[${requestId}] [Wavespeed Proxy] ${req.method} ${req.url}`);
 
-  // Configurar CORS
-  const origin = req.headers.origin;
-  const allowedOrigins = [
-    'http://localhost:5173',
-    'http://localhost:3000',
-    process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '',
-    process.env.VERCEL ? `https://${process.env.VERCEL}` : '',
-    ...(process.env.VITE_VERCEL_URL ? [process.env.VITE_VERCEL_URL] : []),
-  ].filter(Boolean);
-
-  if (origin && (allowedOrigins.includes(origin) || origin.includes('.vercel.app'))) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    console.log(`[${requestId}] CORS allowed for origin: ${origin}`);
-  } else {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    console.log(`[${requestId}] CORS set to * (no matching origin found)`);
-  }
-
+  // Configurar CORS - permitir todas las origenes para simplificar
+  res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('Access-Control-Max-Age', '86400');
@@ -68,30 +48,17 @@ export default async function handler(
   }
 
   try {
-    // Extraer el path del query parameter
-    // Con api/wavespeed-proxy/[...path].ts, el path será ['v1', 'tasks'] para /api/wavespeed-proxy/v1/tasks
-    const path = req.query.path as string | string[];
-    const wavespeedPath = Array.isArray(path) ? path.join('/') : path || '';
+    // Obtener el path de Wavespeed del query parameter
+    const wavespeedPath = req.query.path as string;
 
-    console.log(`[${requestId}] Path extracted:`, { 
-      raw: req.query.path, 
-      processed: wavespeedPath,
-      queryKeys: Object.keys(req.query),
-      url: req.url
-    });
+    console.log(`[${requestId}] Path from query:`, wavespeedPath);
     
     // Health check para el proxy mismo
-    if (wavespeedPath === 'health' || wavespeedPath === 'ping') {
-      return res.status(200).json({ status: 'ok', service: 'wavespeed-proxy-vercel' });
-    }
-
-    if (!wavespeedPath) {
-      console.error(`[${requestId}] ❌ No path provided in request`);
-      return res.status(400).json({ 
-        error: 'Path required',
-        message: 'Please provide a Wavespeed API path',
-        requestId,
-        query: req.query
+    if (!wavespeedPath || wavespeedPath === 'health' || wavespeedPath === 'ping') {
+      return res.status(200).json({ 
+        status: 'ok', 
+        service: 'wavespeed-proxy-vercel',
+        apiKeyConfigured: !!WAVESPEED_API_KEY
       });
     }
 

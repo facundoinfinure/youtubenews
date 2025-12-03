@@ -1,16 +1,10 @@
 {
   "functions": {
-    "api/wavespeed-proxy/[...path].ts": {
+    "api/wavespeed.ts": {
       "maxDuration": 60,
       "memory": 1024
     }
   },
-  "rewrites": [
-    {
-      "source": "/api/wavespeed-proxy/(.*)",
-      "destination": "/api/wavespeed-proxy/$1"
-    }
-  ],
   "headers": [
     {
       "source": "/api/(.*)",

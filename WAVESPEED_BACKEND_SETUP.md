@@ -49,21 +49,20 @@ Si despliegas tu frontend en Vercel, puedes usar las Serverless Functions inclui
 
 ### Endpoints del Proxy
 
-El proxy transforma las rutas de la siguiente manera:
+El proxy usa query parameters para mayor compatibilidad con Vercel:
 
 | Frontend llama a | Proxy envía a |
 |-----------------|---------------|
-| `/api/wavespeed-proxy/api/v3/wavespeed-ai/wan-2.1/i2v-720p` | `https://api.wavespeed.ai/api/v3/wavespeed-ai/wan-2.1/i2v-720p` |
-| `/api/wavespeed-proxy/api/v3/predictions/{id}/result` | `https://api.wavespeed.ai/api/v3/predictions/{id}/result` |
+| `/api/wavespeed?path=api/v3/wavespeed-ai/wan-2.1/i2v-720p` | `https://api.wavespeed.ai/api/v3/wavespeed-ai/wan-2.1/i2v-720p` |
+| `/api/wavespeed?path=api/v3/predictions/{id}/result` | `https://api.wavespeed.ai/api/v3/predictions/{id}/result` |
 
 ### Troubleshooting Vercel
 
 Si recibes errores 404 en los endpoints de Vercel:
 
-1. **Verifica que el archivo exista**: `api/wavespeed-proxy/[...path].ts`
-2. **Verifica `vercel.json`**: Debe tener la configuración de rewrites correcta
-3. **Verifica la variable de entorno**: `WAVESPEED_API_KEY` debe estar configurada en Vercel
-4. **Revisa los logs**: Vercel Dashboard > Deployments > (último deployment) > Functions
+1. **Verifica que el archivo exista**: `api/wavespeed.ts`
+2. **Verifica la variable de entorno**: `WAVESPEED_API_KEY` debe estar configurada en Vercel
+3. **Revisa los logs**: Vercel Dashboard > Deployments > (último deployment) > Functions
 
 ### Verificar configuración
 
@@ -71,10 +70,10 @@ Para verificar que el proxy funciona:
 
 ```bash
 # Test del health check
-curl https://tu-app.vercel.app/api/wavespeed-proxy/health
+curl "https://tu-app.vercel.app/api/wavespeed"
 ```
 
-Debería devolver: `{"status":"ok","service":"wavespeed-proxy-vercel"}`
+Debería devolver: `{"status":"ok","service":"wavespeed-proxy-vercel","apiKeyConfigured":true}`
 
 ## Verificación en el Frontend
 

@@ -49,15 +49,15 @@ const shouldUseProxy = (): boolean => {
 const getWavespeedBaseUrl = (): string => {
   if (shouldUseProxy()) {
     const proxyUrl = getProxyUrl().replace(/\/$/, ''); // Remove trailing slash
-    // Para Vercel Serverless Functions, la ruta es /api/wavespeed-proxy
-    return `${proxyUrl}/api/wavespeed-proxy`;
+    // Para Vercel Serverless Functions, la ruta es /api/wavespeed
+    return `${proxyUrl}/api/wavespeed`;
   }
   return "https://api.wavespeed.ai";
 };
 
 /**
  * Make a proxied request to Wavespeed API
- * This will use your backend proxy if configured, otherwise attempt direct call (may fail with CORS)
+ * Uses /api/wavespeed?path=... format which works reliably on Vercel
  */
 export const wavespeedRequest = async (
   endpoint: string,
@@ -70,11 +70,15 @@ export const wavespeedRequest = async (
   const { method = 'GET', body, headers = {} } = options;
   
   if (shouldUseProxy()) {
-    // Para Vercel, usar el formato /api/wavespeed-proxy/...path
     const proxyUrl = getProxyUrl().replace(/\/$/, '');
     // Remover el leading slash del endpoint si existe
     const cleanEndpoint = endpoint.startsWith('/') ? endpoint.slice(1) : endpoint;
-    const url = `${proxyUrl}/api/wavespeed-proxy/${cleanEndpoint}`;
+    
+    // IMPORTANTE: Usar /api/wavespeed?path=... en lugar de /api/wavespeed-proxy/...
+    // Las rutas dinámicas [...path] no funcionan bien en Vercel
+    const url = `${proxyUrl}/api/wavespeed?path=${encodeURIComponent(cleanEndpoint)}`;
+    
+    console.log(`[Wavespeed Proxy] 🔗 Calling: ${url}`);
     
     return fetch(url, {
       method,
