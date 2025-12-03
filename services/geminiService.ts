@@ -732,22 +732,30 @@ FINAL CHECK: Verify the image contains EXACTLY the characters described (${hostA
 };
 
 export const generateThumbnail = async (newsContext: string, config: ChannelConfig): Promise<string | null> => {
+  // Enhanced prompt for better thumbnail quality
   const prompt = `
   Create a high-impact YouTube thumbnail for a news video about: ${newsContext}.
   Channel Style: ${config.channelName} (${config.tone}).
-  Visuals: Bold, high contrast, breaking news style. 
-  Include text overlay if possible or just striking imagery.
-  Aspect Ratio: 16:9.
-  No photorealistic faces of real politicians if restricted, use stylized or symbolic representations.
+  
+  VISUAL REQUIREMENTS:
+  - Bold, high contrast, breaking news style
+  - Vibrant colors that pop on mobile screens
+  - Professional news aesthetic with modern design
+  - Clear focal point that draws the eye
+  - Include text overlay if possible or just striking imagery
+  - Aspect Ratio: 16:9 (1280x720)
+  - No photorealistic faces of real politicians if restricted, use stylized or symbolic representations
+  - Use icons, symbols, or abstract representations when needed
+  - Ensure text is large and readable at thumbnail size
 `.trim();
 
-  // Try WaveSpeed Nano Banana Pro first
+  // Try WaveSpeed generation model first (no placeholder needed)
   if (isWavespeedConfigured()) {
     try {
-      console.log(`🎨 [Thumbnail] Generating thumbnail using WaveSpeed...`);
+      console.log(`🎨 [Thumbnail] Generating thumbnail using WaveSpeed (generation model)...`);
       
-      const placeholderImage = createPlaceholderImage(1024, 576);
-      const taskId = await createWavespeedImageTask(prompt, '16:9', placeholderImage);
+      // Try generation model first (no input image)
+      const taskId = await createWavespeedImageTask(prompt, '16:9');
       const imageUrl = await pollWavespeedImageTask(taskId);
       
       const dataUri = await imageUrlToDataUri(imageUrl);
@@ -756,14 +764,55 @@ export const generateThumbnail = async (newsContext: string, config: ChannelConf
       console.log(`✅ [Thumbnail] Generated via WaveSpeed`);
       return dataUri;
     } catch (wavespeedError) {
-      console.error(`⚠️ [Thumbnail] WaveSpeed failed, trying DALL-E:`, (wavespeedError as Error).message);
+      console.error(`⚠️ [Thumbnail] WaveSpeed generation failed, trying edit model:`, (wavespeedError as Error).message);
+      
+      // Fallback to edit model with placeholder
+      try {
+        console.log(`🎨 [Thumbnail] Trying WaveSpeed edit model with placeholder...`);
+        const placeholderImage = createPlaceholderImage(1024, 576);
+        const taskId = await createWavespeedImageTask(prompt, '16:9', placeholderImage);
+        const imageUrl = await pollWavespeedImageTask(taskId);
+        
+        const dataUri = await imageUrlToDataUri(imageUrl);
+        CostTracker.track('thumbnail', 'wavespeed/nano-banana-pro', 0.14);
+        
+        console.log(`✅ [Thumbnail] Generated via WaveSpeed (edit model)`);
+        return dataUri;
+      } catch (editError) {
+        console.error(`⚠️ [Thumbnail] WaveSpeed edit model also failed, trying DALL-E:`, (editError as Error).message);
+      }
     }
   }
 
-  // Fallback to DALL-E 3
+  // Enhanced DALL-E prompt for better quality
+  const enhancedDallePrompt = `
+  Create a professional, high-impact YouTube thumbnail image for a news video.
+  
+  TOPIC: ${newsContext}
+  CHANNEL: ${config.channelName} (${config.tone} tone)
+  
+  DESIGN SPECIFICATIONS:
+  - Style: Modern news broadcast aesthetic, similar to CNN, BBC, or Fox News thumbnails
+  - Composition: Bold, eye-catching layout with strong visual hierarchy
+  - Colors: High contrast, vibrant palette that works on mobile (avoid muted tones)
+  - Typography: Large, bold text overlay if applicable, highly readable at small sizes
+  - Visual elements: Use icons, symbols, charts, or abstract graphics rather than photorealistic people when possible
+  - Lighting: Dramatic, professional studio lighting with clear shadows and highlights
+  - Mood: Urgent, breaking news atmosphere
+  
+  TECHNICAL:
+  - Aspect ratio: 16:9 (1280x720 equivalent)
+  - Resolution: High quality, sharp details
+  - No watermarks, no text that might be cut off
+  - Professional news channel aesthetic
+  
+  Make it CLICK-WORTHY and visually striking!
+`.trim();
+
+  // Fallback to DALL-E 3 with enhanced prompt
   try {
-    console.log(`🎨 [Thumbnail] Generating thumbnail using DALL-E 3 (fallback)...`);
-    const dalleImage = await generateImageWithDALLE(prompt, '1792x1024');
+    console.log(`🎨 [Thumbnail] Generating thumbnail using DALL-E 3 (enhanced prompt)...`);
+    const dalleImage = await generateImageWithDALLE(enhancedDallePrompt, '1792x1024');
     
     if (dalleImage) {
       console.log(`✅ [Thumbnail] Generated via DALL-E 3`);
@@ -803,48 +852,76 @@ export const generateThumbnailVariants = async (
   const variantStyle = styles[(styleIndex + 1) % styles.length];
 
   const basePrompt = (style: typeof styles[0]) => `
-Create a VIRAL YouTube thumbnail for: "${viralMeta.title}"
+Create a VIRAL, high-performance YouTube thumbnail image.
 
-Topic: ${newsContext}
-Channel: ${config.channelName}
+HEADLINE: "${viralMeta.title}"
+TOPIC: ${newsContext}
+CHANNEL: ${config.channelName} (${config.tone} tone)
 
-STYLE: ${style.name}
+THUMBNAIL STYLE: ${style.name}
 ${style.prompt}
 
-REQUIREMENTS:
-- 16:9 ratio (1280x720)
-- Bold readable text: "${viralMeta.title.substring(0, 30)}"
-- Brand colors: ${config.logoColor1}, ${config.logoColor2}
-- High contrast (mobile-friendly)
-- Evoke emotion: shock, curiosity, urgency
-- NO photorealistic politicians (use icons/symbols)
-- Professional news aesthetic
+DESIGN REQUIREMENTS:
+- Aspect ratio: 16:9 (1280x720 equivalent)
+- Text overlay: Large, bold, highly readable text displaying "${viralMeta.title.substring(0, 40)}"
+- Color scheme: Use brand colors ${config.logoColor1} and ${config.logoColor2} prominently, with high contrast
+- Mobile optimization: Must be clear and impactful when viewed at small sizes (thumbnails are tiny!)
+- Emotional impact: Evoke shock, curiosity, or urgency through visual composition
+- Professional quality: News channel aesthetic (like CNN, BBC, Fox News style thumbnails)
+- Visual elements: Use icons, symbols, charts, or stylized graphics - avoid photorealistic politicians
+- Typography: Bold sans-serif font, white or yellow text with dark outline for maximum readability
+- Composition: Strong focal point, rule of thirds, visual hierarchy that guides the eye
 
-Make it CLICK-WORTHY!
+TECHNICAL:
+- High resolution, sharp details
+- No watermarks or logos
+- Professional lighting and shadows
+- Modern, clean design aesthetic
+
+Make it MAXIMUM CLICK-THROUGH RATE - this thumbnail needs to stand out in YouTube search results!
 `.trim();
 
   // Helper function to generate a single thumbnail with WaveSpeed + DALL-E fallback
   const generateSingleThumbnail = async (prompt: string): Promise<string | null> => {
-    // Try WaveSpeed first
+    // Try WaveSpeed generation model first (no placeholder)
     if (isWavespeedConfigured()) {
       try {
-        const placeholderImage = createPlaceholderImage(1024, 576);
-        const taskId = await createWavespeedImageTask(prompt, '16:9', placeholderImage);
+        console.log(`🎨 [Thumbnail Variant] Trying WaveSpeed generation model...`);
+        const taskId = await createWavespeedImageTask(prompt, '16:9');
         const imageUrl = await pollWavespeedImageTask(taskId);
         const dataUri = await imageUrlToDataUri(imageUrl);
         CostTracker.track('thumbnail', 'wavespeed/nano-banana-pro', 0.14);
+        console.log(`✅ [Thumbnail Variant] Generated via WaveSpeed`);
         return dataUri;
-      } catch (e) {
-        console.warn(`⚠️ WaveSpeed thumbnail failed, trying DALL-E`);
+      } catch (genError) {
+        console.warn(`⚠️ WaveSpeed generation failed, trying edit model:`, (genError as Error).message);
+        
+        // Fallback to edit model with placeholder
+        try {
+          console.log(`🎨 [Thumbnail Variant] Trying WaveSpeed edit model...`);
+          const placeholderImage = createPlaceholderImage(1024, 576);
+          const taskId = await createWavespeedImageTask(prompt, '16:9', placeholderImage);
+          const imageUrl = await pollWavespeedImageTask(taskId);
+          const dataUri = await imageUrlToDataUri(imageUrl);
+          CostTracker.track('thumbnail', 'wavespeed/nano-banana-pro', 0.14);
+          console.log(`✅ [Thumbnail Variant] Generated via WaveSpeed (edit)`);
+          return dataUri;
+        } catch (editError) {
+          console.warn(`⚠️ WaveSpeed edit model also failed, trying DALL-E:`, (editError as Error).message);
+        }
       }
     }
 
-    // Fallback to DALL-E
+    // Enhanced DALL-E fallback with better prompt
     try {
+      console.log(`🎨 [Thumbnail Variant] Using DALL-E 3 with enhanced prompt...`);
       const dalleImage = await generateImageWithDALLE(prompt, '1792x1024');
+      if (dalleImage) {
+        console.log(`✅ [Thumbnail Variant] Generated via DALL-E 3`);
+      }
       return dalleImage;
     } catch (e) {
-      console.error(`❌ DALL-E thumbnail failed`);
+      console.error(`❌ DALL-E thumbnail failed:`, (e as Error).message);
       return null;
     }
   };
