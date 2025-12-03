@@ -699,7 +699,7 @@ export const BroadcastPlayer: React.FC<BroadcastPlayerProps> = ({
                         const centerShift_y = (canvas.height - activeVid.videoHeight * ratio) / 2;
 
                         // Sync video playback to timeline for consistent rendering
-                        if (isTalking) {
+                        if (isTalking && currentSeg) {
                             if (activeVid.paused) {
                                 // Calculate video position within segment for looping
                                 const segmentProgress = (elapsedSec - currentSeg.start) / (currentSeg.end - currentSeg.start);
