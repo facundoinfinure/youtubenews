@@ -4,7 +4,7 @@ export const MODEL_STRATEGY = {
     news: "gemini-2.5-flash",           // Needs grounding
     audio: "gemini-2.5-flash-preview-tts", // Quality matters
     video: "veo-3.1-generate-preview",  // VEO 3.1 - official model name from docs (fallback)
-    thumbnail: "imagen-3.0-generate-001", // Quality matters
+    thumbnail: "gemini-2.5-flash-image", // Gemini model with image generation support
 
     // Simple tasks - can use cheaper models
     script: "gemini-2.0-flash-lite",    // Template-based, 40% cheaper

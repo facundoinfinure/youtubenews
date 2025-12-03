@@ -87,6 +87,13 @@ See [backend/README.md](./backend/README.md) for detailed deployment instruction
 
 1.  Create a new Supabase project.
 2.  Run the SQL scripts (if provided) to set up the `channels`, `news_items`, and `videos` tables.
+3.  **IMPORTANT**: Create the `channel-assets` storage bucket:
+   - Go to Supabase Dashboard > Storage
+   - Click "New bucket"
+   - Name: `channel-assets`
+   - Set as Public: YES
+   - Click "Create bucket"
+   - See `supabase_storage_setup.sql` for detailed instructions
 
 ### Google Cloud (YouTube)
 

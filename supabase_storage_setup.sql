@@ -1,0 +1,70 @@
+-- =============================================================================================
+-- SUPABASE STORAGE BUCKET SETUP
+-- =============================================================================================
+-- 
+-- IMPORTANT: Supabase Storage buckets cannot be created via SQL.
+-- You must create them through the Supabase Dashboard or using the Storage API.
+--
+-- Steps to create the 'channel-assets' bucket:
+--
+-- Option 1: Via Supabase Dashboard (Recommended)
+-- 1. Go to your Supabase project dashboard
+-- 2. Navigate to "Storage" in the left sidebar
+-- 3. Click "New bucket"
+-- 4. Name: "channel-assets"
+-- 5. Set as Public: YES (or configure RLS policies as needed)
+-- 6. Click "Create bucket"
+--
+-- Option 2: Via Supabase CLI
+-- Run this command in your terminal:
+--   supabase storage create channel-assets --public
+--
+-- Option 3: Via API (using curl or your preferred HTTP client)
+-- POST https://<your-project-ref>.supabase.co/storage/v1/bucket
+-- Headers:
+--   Authorization: Bearer <your-service-role-key>
+--   apikey: <your-service-role-key>
+--   Content-Type: application/json
+-- Body:
+--   {
+--     "name": "channel-assets",
+--     "public": true
+--   }
+--
+-- =============================================================================================
+-- STORAGE POLICIES (RLS)
+-- =============================================================================================
+-- After creating the bucket, you may want to set up Row Level Security policies
+-- to control access. Here are some example policies:
+
+-- Allow public read access (if bucket is public, this may not be needed)
+-- CREATE POLICY "Public Access" ON storage.objects
+--   FOR SELECT USING (bucket_id = 'channel-assets');
+
+-- Allow authenticated users to upload
+-- CREATE POLICY "Authenticated Upload" ON storage.objects
+--   FOR INSERT WITH CHECK (
+--     bucket_id = 'channel-assets' AND
+--     auth.role() = 'authenticated'
+--   );
+
+-- Allow authenticated users to update their own files
+-- CREATE POLICY "Authenticated Update" ON storage.objects
+--   FOR UPDATE USING (
+--     bucket_id = 'channel-assets' AND
+--     auth.role() = 'authenticated'
+--   );
+
+-- Allow authenticated users to delete their own files
+-- CREATE POLICY "Authenticated Delete" ON storage.objects
+--   FOR DELETE USING (
+--     bucket_id = 'channel-assets' AND
+--     auth.role() = 'authenticated'
+--   );
+
+-- =============================================================================================
+-- VERIFICATION
+-- =============================================================================================
+-- After creating the bucket, verify it exists by checking in the dashboard
+-- or by querying:
+-- SELECT * FROM storage.buckets WHERE name = 'channel-assets';

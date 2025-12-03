@@ -51,14 +51,25 @@ const createWavespeedTask = async (prompt: string, aspectRatio: '16:9' | '9:16',
   console.log(`[Wavespeed] 📝 Prompt length: ${prompt.length} chars`);
   console.log(`[Wavespeed] 📐 Aspect ratio: ${aspectRatio}`);
 
-  const response = await fetch(wavespeedApiUrl, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${apiKey}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(requestBody)
-  });
+  let response: Response;
+  try {
+    response = await fetch(wavespeedApiUrl, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(requestBody)
+    });
+  } catch (fetchError: any) {
+    // Handle CORS and network errors
+    if (fetchError.message?.includes('CORS') || fetchError.message?.includes('Failed to fetch')) {
+      console.error(`[Wavespeed] ❌ CORS error: API calls to Wavespeed must be made from a backend server or through a proxy.`);
+      console.error(`[Wavespeed] Current origin: ${typeof window !== 'undefined' ? window.location.origin : 'unknown'}`);
+      throw new Error(`CORS error: Wavespeed API cannot be called directly from the browser. Please configure a backend proxy or use server-side API calls.`);
+    }
+    throw fetchError;
+  }
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -94,12 +105,22 @@ const pollWavespeedTask = async (taskId: string): Promise<string> => {
   while (retries < maxRetries) {
     await new Promise(resolve => setTimeout(resolve, 5000));
 
-    const response = await fetch(wavespeedApiUrl, {
-      method: "GET",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`
+    let response: Response;
+    try {
+      response = await fetch(wavespeedApiUrl, {
+        method: "GET",
+        headers: {
+          "Authorization": `Bearer ${apiKey}`
+        }
+      });
+    } catch (fetchError: any) {
+      // Handle CORS and network errors
+      if (fetchError.message?.includes('CORS') || fetchError.message?.includes('Failed to fetch')) {
+        console.error(`[Wavespeed] ❌ CORS error during polling: API calls to Wavespeed must be made from a backend server.`);
+        throw new Error(`CORS error: Wavespeed API cannot be called directly from the browser. Please configure a backend proxy.`);
       }
-    });
+      throw fetchError;
+    }
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -241,14 +262,24 @@ const createWavespeedImageTask = async (
     requestBody.images = [imageUrl];
   }
 
-  const response = await fetch(wavespeedApiUrl, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${apiKey}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(requestBody)
-  });
+  let response: Response;
+  try {
+    response = await fetch(wavespeedApiUrl, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(requestBody)
+    });
+  } catch (fetchError: any) {
+    // Handle CORS and network errors
+    if (fetchError.message?.includes('CORS') || fetchError.message?.includes('Failed to fetch')) {
+      console.error(`[Wavespeed] ❌ CORS error: API calls to Wavespeed must be made from a backend server or through a proxy.`);
+      throw new Error(`CORS error: Wavespeed API cannot be called directly from the browser. Please configure a backend proxy or use server-side API calls.`);
+    }
+    throw fetchError;
+  }
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -278,12 +309,22 @@ const pollWavespeedImageTask = async (taskId: string): Promise<string> => {
   while (retries < maxRetries) {
     await new Promise(resolve => setTimeout(resolve, 3000)); // Check every 3 seconds for images
 
-    const response = await fetch(wavespeedApiUrl, {
-      method: "GET",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`
+    let response: Response;
+    try {
+      response = await fetch(wavespeedApiUrl, {
+        method: "GET",
+        headers: {
+          "Authorization": `Bearer ${apiKey}`
+        }
+      });
+    } catch (fetchError: any) {
+      // Handle CORS and network errors
+      if (fetchError.message?.includes('CORS') || fetchError.message?.includes('Failed to fetch')) {
+        console.error(`[Wavespeed] ❌ CORS error during image polling: API calls to Wavespeed must be made from a backend server.`);
+        throw new Error(`CORS error: Wavespeed API cannot be called directly from the browser. Please configure a backend proxy.`);
       }
-    });
+      throw fetchError;
+    }
 
     if (!response.ok) {
       throw new Error(`Wavespeed image polling error: ${response.status}`);

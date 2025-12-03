@@ -11,6 +11,72 @@ const supabaseKey = getSupabaseKey();
 
 export const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
+// =============================================================================================
+// STORAGE BUCKET VERIFICATION
+// =============================================================================================
+
+/**
+ * Verifies that the channel-assets bucket exists, or provides instructions to create it
+ */
+export const verifyStorageBucket = async (): Promise<boolean> => {
+  if (!supabase) {
+    console.error("❌ Supabase not initialized - cannot verify storage bucket");
+    return false;
+  }
+
+  try {
+    // Try to list buckets to check if channel-assets exists
+    const { data: buckets, error } = await supabase.storage.listBuckets();
+    
+    if (error) {
+      // If we can't list buckets, try a simple operation to see if bucket exists
+      const { error: testError } = await supabase.storage
+        .from('channel-assets')
+        .list('', { limit: 1 });
+      
+      if (testError) {
+        if (testError.message?.includes('Bucket not found') || testError.message?.includes('not found')) {
+          console.error("❌ Storage bucket 'channel-assets' not found!");
+          console.error("📋 To create it:");
+          console.error("   1. Go to Supabase Dashboard > Storage");
+          console.error("   2. Click 'New bucket'");
+          console.error("   3. Name: 'channel-assets'");
+          console.error("   4. Set as Public: YES");
+          console.error("   5. Click 'Create bucket'");
+          console.error("   Or see: supabase_storage_setup.sql for detailed instructions");
+          return false;
+        }
+        // Other errors might be permissions, but bucket might exist
+        console.warn("⚠️ Could not verify bucket (may be permissions issue):", testError.message);
+        return false;
+      }
+      // No error means bucket exists
+      return true;
+    }
+
+    // Check if bucket exists in the list
+    const bucketExists = buckets?.some(bucket => bucket.name === 'channel-assets');
+    
+    if (!bucketExists) {
+      console.error("❌ Storage bucket 'channel-assets' not found!");
+      console.error("📋 To create it:");
+      console.error("   1. Go to Supabase Dashboard > Storage");
+      console.error("   2. Click 'New bucket'");
+      console.error("   3. Name: 'channel-assets'");
+      console.error("   4. Set as Public: YES");
+      console.error("   5. Click 'Create bucket'");
+      console.error("   Or see: supabase_storage_setup.sql for detailed instructions");
+      return false;
+    }
+
+    console.log("✅ Storage bucket 'channel-assets' verified");
+    return true;
+  } catch (e) {
+    console.error("Error verifying storage bucket:", e);
+    return false;
+  }
+};
+
 export const signInWithGoogle = async () => {
   if (!supabase) throw new Error("Supabase not initialized");
   const { data, error } = await supabase.auth.signInWithOAuth({
@@ -192,7 +258,7 @@ export const getChannelIntroOutro = async (channelId: string): Promise<{ introUr
 
   const { data, error } = await supabase
     .from('channels')
-    .select('intro_video_url, outro_video_url')
+    .select('config')
     .eq('id', channelId)
     .single();
 
@@ -201,9 +267,11 @@ export const getChannelIntroOutro = async (channelId: string): Promise<{ introUr
     return { introUrl: null, outroUrl: null };
   }
 
+  // Extract intro/outro URLs from config JSONB field
+  const config = data?.config as any;
   return {
-    introUrl: data?.intro_video_url || null,
-    outroUrl: data?.outro_video_url || null
+    introUrl: config?.intro_video_url || null,
+    outroUrl: config?.outro_video_url || null
   };
 };
 
@@ -214,12 +282,29 @@ export const saveChannelIntroOutro = async (
 ): Promise<boolean> => {
   if (!supabase) return false;
 
+  // First, get the current channel config
+  const { data: channelData, error: fetchError } = await supabase
+    .from('channels')
+    .select('config')
+    .eq('id', channelId)
+    .single();
+
+  if (fetchError) {
+    console.error("Error fetching channel for intro/outro save:", fetchError);
+    return false;
+  }
+
+  // Update config with intro/outro URLs
+  const currentConfig = (channelData?.config || {}) as any;
+  const updatedConfig = {
+    ...currentConfig,
+    intro_video_url: introUrl,
+    outro_video_url: outroUrl
+  };
+
   const { error } = await supabase
     .from('channels')
-    .update({
-      intro_video_url: introUrl,
-      outro_video_url: outroUrl
-    })
+    .update({ config: updatedConfig })
     .eq('id', channelId);
 
   if (error) {
@@ -357,14 +442,23 @@ export const uploadImageToStorage = async (imageDataUrl: string, fileName: strin
     const filePath = `channel-images/${fileName}`;
 
     const { data, error } = await supabase.storage
-      .from('channel-assets') // You may need to create this bucket
+      .from('channel-assets')
       .upload(filePath, blob, {
         contentType: blob.type,
         upsert: true
       });
 
     if (error) {
-      console.error("Error uploading image:", error);
+      // Check if error is due to bucket not existing
+      if (error.message?.includes('Bucket not found') || error.message?.includes('not found')) {
+        console.error("❌ Storage bucket 'channel-assets' not found. Please create it in Supabase Dashboard:");
+        console.error("   1. Go to Storage in Supabase Dashboard");
+        console.error("   2. Create a new bucket named 'channel-assets'");
+        console.error("   3. Set it to public or configure RLS policies");
+        console.error("   4. Error details:", error);
+      } else {
+        console.error("Error uploading image:", error);
+      }
       // Fallback: return data URL if storage upload fails
       return imageDataUrl;
     }
@@ -410,7 +504,16 @@ export const uploadAudioToStorage = async (
       });
 
     if (error) {
-      console.error("Error uploading audio:", error);
+      // Check if error is due to bucket not existing
+      if (error.message?.includes('Bucket not found') || error.message?.includes('not found')) {
+        console.error("❌ Storage bucket 'channel-assets' not found. Please create it in Supabase Dashboard:");
+        console.error("   1. Go to Storage in Supabase Dashboard");
+        console.error("   2. Create a new bucket named 'channel-assets'");
+        console.error("   3. Set it to public or configure RLS policies");
+        console.error("   4. Error details:", error);
+      } else {
+        console.error("Error uploading audio:", error);
+      }
       return null;
     }
 
