@@ -11,10 +11,10 @@
  * 3. Ensure your backend has the WAVESPEED_API_KEY environment variable
  */
 
-const getWavespeedApiKey = () => import.meta.env.VITE_WAVESPEED_API_KEY || window.env?.WAVESPEED_API_KEY || process.env.WAVESPEED_API_KEY || "";
+const getWavespeedApiKey = () => import.meta.env.VITE_WAVESPEED_API_KEY || "";
 
 // Configuration: Set this to your backend proxy URL if you have one
-const getProxyUrl = () => import.meta.env.VITE_BACKEND_URL || window.env?.BACKEND_URL || process.env.BACKEND_URL || "";
+const getProxyUrl = () => import.meta.env.VITE_BACKEND_URL || "";
 
 /**
  * Check if we should use a backend proxy for Wavespeed calls
