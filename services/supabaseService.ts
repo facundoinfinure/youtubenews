@@ -192,8 +192,18 @@ export const saveNewsToDB = async (newsDate: Date, news: NewsItem[], channelId: 
 
   const dateStr = newsDate.toISOString().split('T')[0]; // YYYY-MM-DD
 
+  console.log(`💾 Saving ${news.length} news items to database for date ${dateStr}, channel ${channelId}`);
+
   // Delete existing news for this date and channel to avoid duplicates
-  await supabase.from('news_items').delete().eq('news_date', dateStr).eq('channel_id', channelId);
+  const { error: deleteError } = await supabase
+    .from('news_items')
+    .delete()
+    .eq('news_date', dateStr)
+    .eq('channel_id', channelId);
+  
+  if (deleteError) {
+    console.error("Error deleting existing news:", deleteError);
+  }
 
   // Insert new news items
   const newsRecords = news.map(item => ({
@@ -209,8 +219,21 @@ export const saveNewsToDB = async (newsDate: Date, news: NewsItem[], channelId: 
     selected: false
   }));
 
-  const { error } = await supabase.from('news_items').insert(newsRecords);
-  if (error) console.error("Error saving news:", error);
+  // Insert in batches if needed (Supabase has a limit, but 15 items should be fine)
+  const { data, error } = await supabase
+    .from('news_items')
+    .insert(newsRecords)
+    .select(); // Return inserted data to verify
+
+  if (error) {
+    console.error("❌ Error saving news to database:", error);
+    console.error("Error details:", JSON.stringify(error, null, 2));
+  } else {
+    console.log(`✅ Successfully saved ${data?.length || news.length} news items to database`);
+    if (data && data.length !== news.length) {
+      console.warn(`⚠️ Warning: Tried to save ${news.length} items but only ${data.length} were saved`);
+    }
+  }
 };
 
 export const getNewsByDate = async (newsDate: Date, channelId: string): Promise<NewsItem[]> => {
@@ -223,15 +246,21 @@ export const getNewsByDate = async (newsDate: Date, channelId: string): Promise<
     .select('*')
     .eq('news_date', dateStr)
     .eq('channel_id', channelId)
-    .order('viral_score', { ascending: false }); // FIX: Order by viral_score descending
+    .order('viral_score', { ascending: false })
+    .limit(100); // Explicit limit to ensure we get all news (Supabase default is 1000, but being explicit)
 
   if (error) {
     console.error("Error fetching news:", error);
     return [];
   }
 
-  if (!data || data.length === 0) return [];
+  if (!data || data.length === 0) {
+    console.log(`📭 No news found in database for date ${dateStr} and channel ${channelId}`);
+    return [];
+  }
 
+  console.log(`📰 Retrieved ${data.length} news items from database for date ${dateStr}`);
+  
   return data.map((row: any) => ({
     headline: row.headline,
     source: row.source,

@@ -296,19 +296,31 @@ const App: React.FC = () => {
 
       // Check if news already exists in database
       let fetchedNews = await getNewsByDate(dateObj, activeChannel.id);
+      console.log(`🔍 Database query returned ${fetchedNews.length} news items`);
 
       if (fetchedNews.length > 0) {
         addLog(`✅ Found ${fetchedNews.length} cached stories.`);
+        console.log(`📊 News items from DB:`, fetchedNews.map(n => ({ headline: n.headline, hasImage: !!n.imageUrl })));
       } else {
         addLog(`📡 Scanning financial markets for ${dateObj.toLocaleDateString()} in ${config.country}...`);
         fetchedNews = await fetchEconomicNews(dateObj, config);
+        console.log(`🔍 API returned ${fetchedNews.length} news items`);
         addLog(`✅ Found ${fetchedNews.length} potential stories.`);
 
         // Save news to database
         await saveNewsToDB(dateObj, fetchedNews, activeChannel.id);
         addLog(`💾 News saved to database.`);
+        
+        // Verify what was saved
+        const verifyNews = await getNewsByDate(dateObj, activeChannel.id);
+        console.log(`✅ Verification: ${verifyNews.length} news items now in database`);
+        if (verifyNews.length !== fetchedNews.length) {
+          console.warn(`⚠️ Mismatch: API returned ${fetchedNews.length} but DB has ${verifyNews.length}`);
+        }
+        fetchedNews = verifyNews; // Use what's actually in DB
       }
 
+      console.log(`📰 Final news count to display: ${fetchedNews.length}`);
       setAllNews(fetchedNews);
       setState(AppState.SELECTING_NEWS);
     } catch (error) {
