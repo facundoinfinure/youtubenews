@@ -23,29 +23,68 @@ const getProxyUrl = (): string => {
 };
 
 /**
- * Make a request to OpenAI via proxy
+ * Make a request to OpenAI via proxy with retry logic
  */
 const openaiRequest = async (
   endpoint: string,
-  body: any
+  body: any,
+  options: { retries?: number; timeout?: number } = {}
 ): Promise<any> => {
+  const { retries = 2, timeout = 55000 } = options; // 55s to leave room before Vercel timeout
   const proxyUrl = getProxyUrl().replace(/\/$/, '');
   const url = `${proxyUrl}/api/openai?endpoint=${encodeURIComponent(endpoint)}`;
   
   console.log(`[OpenAI] 🔗 Calling: ${endpoint}`);
   
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
+  let lastError: Error | null = null;
   
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(`OpenAI API error: ${response.status} - ${errorData.error?.message || 'Unknown error'}`);
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeout);
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        const errorMsg = errorData.error?.message || 'Unknown error';
+        
+        // If timeout or server error, allow retry
+        if (response.status >= 500 && attempt < retries) {
+          console.warn(`[OpenAI] ⚠️ Attempt ${attempt + 1} failed (${response.status}), retrying...`);
+          lastError = new Error(`OpenAI API error: ${response.status} - ${errorMsg}`);
+          await new Promise(r => setTimeout(r, 1000 * (attempt + 1))); // Exponential backoff
+          continue;
+        }
+        
+        throw new Error(`OpenAI API error: ${response.status} - ${errorMsg}`);
+      }
+      
+      return response.json();
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        console.warn(`[OpenAI] ⏱️ Request timeout after ${timeout}ms`);
+        lastError = new Error('Request timeout');
+      } else {
+        lastError = error;
+      }
+      
+      if (attempt < retries) {
+        console.warn(`[OpenAI] ⚠️ Attempt ${attempt + 1} failed, retrying...`);
+        await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+        continue;
+      }
+    }
   }
   
-  return response.json();
+  throw lastError || new Error('OpenAI request failed after retries');
 };
 
 // =============================================================================================
@@ -53,65 +92,76 @@ const openaiRequest = async (
 // =============================================================================================
 
 /**
- * Generate a script from selected news
+ * Generate a script from selected news with fallback to gpt-4o-mini
  */
 export const generateScriptWithGPT = async (
   news: NewsItem[], 
   config: ChannelConfig, 
   viralHook?: string
 ): Promise<ScriptLine[]> => {
-  const newsContext = news.map(n => `- ${n.headline} (Source: ${n.source}). Summary: ${n.summary}`).join('\n');
+  // Limit news items to reduce context size and latency
+  const limitedNews = news.slice(0, 5);
+  const newsContext = limitedNews.map(n => `- ${n.headline} (${n.source}): ${n.summary?.substring(0, 100) || ''}`).join('\n');
 
-  const systemPrompt = `You are the showrunner for "${config.channelName}", a short 1-minute news segment hosted by: 
+  const systemPrompt = `You are the showrunner for "${config.channelName}", a 1-minute news segment hosted by: 
 1. "${config.characters.hostA.name}" (${config.characters.hostA.bio}).
 2. "${config.characters.hostB.name}" (${config.characters.hostB.bio}).
 
-Tone: ${config.tone}.
-Language: ${config.language}.
-
-They are discussing the selected news.
+Tone: ${config.tone}. Language: ${config.language}.
 
 SCRIPT STRUCTURE (60 seconds):
-- 0-10s: HOOK (grab attention)${viralHook ? ` Use this: "${viralHook}"` : ''}
-- 10-40s: CONTENT (deliver value, cite sources)
-- 40-50s: PAYOFF (answer the hook)
-- 50-60s: CTA (subscribe/like)
+- 0-10s: HOOK${viralHook ? ` "${viralHook}"` : ''}
+- 10-40s: CONTENT (cite sources)
+- 40-50s: PAYOFF
+- 50-60s: CTA
 
 Rules:
-- KEEP IT UNDER 150 WORDS TOTAL (approx 1 minute).
-- CITATION REQUIRED: You MUST explicitly mention the source of the news in the dialogue.
-- Structure the output as a JSON Array of objects: [{"speaker": "${config.characters.hostA.name}", "text": "..."}, {"speaker": "${config.characters.hostB.name}", "text": "..."}].
-- Use "Both" as speaker for the intro/outro if they speak together.
-- Be creative, use puns related to the characters.
-- Pattern interrupt every 15 seconds
-- Use "you" language
-- STRICT JSON OUTPUT. NO MARKDOWN.`;
+- MAX 150 WORDS TOTAL
+- CITE the news source in dialogue
+- JSON Array: [{"speaker": "${config.characters.hostA.name}", "text": "..."}, ...]
+- Use "Both" for intro/outro
+- STRICT JSON. NO MARKDOWN.`;
 
-  const response = await openaiRequest('chat/completions', {
-    model: 'gpt-4o',
+  const requestBody = {
     messages: [
       { role: 'system', content: systemPrompt },
-      { role: 'user', content: `Here is the selected news for today's episode:\n${newsContext}\n\nWrite the script in JSON format.` }
+      { role: 'user', content: `Today's news:\n${newsContext}\n\nWrite the script as JSON.` }
     ],
     response_format: { type: 'json_object' },
     temperature: 0.7
-  });
+  };
 
-  // Track cost (~500 input + ~300 output tokens)
-  CostTracker.track('script', 'gpt-4o', 0.01);
+  // Try GPT-4o first, fallback to gpt-4o-mini if it fails
+  const models = ['gpt-4o', 'gpt-4o-mini'];
+  let lastError: Error | null = null;
 
-  try {
-    const content = response.choices[0]?.message?.content || '{"script":[]}';
-    const parsed = JSON.parse(content);
-    return Array.isArray(parsed) ? parsed : parsed.script || [];
-  } catch (e) {
-    console.error("Failed to parse script from GPT-4o:", e);
-    throw new Error(`Failed to parse script: ${(e as Error).message}`);
+  for (const model of models) {
+    try {
+      console.log(`[Script] 🎬 Trying ${model}...`);
+      const response = await openaiRequest('chat/completions', {
+        model,
+        ...requestBody
+      }, { timeout: model === 'gpt-4o' ? 45000 : 30000 }); // Shorter timeout for first try
+
+      CostTracker.track('script', model, model === 'gpt-4o' ? 0.01 : 0.002);
+
+      const content = response.choices[0]?.message?.content || '{"script":[]}';
+      const parsed = JSON.parse(content);
+      console.log(`[Script] ✅ Success with ${model}`);
+      return Array.isArray(parsed) ? parsed : parsed.script || [];
+    } catch (error: any) {
+      console.warn(`[Script] ⚠️ ${model} failed:`, error.message);
+      lastError = error;
+      // Continue to next model
+    }
   }
+
+  console.error("[Script] ❌ All models failed");
+  throw lastError || new Error('Script generation failed');
 };
 
 /**
- * Generate viral metadata (title, description, tags)
+ * Generate viral metadata (title, description, tags) with fallback
  */
 export const generateViralMetadataWithGPT = async (
   news: NewsItem[], 
@@ -119,46 +169,60 @@ export const generateViralMetadataWithGPT = async (
   date: Date,
   trendingTopics: string[] = []
 ): Promise<ViralMetadata> => {
-  const newsContext = news.map(n => `- ${n.headline} (Viral Score: ${n.viralScore})`).join('\n');
+  // Limit news to top 3 for faster processing
+  const topNews = news.slice(0, 3);
+  const newsContext = topNews.map(n => `- ${n.headline} (Score: ${n.viralScore})`).join('\n');
   const dateStr = date.toLocaleDateString();
 
-  const prompt = `You are a VIRAL YouTube expert with 100M+ views across channels.
+  const prompt = `VIRAL YouTube metadata expert. Create HIGH-CTR metadata in JSON.
 
-NEWS STORIES:
+NEWS:
 ${newsContext}
 
-TRENDING NOW IN ${config.country}:
-${trendingTopics.join(', ')}
+TRENDING: ${trendingTopics.slice(0, 5).join(', ')}
 
-Create HIGH-CTR metadata in JSON format with these fields:
-- title (max 60 chars): Use power words like SHOCKING, BREAKING, EXPOSED. Include emoji.
-- description (max 250 chars): Hook in first 10 words, include date: ${dateStr}, end with "${config.tagline}"
-- tags (exactly 20): Mix broad + specific, include ${(config.defaultTags || []).join(', ')}
+JSON format:
+- title (max 60 chars): Power words + emoji
+- description (max 250 chars): Hook + date ${dateStr} + "${config.tagline}"
+- tags (20): Include ${(config.defaultTags || []).slice(0, 5).join(', ')}
 
-Return ONLY valid JSON: {"title": "...", "description": "...", "tags": ["...", ...]}`;
+Return ONLY: {"title": "...", "description": "...", "tags": [...]}`;
 
-  const response = await openaiRequest('chat/completions', {
-    model: 'gpt-4o',
+  const requestBody = {
     messages: [{ role: 'user', content: prompt }],
     response_format: { type: 'json_object' },
     temperature: 0.8
-  });
+  };
 
-  CostTracker.track('metadata', 'gpt-4o', 0.015);
+  // Try GPT-4o first, fallback to gpt-4o-mini
+  const models = ['gpt-4o', 'gpt-4o-mini'];
 
-  try {
-    const content = response.choices[0]?.message?.content || '{}';
-    const metadata = JSON.parse(content);
-    
-    return {
-      title: metadata.title?.substring(0, 60) || "Breaking News",
-      description: metadata.description?.substring(0, 250) || "",
-      tags: Array.isArray(metadata.tags) ? metadata.tags.slice(0, 20) : []
-    };
-  } catch (e) {
-    console.error("Failed to parse metadata from GPT-4o:", e);
-    return { title: "Breaking News", description: "", tags: [] };
+  for (const model of models) {
+    try {
+      console.log(`[Metadata] 🏷️ Trying ${model}...`);
+      const response = await openaiRequest('chat/completions', {
+        model,
+        ...requestBody
+      }, { timeout: model === 'gpt-4o' ? 30000 : 20000 });
+
+      CostTracker.track('metadata', model, model === 'gpt-4o' ? 0.015 : 0.003);
+
+      const content = response.choices[0]?.message?.content || '{}';
+      const metadata = JSON.parse(content);
+      console.log(`[Metadata] ✅ Success with ${model}`);
+      
+      return {
+        title: metadata.title?.substring(0, 60) || "Breaking News",
+        description: metadata.description?.substring(0, 250) || "",
+        tags: Array.isArray(metadata.tags) ? metadata.tags.slice(0, 20) : []
+      };
+    } catch (error: any) {
+      console.warn(`[Metadata] ⚠️ ${model} failed:`, error.message);
+    }
   }
+
+  console.error("[Metadata] ❌ All models failed, using defaults");
+  return { title: "Breaking News", description: "", tags: config.defaultTags || [] };
 };
 
 /**
