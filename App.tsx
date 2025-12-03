@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { AppState, ChannelConfig, NewsItem, BroadcastSegment, VideoAssets, ViralMetadata, UserProfile, Channel, ScriptLine, StoredVideo } from './types';
 import { signInWithGoogle, getSession, signOut, getAllChannels, saveChannel, saveVideoToDB, getNewsByDate, saveNewsToDB, markNewsAsSelected, deleteVideoFromDB, loadConfigFromDB, supabase, fetchVideosFromDB, saveProduction, getIncompleteProductions, getProductionById, updateProductionStatus, uploadAudioToStorage, getAudioFromStorage, findCachedScript, findCachedAudio, getAllProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction, verifyStorageBucket } from './services/supabaseService';
@@ -44,6 +44,8 @@ const DEFAULT_CONFIG: ChannelConfig = {
 const App: React.FC = () => {
   // Start at LOGIN state
   const [state, setState] = useState<AppState>(AppState.LOGIN);
+  // Track if we're in admin dashboard to restore it when tab becomes visible
+  const wasInAdminRef = useRef<boolean>(false);
 
   // Data State
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -221,12 +223,23 @@ const App: React.FC = () => {
     }
   }, [user, activeChannel]); // Only depend on user and activeChannel, not state
 
+  // Track when we enter/exit admin dashboard
+  useEffect(() => {
+    if (state === AppState.ADMIN_DASHBOARD) {
+      wasInAdminRef.current = true;
+    } else if (state !== AppState.ADMIN_DASHBOARD && wasInAdminRef.current) {
+      // Only clear the flag if we explicitly exit admin (not just state change)
+      // This will be cleared when user clicks exit button
+    }
+  }, [state]);
+
   // Persist state when tab becomes hidden (visibility change)
   useEffect(() => {
     const handleVisibilityChange = async () => {
       if (document.hidden && state !== AppState.IDLE && state !== AppState.LOGIN && activeChannel && user) {
         // Save ADMIN_DASHBOARD state to localStorage
         if (state === AppState.ADMIN_DASHBOARD) {
+          wasInAdminRef.current = true;
           const progress = {
             state,
             allNews,
@@ -238,6 +251,7 @@ const App: React.FC = () => {
             logs
           };
           localStorage.setItem('chimpNewsProgress', JSON.stringify(progress));
+          localStorage.setItem('wasInAdmin', 'true');
           console.log("💾 Saved ADMIN_DASHBOARD state before tab hidden");
           return; // Don't save production state for admin dashboard
         }
@@ -274,16 +288,19 @@ const App: React.FC = () => {
       // When tab becomes visible again, restore state from localStorage if needed
       // This prevents the app from switching to home when user returns
       if (!document.hidden && user && activeChannel) {
-        // Restore if we're at IDLE (home) or if we were in ADMIN_DASHBOARD
         const saved = localStorage.getItem('chimpNewsProgress');
+        const wasInAdmin = localStorage.getItem('wasInAdmin') === 'true';
+        
         if (saved) {
           try {
             const parsed = JSON.parse(saved);
-            // Restore if the saved state is ADMIN_DASHBOARD (always restore) or other non-IDLE states
-            if (parsed.state === AppState.ADMIN_DASHBOARD) {
-              // Always restore ADMIN_DASHBOARD state
-              setState(parsed.state);
+            // Always restore ADMIN_DASHBOARD if it was saved, regardless of current state
+            if (parsed.state === AppState.ADMIN_DASHBOARD || wasInAdmin) {
+              // Force restore ADMIN_DASHBOARD state immediately
+              setState(AppState.ADMIN_DASHBOARD);
+              wasInAdminRef.current = true;
               console.log("🔄 Restored ADMIN_DASHBOARD state when tab became visible");
+              // Don't clear wasInAdmin flag here - only clear when user explicitly exits
             } else if (state === AppState.IDLE && parsed.state && parsed.state !== AppState.IDLE && parsed.state !== AppState.LOGIN) {
               // Only restore other states if we're currently at IDLE
               setAllNews(parsed.allNews || []);
@@ -305,7 +322,7 @@ const App: React.FC = () => {
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [state, currentProductionId, activeChannel, user, selectedNews, selectedDate, productionProgress, previewScript, viralMeta, videos, thumbnailDataUrl, thumbnailVariant]); // Run when user logs in
+  }, [state, currentProductionId, activeChannel, user, selectedNews, selectedDate, productionProgress, previewScript, viralMeta, videos, thumbnailDataUrl, thumbnailVariant, allNews, segments, logs]); // Run when user logs in
 
   // LOGIN LOGIC
   const handleLogin = async () => {
@@ -1034,7 +1051,11 @@ const App: React.FC = () => {
       <AdminDashboard
         config={config}
         onUpdateConfig={handleConfigUpdate}
-        onExit={() => setState(AppState.IDLE)}
+        onExit={() => {
+          wasInAdminRef.current = false;
+          localStorage.removeItem('wasInAdmin');
+          setState(AppState.IDLE);
+        }}
         activeChannel={activeChannel}
         channels={channels}
         onChannelChange={(channel) => {
