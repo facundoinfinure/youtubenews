@@ -320,6 +320,53 @@ export const setFindCachedAudioFunction = (fn: (text: string, voiceName: string,
   findCachedAudioFn = fn;
 };
 
+/**
+ * Split "Both" dialogue lines into separate lines for each host
+ * This ensures each host speaks their own part instead of speaking in unison
+ */
+const splitBothDialogues = (script: ScriptLine[], config: ChannelConfig): ScriptLine[] => {
+  const result: ScriptLine[] = [];
+  
+  for (const line of script) {
+    if (line.speaker === 'Both' || line.speaker.toLowerCase().includes('both')) {
+      // Split the text into two parts
+      const text = line.text.trim();
+      const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
+      
+      if (sentences.length >= 2) {
+        // If there are 2+ sentences, split between hosts
+        const midpoint = Math.ceil(sentences.length / 2);
+        const hostAText = sentences.slice(0, midpoint).join(' ').trim();
+        const hostBText = sentences.slice(midpoint).join(' ').trim();
+        
+        if (hostAText) {
+          result.push({ speaker: config.characters.hostA.name, text: hostAText });
+        }
+        if (hostBText) {
+          result.push({ speaker: config.characters.hostB.name, text: hostBText });
+        }
+      } else {
+        // Single sentence - split by comma or just alternate words
+        const commaIndex = text.indexOf(',');
+        if (commaIndex > text.length * 0.3 && commaIndex < text.length * 0.7) {
+          // Split at comma if it's roughly in the middle
+          result.push({ speaker: config.characters.hostA.name, text: text.substring(0, commaIndex + 1).trim() });
+          result.push({ speaker: config.characters.hostB.name, text: text.substring(commaIndex + 1).trim() });
+        } else {
+          // Give the whole line to hostA (better than unison for lip-sync)
+          result.push({ speaker: config.characters.hostA.name, text: text });
+        }
+      }
+      
+      console.log(`🔀 [Script] Split "Both" dialogue into separate host lines`);
+    } else {
+      result.push(line);
+    }
+  }
+  
+  return result;
+};
+
 export const generateSegmentedAudio = async (script: ScriptLine[], config: ChannelConfig): Promise<BroadcastSegment[]> => {
   return generateSegmentedAudioWithCache(script, config, '');
 };
@@ -329,11 +376,14 @@ export const generateSegmentedAudioWithCache = async (
   config: ChannelConfig,
   channelId: string = ''
 ): Promise<BroadcastSegment[]> => {
+  // Split "Both" dialogues into separate lines for each host
+  const processedScript = splitBothDialogues(script, config);
+  
   // Use OpenAI TTS for audio generation (no more Gemini quota issues!)
-  console.log(`🎙️ [Audio] Generating ${script.length} audio segments using OpenAI TTS...`);
+  console.log(`🎙️ [Audio] Generating ${processedScript.length} audio segments using OpenAI TTS...`);
 
   // PARALLEL PROCESSING with cache support
-  const audioPromises = script.map(async (line) => {
+  const audioPromises = processedScript.map(async (line) => {
     let character = config.characters.hostA; // Default
     if (line.speaker === config.characters.hostA.name) {
       character = config.characters.hostA;

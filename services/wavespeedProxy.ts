@@ -475,7 +475,7 @@ export const createInfiniteTalkMultiTask = async (
     left_audio: leftAudioUrl,
     right_audio: rightAudioUrl,
     image: imageUrl,
-    order: order === 'left_first' ? 'left to right' : order === 'right_first' ? 'right to left' : 'meanwhile',
+    order: order === 'left_first' ? 'left_right' : order === 'right_first' ? 'right_left' : 'meanwhile',
     resolution,
     prompt,
     seed
