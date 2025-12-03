@@ -326,7 +326,7 @@ export const createWavespeedImageTask = async (
   const requestBody: any = {
     prompt: prompt,
     aspect_ratio: aspectRatio,
-    resolution: "2k",
+    resolution: "1K",  // 1K for smaller file size (YouTube allows max 2MB for thumbnails)
     output_format: "png",
     enable_sync_mode: false,
     enable_base64_output: false

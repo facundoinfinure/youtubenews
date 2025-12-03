@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { AppState, ChannelConfig, NewsItem, BroadcastSegment, VideoAssets, ViralMetadata, UserProfile, Channel, ScriptLine, StoredVideo } from './types';
-import { signInWithGoogle, getSession, signOut, getAllChannels, saveChannel, saveVideoToDB, getNewsByDate, saveNewsToDB, markNewsAsSelected, deleteVideoFromDB, loadConfigFromDB, supabase, fetchVideosFromDB, saveProduction, getIncompleteProductions, getProductionById, updateProductionStatus, uploadAudioToStorage, getAudioFromStorage, findCachedScript, findCachedAudio, getAllProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction, verifyStorageBucket, getCompletedProductionsWithVideoInfo, ProductionWithVideoInfo } from './services/supabaseService';
+import { signInWithGoogle, getSession, signOut, getAllChannels, saveChannel, saveVideoToDB, getNewsByDate, saveNewsToDB, markNewsAsSelected, deleteVideoFromDB, loadConfigFromDB, supabase, fetchVideosFromDB, saveProduction, getIncompleteProductions, getProductionById, updateProductionStatus, uploadAudioToStorage, uploadImageToStorage, getAudioFromStorage, findCachedScript, findCachedAudio, getAllProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction, verifyStorageBucket, getCompletedProductionsWithVideoInfo, ProductionWithVideoInfo } from './services/supabaseService';
 import { fetchEconomicNews, generateScript, generateSegmentedAudio, generateSegmentedAudioWithCache, setFindCachedAudioFunction, generateBroadcastVisuals, generateViralMetadata, generateThumbnail, generateThumbnailVariants, generateViralHook, generateVideoSegmentsWithInfiniteTalk } from './services/geminiService';
 import { uploadVideoToYouTube, deleteVideoFromYouTube } from './services/youtubeService';
 import { ContentCache } from './services/ContentCache';
@@ -36,10 +36,29 @@ const DEFAULT_CONFIG: ChannelConfig = {
       name: "Dani",
       bio: "Female, Democrat-leaning, loves social safety nets, witty, optimistic, wears a blue suit",
       visualPrompt: "Female chimpanzee news anchor wearing a blue suit and glasses",
-      voiceName: "Fenrir"
+      voiceName: "Leda"
     }
   }
 };
+
+const EMPTY_VIDEO_ASSETS: VideoAssets = {
+  intro: null,
+  outro: null,
+  wide: null,
+  hostA: [],
+  hostB: []
+};
+
+const normalizeVideoAssets = (assets?: VideoAssets | null): VideoAssets => ({
+  intro: assets?.intro ?? null,
+  outro: assets?.outro ?? null,
+  wide: assets?.wide ?? null,
+  hostA: assets?.hostA ?? [],
+  hostB: assets?.hostB ?? []
+});
+
+const hasVideoAssets = (assets: VideoAssets): boolean =>
+  Boolean(assets.intro || assets.outro || assets.wide || assets.hostA.length || assets.hostB.length);
 
 const App: React.FC = () => {
   // Start at LOGIN state
@@ -56,7 +75,7 @@ const App: React.FC = () => {
   const [allNews, setAllNews] = useState<NewsItem[]>([]);
   const [selectedNews, setSelectedNews] = useState<NewsItem[]>([]);
   const [segments, setSegments] = useState<BroadcastSegment[]>([]);
-  const [videos, setVideos] = useState<VideoAssets>({ wide: null, hostA: [], hostB: [] });
+  const [videos, setVideos] = useState<VideoAssets>(EMPTY_VIDEO_ASSETS);
   const [viralMeta, setViralMeta] = useState<ViralMetadata | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [loginError, setLoginError] = useState<string | null>(null);
@@ -174,6 +193,8 @@ const App: React.FC = () => {
       try {
         // Optimize data before saving: remove large video blobs, limit logs
         const optimizedVideos = {
+          intro: videos.intro ? (typeof videos.intro === 'string' ? videos.intro : 'url') : null,
+          outro: videos.outro ? (typeof videos.outro === 'string' ? videos.outro : 'url') : null,
           wide: videos.wide ? (typeof videos.wide === 'string' ? videos.wide : 'url') : null,
           hostA: videos.hostA.map(v => typeof v === 'string' ? v : 'url'),
           hostB: videos.hostB.map(v => typeof v === 'string' ? v : 'url')
@@ -266,7 +287,7 @@ const App: React.FC = () => {
             setAllNews(parsed.allNews || []);
             setSelectedNews(parsed.selectedNews || []);
             setSegments(parsed.segments || []);
-            setVideos(parsed.videos || { wide: null, hostA: [], hostB: [] });
+            setVideos(normalizeVideoAssets(parsed.videos));
             setViralMeta(parsed.viralMeta || null);
             setSelectedDate(parsed.selectedDate || getYesterday());
             setLogs(parsed.logs || []);
@@ -333,7 +354,7 @@ const App: React.FC = () => {
             user_id: user.email,
             script: previewScript.length > 0 ? previewScript : undefined,
             viral_metadata: viralMeta || undefined,
-            video_assets: videos.wide ? videos : undefined,
+            video_assets: hasVideoAssets(videos) ? videos : undefined,
             thumbnail_urls: thumbnailDataUrl ? [thumbnailDataUrl, thumbnailVariant].filter((url): url is string => Boolean(url)) : undefined
           };
 
@@ -369,7 +390,7 @@ const App: React.FC = () => {
               setAllNews(parsed.allNews || []);
               setSelectedNews(parsed.selectedNews || []);
               setSegments(parsed.segments || []);
-              setVideos(parsed.videos || { wide: null, hostA: [], hostB: [] });
+              setVideos(normalizeVideoAssets(parsed.videos));
               setViralMeta(parsed.viralMeta || null);
               setSelectedDate(parsed.selectedDate || getYesterday());
               setLogs(parsed.logs || []);
@@ -509,6 +530,16 @@ const App: React.FC = () => {
       .map(n => n.id)
       .filter((id): id is string => Boolean(id)) as string[];
 
+    const normalizedUpdates = { ...updates };
+    if (updates.videoAssets) {
+      const normalizedAssets = normalizeVideoAssets(updates.videoAssets);
+      if (hasVideoAssets(normalizedAssets)) {
+        normalizedUpdates.videoAssets = normalizedAssets;
+      } else {
+        delete normalizedUpdates.videoAssets;
+      }
+    }
+
     const productionData = {
       id: productionId || undefined,
       channel_id: activeChannel.id,
@@ -517,7 +548,7 @@ const App: React.FC = () => {
       selected_news_ids: newsIds.length > 0 ? newsIds : [], // Store UUIDs, empty array if no IDs available
       progress_step: step,
       user_id: user.email,
-      ...updates
+      ...normalizedUpdates
     };
 
     const saved = await saveProduction(productionData, user.email);
@@ -534,6 +565,35 @@ const App: React.FC = () => {
     return productionId;
   };
 
+  const persistThumbnailsToStorage = async (
+    thumbnails: { primary: string | null; variant: string | null },
+    productionId: string | null
+  ): Promise<{ primary: string | null; variant: string | null }> => {
+    if (!activeChannel || (!thumbnails.primary && !thumbnails.variant)) {
+      return thumbnails;
+    }
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const basePath = `thumbnails/${activeChannel.id}/${productionId || 'draft'}-${timestamp}`;
+    const ensureStored = async (url: string | null, suffix: string) => {
+      if (!url) return null;
+      const alreadyStored = url.includes('supabase.co/storage/v1/object/public/channel-assets');
+      if (alreadyStored) return url;
+      const stored = await uploadImageToStorage(url, `${basePath}-${suffix}.png`);
+      return stored || url;
+    };
+
+    const [primaryUrl, variantUrl] = await Promise.all([
+      ensureStored(thumbnails.primary, 'A'),
+      ensureStored(thumbnails.variant, 'B')
+    ]);
+
+    return {
+      primary: primaryUrl,
+      variant: variantUrl
+    };
+  };
+
   const startProduction = async (finalNews: NewsItem[], resumeFromProduction?: any) => {
     if (!activeChannel) {
       setState(AppState.ERROR);
@@ -544,10 +604,12 @@ const App: React.FC = () => {
 
     // Clear logs when starting a new production
     setLogs([]);
-    setVideos({ wide: null, hostA: [], hostB: [] });
+    setVideos(EMPTY_VIDEO_ASSETS);
     setSegments([]);
     setViralMeta(null);
     setUploadStatus(null);
+    setThumbnailDataUrl(null);
+    setThumbnailVariant(null);
 
     // Initialize progress tracking (6 major steps)
     const TOTAL_STEPS = 6;
@@ -575,10 +637,11 @@ const App: React.FC = () => {
           setViralMeta(resumeFromProduction.viral_metadata);
         }
         if (resumeFromProduction.video_assets) {
-          setVideos(resumeFromProduction.video_assets);
+          setVideos(normalizeVideoAssets(resumeFromProduction.video_assets));
         }
         if (resumeFromProduction.thumbnail_urls && resumeFromProduction.thumbnail_urls.length > 0) {
           setThumbnailDataUrl(resumeFromProduction.thumbnail_urls[0]);
+          setThumbnailVariant(resumeFromProduction.thumbnail_urls[1] || null);
         }
 
         addLog("🔄 Resuming production from saved state...");
@@ -752,7 +815,7 @@ const App: React.FC = () => {
 
       // Get intro/outro (just reference image for InfiniteTalk workflow)
       const backgroundVideos = await generateBroadcastVisuals(mainContext, config, genScript, activeChannel.id, productionId || undefined);
-      setVideos(backgroundVideos);
+      setVideos(normalizeVideoAssets(backgroundVideos));
       addLog("✅ Reference image ready for video generation.");
 
       // Wait for metadata
@@ -826,13 +889,15 @@ const App: React.FC = () => {
 
       // Update video assets with organized host videos
       const organizedVideos: VideoAssets = {
-        wide: backgroundVideos.wide, // Intro/outro video
+        intro: backgroundVideos.intro ?? null,
+        outro: backgroundVideos.outro ?? null,
+        wide: backgroundVideos.wide,
         hostA: hostAVideos,
         hostB: hostBVideos
       };
 
       setSegments(finalSegments);
-      setVideos(organizedVideos);
+      setVideos(normalizeVideoAssets(organizedVideos));
       setViralMeta(metadata);
       addLog(`✅ Media ready: ${audioSegments.length} audio clips, ${hostAVideos.length} Host A videos, ${hostBVideos.length} Host B videos.`);
 
@@ -849,23 +914,27 @@ const App: React.FC = () => {
         addLog("✅ Using existing thumbnails.");
         thumbnails.primary = resumeFromProduction.thumbnail_urls[0];
         thumbnails.variant = resumeFromProduction.thumbnail_urls[1] || null;
-        setThumbnailDataUrl(thumbnails.primary);
-        setThumbnailVariant(thumbnails.variant || null);
       } else if (!thumbnails.primary) {
         setProductionProgress({ current: 5, total: TOTAL_STEPS, step: 'Creating thumbnails...' });
         addLog("🎨 Creating thumbnail variants...");
         thumbnails = await generateThumbnailVariants(mainContext, config, metadata);
-        setThumbnailDataUrl(thumbnails.primary);
-        setThumbnailVariant(thumbnails.variant || null);
         addLog(`✅ Thumbnails ready (${thumbnails.variant ? '2 variants for A/B testing' : '1 thumbnail'})`);
-
-        // Save thumbnails
-        if (productionId) {
-          const thumbnailUrls = [thumbnails.primary, thumbnails.variant].filter(Boolean) as string[];
-          await saveProductionState(productionId, 5, 'in_progress', { thumbnailUrls });
-        }
       } else {
         addLog("✅ Using existing thumbnails from state.");
+      }
+
+      if (thumbnails.primary || thumbnails.variant) {
+        const storedThumbnails = await persistThumbnailsToStorage(thumbnails, productionId);
+        thumbnails = storedThumbnails;
+        setThumbnailDataUrl(storedThumbnails.primary);
+        setThumbnailVariant(storedThumbnails.variant || null);
+
+        if (productionId) {
+          const thumbnailUrls = [storedThumbnails.primary, storedThumbnails.variant].filter(Boolean) as string[];
+          if (thumbnailUrls.length > 0) {
+            await saveProductionState(productionId, 5, 'in_progress', { thumbnailUrls });
+          }
+        }
       }
 
       // Step 6: Complete!
@@ -1064,7 +1133,7 @@ const App: React.FC = () => {
     setAllNews([]);
     setSelectedNews([]);
     setSegments([]);
-    setVideos({ wide: null, hostA: [], hostB: [] });
+    setVideos(EMPTY_VIDEO_ASSETS);
     setViralMeta(null);
     setLogs([]); // Clear logs when switching channels
     setThumbnailDataUrl(null);
@@ -1169,7 +1238,7 @@ const App: React.FC = () => {
 
       // Set state to render video
       setSegments(segmentsWithAudio);
-      setVideos(fullProduction.video_assets);
+      setVideos(normalizeVideoAssets(fullProduction.video_assets));
       setViralMeta(fullProduction.viral_metadata || null);
       setThumbnailDataUrl(fullProduction.thumbnail_urls?.[0] || null);
       setThumbnailVariant(fullProduction.thumbnail_urls?.[1] || null);
@@ -1457,6 +1526,20 @@ const App: React.FC = () => {
               {viralMeta ? viralMeta.title : `${config.channelName} Daily Update`}
             </h1>
 
+            {viralMeta?.titleVariants && viralMeta.titleVariants.length > 1 && (
+              <div className="bg-[#191919] border border-[#2f2f2f] rounded-xl p-4 space-y-3">
+                <div className="text-xs tracking-[0.3em] uppercase text-gray-400">Title Experiments</div>
+                {viralMeta.titleVariants.slice(0, 2).map((titleOption, idx) => (
+                  <div key={idx}>
+                    <div className="text-sm font-semibold text-yellow-400 mb-1">
+                      {`Title ${idx === 0 ? 'A' : 'B'}`}
+                    </div>
+                    <p className="text-sm text-gray-200">{titleOption}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <div className="flex items-center justify-between flex-wrap gap-4 border-b border-[#272727] pb-4">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-black border border-white/20" style={{ backgroundColor: config.logoColor1 }}>
@@ -1487,6 +1570,23 @@ const App: React.FC = () => {
                 <p className="text-gray-400 italic">Generating video metadata...</p>
               )}
             </div>
+
+            {(thumbnailDataUrl || thumbnailVariant) && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {thumbnailDataUrl && (
+                  <div className="bg-[#1b1b1b] border border-[#2a2a2a] rounded-xl p-3 space-y-2">
+                    <div className="text-xs uppercase tracking-[0.3em] text-gray-400">Thumbnail A</div>
+                    <img src={thumbnailDataUrl} alt="Thumbnail A" className="w-full h-48 object-cover rounded-lg" />
+                  </div>
+                )}
+                {thumbnailVariant && (
+                  <div className="bg-[#1b1b1b] border border-[#2a2a2a] rounded-xl p-3 space-y-2">
+                    <div className="text-xs uppercase tracking-[0.3em] text-gray-400">Thumbnail B</div>
+                    <img src={thumbnailVariant} alt="Thumbnail B" className="w-full h-48 object-cover rounded-lg" />
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* LOGS DISPLAY */}

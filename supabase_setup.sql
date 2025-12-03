@@ -29,7 +29,7 @@ values (1, '{
       "name": "Dani",
       "bio": "Female, Democrat-leaning, loves social safety nets, witty, optimistic, wears a blue suit",
       "visualPrompt": "Female chimpanzee news anchor wearing a blue suit and glasses",
-      "voiceName": "Fenrir"
+      "voiceName": "Leda"
     }
   }
 }'::jsonb)

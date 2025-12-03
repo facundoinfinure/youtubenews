@@ -40,7 +40,9 @@ export const BroadcastPlayer: React.FC<BroadcastPlayerProps> = ({
     const musicSourceRef = useRef<AudioBufferSourceNode | null>(null);
 
     // Video Refs (Arrays)
+    const videoIntroRef = useRef<HTMLVideoElement>(null);
     const videoWideRef = useRef<HTMLVideoElement>(null);
+    const videoOutroRef = useRef<HTMLVideoElement>(null);
     const videoHostARefs = useRef<(HTMLVideoElement | null)[]>([]);
     const videoHostBRefs = useRef<(HTMLVideoElement | null)[]>([]);
 
@@ -133,7 +135,8 @@ export const BroadcastPlayer: React.FC<BroadcastPlayerProps> = ({
 
     // Determine active video based on current speaker AND index (rotation)
     const getActiveVideoRef = (index: number) => {
-        if (phase === 'INTRO' || phase === 'OUTRO') return videoWideRef.current;
+        if (phase === 'INTRO') return videoIntroRef.current || videoWideRef.current;
+        if (phase === 'OUTRO') return videoOutroRef.current || videoWideRef.current;
         if (!segments[index]) return videoWideRef.current;
 
         const speaker = segments[index].speaker;
@@ -214,7 +217,18 @@ export const BroadcastPlayer: React.FC<BroadcastPlayerProps> = ({
         if (index >= segments.length) {
             setPhase('OUTRO');
             playMusic();
+            if (videoOutroRef.current) {
+                videoOutroRef.current.currentTime = 0;
+                videoOutroRef.current.play().catch(() => { });
+            } else if (videoWideRef.current) {
+                videoWideRef.current.currentTime = 0;
+                videoWideRef.current.play().catch(() => { });
+            }
             setTimeout(() => {
+                if (videoOutroRef.current) {
+                    videoOutroRef.current.pause();
+                    videoOutroRef.current.currentTime = 0;
+                }
                 setPhase('IDLE');
                 setCurrentSegmentIndex(0);
             }, OUTRO_DURATION);
@@ -251,16 +265,28 @@ export const BroadcastPlayer: React.FC<BroadcastPlayerProps> = ({
             }
             setPhase('IDLE');
             // Reset all videos
+            if (videoIntroRef.current) { videoIntroRef.current.pause(); videoIntroRef.current.currentTime = 0; }
             if (videoWideRef.current) { videoWideRef.current.pause(); videoWideRef.current.currentTime = 0; }
+            if (videoOutroRef.current) { videoOutroRef.current.pause(); videoOutroRef.current.currentTime = 0; }
             videoHostARefs.current.forEach(v => { if (v) { v.pause(); v.currentTime = 0; } });
             videoHostBRefs.current.forEach(v => { if (v) { v.pause(); v.currentTime = 0; } });
         } else {
             setPhase('INTRO');
             playMusic();
 
-            if (videoWideRef.current) videoWideRef.current.play().catch(() => { });
+            if (videoIntroRef.current) {
+                videoIntroRef.current.currentTime = 0;
+                videoIntroRef.current.play().catch(() => { });
+            } else if (videoWideRef.current) {
+                videoWideRef.current.currentTime = 0;
+                videoWideRef.current.play().catch(() => { });
+            }
 
             setTimeout(() => {
+                if (videoIntroRef.current) {
+                    videoIntroRef.current.pause();
+                    videoIntroRef.current.currentTime = 0;
+                }
                 setPhase('CONTENT');
                 playSegment(0);
             }, INTRO_DURATION);
@@ -315,25 +341,32 @@ export const BroadcastPlayer: React.FC<BroadcastPlayerProps> = ({
             }
         };
 
-        // Load wide asset (could be image or video)
-        let wideImage: HTMLImageElement | null = null;
-        let vWide: HTMLVideoElement | null = null;
-        
-        if (videos.wide) {
-            if (isImageUrl(videos.wide)) {
-                console.log("[Render] Loading intro/outro as image");
-                wideImage = await loadImageBlob(videos.wide);
-            } else {
-                console.log("[Render] Loading intro/outro as video");
-                vWide = await loadVideoBlob(videos.wide);
+        const loadVisualAsset = async (url: string | null): Promise<{ image: HTMLImageElement | null; video: HTMLVideoElement | null }> => {
+            if (!url) return { image: null, video: null };
+            if (isImageUrl(url)) {
+                return { image: await loadImageBlob(url), video: null };
             }
-        }
+            return { image: null, video: await loadVideoBlob(url) };
+        };
+
+        const introVisual = await loadVisualAsset(videos.intro || videos.wide);
+        const outroVisual = await loadVisualAsset(videos.outro || videos.wide);
+        const backgroundVisual = await loadVisualAsset(videos.wide);
+
+        const introImage = introVisual.image;
+        const vIntro = introVisual.video;
+        const outroImage = outroVisual.image;
+        const vOutro = outroVisual.video;
+        const wideImage = backgroundVisual.image;
+        const vWide = backgroundVisual.video;
 
         const vHostAs = await Promise.all(videos.hostA.map(loadVideoBlob));
         const vHostBs = await Promise.all(videos.hostB.map(loadVideoBlob));
 
         // Warm up videos (skip images)
+        if (vIntro) await vIntro.play().then(() => vIntro.pause()).catch(() => {});
         if (vWide) await vWide.play().then(() => vWide.pause()).catch(() => {});
+        if (vOutro) await vOutro.play().then(() => vOutro.pause()).catch(() => {});
         for (const v of vHostAs) if (v) await v.play().then(() => v.pause()).catch(() => {});
         for (const v of vHostBs) if (v) await v.play().then(() => v.pause()).catch(() => {});
 
@@ -456,15 +489,31 @@ export const BroadcastPlayer: React.FC<BroadcastPlayerProps> = ({
                     const progress = elapsedSec / introSec;
                     const scale = 2 - progress;
                     
-                    if (wideImage) {
-                        // Draw reference image as intro background
+                    if (introImage) {
+                        const hRatio = canvas.width / introImage.width;
+                        const vRatio = canvas.height / introImage.height;
+                        const ratio = Math.max(hRatio, vRatio);
+                        const centerShift_x = (canvas.width - introImage.width * ratio) / 2;
+                        const centerShift_y = (canvas.height - introImage.height * ratio) / 2;
+                        ctx.drawImage(introImage, centerShift_x, centerShift_y, introImage.width * ratio, introImage.height * ratio);
+                        // Overlay with fade-in effect
+                        ctx.fillStyle = `rgba(0,0,0,${1 - progress})`;
+                        ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    } else if (vIntro) {
+                        if (vIntro.paused) vIntro.play();
+                        const hRatio = canvas.width / vIntro.videoWidth;
+                        const vRatio = canvas.height / vIntro.videoHeight;
+                        const ratio = Math.max(hRatio, vRatio);
+                        const centerShift_x = (canvas.width - vIntro.videoWidth * ratio) / 2;
+                        const centerShift_y = (canvas.height - vIntro.videoHeight * ratio) / 2;
+                        ctx.drawImage(vIntro, centerShift_x, centerShift_y, vIntro.videoWidth * ratio, vIntro.videoHeight * ratio);
+                    } else if (wideImage) {
                         const hRatio = canvas.width / wideImage.width;
                         const vRatio = canvas.height / wideImage.height;
                         const ratio = Math.max(hRatio, vRatio);
                         const centerShift_x = (canvas.width - wideImage.width * ratio) / 2;
                         const centerShift_y = (canvas.height - wideImage.height * ratio) / 2;
                         ctx.drawImage(wideImage, centerShift_x, centerShift_y, wideImage.width * ratio, wideImage.height * ratio);
-                        // Overlay with fade-in effect
                         ctx.fillStyle = `rgba(0,0,0,${1 - progress})`;
                         ctx.fillRect(0, 0, canvas.width, canvas.height);
                     } else if (vWide) {
@@ -483,15 +532,42 @@ export const BroadcastPlayer: React.FC<BroadcastPlayerProps> = ({
                     // Outro - use image or logo
                     const progress = (elapsedSec - outroStartSec) / (OUTRO_DURATION / 1000);
                     
-                    if (wideImage) {
-                        // Draw reference image as outro background
+                    if (outroImage) {
+                        const hRatio = canvas.width / outroImage.width;
+                        const vRatio = canvas.height / outroImage.height;
+                        const ratio = Math.max(hRatio, vRatio);
+                        const centerShift_x = (canvas.width - outroImage.width * ratio) / 2;
+                        const centerShift_y = (canvas.height - outroImage.height * ratio) / 2;
+                        ctx.drawImage(outroImage, centerShift_x, centerShift_y, outroImage.width * ratio, outroImage.height * ratio);
+                        ctx.fillStyle = `rgba(0,0,0,${progress})`;
+                        ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    } else if (vOutro) {
+                        if (vOutro.paused) vOutro.play();
+                        const hRatio = canvas.width / vOutro.videoWidth;
+                        const vRatio = canvas.height / vOutro.videoHeight;
+                        const ratio = Math.max(hRatio, vRatio);
+                        const centerShift_x = (canvas.width - vOutro.videoWidth * ratio) / 2;
+                        const centerShift_y = (canvas.height - vOutro.videoHeight * ratio) / 2;
+                        ctx.drawImage(vOutro, centerShift_x, centerShift_y, vOutro.videoWidth * ratio, vOutro.videoHeight * ratio);
+                        ctx.fillStyle = `rgba(0,0,0,${progress})`;
+                        ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    } else if (wideImage) {
                         const hRatio = canvas.width / wideImage.width;
                         const vRatio = canvas.height / wideImage.height;
                         const ratio = Math.max(hRatio, vRatio);
                         const centerShift_x = (canvas.width - wideImage.width * ratio) / 2;
                         const centerShift_y = (canvas.height - wideImage.height * ratio) / 2;
                         ctx.drawImage(wideImage, centerShift_x, centerShift_y, wideImage.width * ratio, wideImage.height * ratio);
-                        // Overlay with fade-out effect
+                        ctx.fillStyle = `rgba(0,0,0,${progress})`;
+                        ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    } else if (vWide) {
+                        if (vWide.paused) vWide.play();
+                        const hRatio = canvas.width / vWide.videoWidth;
+                        const vRatio = canvas.height / vWide.videoHeight;
+                        const ratio = Math.max(hRatio, vRatio);
+                        const centerShift_x = (canvas.width - vWide.videoWidth * ratio) / 2;
+                        const centerShift_y = (canvas.height - vWide.videoHeight * ratio) / 2;
+                        ctx.drawImage(vWide, centerShift_x, centerShift_y, vWide.videoWidth * ratio, vWide.videoHeight * ratio);
                         ctx.fillStyle = `rgba(0,0,0,${progress})`;
                         ctx.fillRect(0, 0, canvas.width, canvas.height);
                     } else {
@@ -540,6 +616,15 @@ export const BroadcastPlayer: React.FC<BroadcastPlayerProps> = ({
                         const centerShift_x = (canvas.width - wideImage.width * ratio) / 2;
                         const centerShift_y = (canvas.height - wideImage.height * ratio) / 2;
                         ctx.drawImage(wideImage, centerShift_x, centerShift_y, wideImage.width * ratio, wideImage.height * ratio);
+                    } else if (vWide) {
+                        if (isTalking && vWide.paused) vWide.play();
+                        else if (!isTalking && !vWide.paused) vWide.pause();
+                        const hRatio = canvas.width / vWide.videoWidth;
+                        const vRatio = canvas.height / vWide.videoHeight;
+                        const ratio = Math.max(hRatio, vRatio);
+                        const centerShift_x = (canvas.width - vWide.videoWidth * ratio) / 2;
+                        const centerShift_y = (canvas.height - vWide.videoHeight * ratio) / 2;
+                        ctx.drawImage(vWide, centerShift_x, centerShift_y, vWide.videoWidth * ratio, vWide.videoHeight * ratio);
                     } else {
                         ctx.fillStyle = "#111";
                         ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -651,32 +736,58 @@ export const BroadcastPlayer: React.FC<BroadcastPlayerProps> = ({
         <div className={`relative bg-black rounded-none overflow-hidden shadow-2xl group mx-auto ${isShorts ? 'w-[400px] h-[711px]' : 'w-full aspect-video'}`}>
 
             {/* 1. VIDEO LAYER */}
-            <div className={`absolute inset-0 bg-black transition-opacity duration-1000 ${phase === 'CONTENT' ? 'opacity-100' : 'opacity-0'}`}>
-                {videos.wide && (
+            <div className="absolute inset-0 bg-black overflow-hidden">
+                {(videos.intro || videos.wide) && (
                     <video
-                        ref={videoWideRef} src={videos.wide} muted loop playsInline crossOrigin="anonymous"
-                        className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-500 ease-in-out ${getActiveVideoRef(currentSegmentIndex) === videoWideRef.current ? 'opacity-100 z-10' : 'opacity-0 z-0'
-                            }`}
+                        ref={videoIntroRef}
+                        src={videos.intro || videos.wide || undefined}
+                        muted
+                        playsInline
+                        loop
+                        crossOrigin="anonymous"
+                        className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-700 ease-in-out ${phase === 'INTRO' ? 'opacity-100 z-20' : 'opacity-0 z-0'}`}
                     />
                 )}
-                {videos.hostA.map((src, idx) => (
+
+                <div className={`absolute inset-0 transition-opacity duration-700 ${phase === 'CONTENT' ? 'opacity-100' : 'opacity-0'}`}>
+                    {videos.wide && (
+                        <video
+                            ref={videoWideRef} src={videos.wide} muted loop playsInline crossOrigin="anonymous"
+                            className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-500 ease-in-out ${getActiveVideoRef(currentSegmentIndex) === videoWideRef.current ? 'opacity-100 z-10' : 'opacity-0 z-0'
+                                }`}
+                        />
+                    )}
+                    {videos.hostA.map((src, idx) => (
+                        <video
+                            key={`hostA-${idx}`}
+                            ref={el => videoHostARefs.current[idx] = el}
+                            src={src} muted loop playsInline crossOrigin="anonymous"
+                            className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-500 ease-in-out ${getActiveVideoRef(currentSegmentIndex) === videoHostARefs.current[idx] ? 'opacity-100 z-10' : 'opacity-0 z-0'
+                                }`}
+                        />
+                    ))}
+                    {videos.hostB.map((src, idx) => (
+                        <video
+                            key={`hostB-${idx}`}
+                            ref={el => videoHostBRefs.current[idx] = el}
+                            src={src} muted loop playsInline crossOrigin="anonymous"
+                            className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-500 ease-in-out ${getActiveVideoRef(currentSegmentIndex) === videoHostBRefs.current[idx] ? 'opacity-100 z-10' : 'opacity-0 z-0'
+                                }`}
+                        />
+                    ))}
+                </div>
+
+                {(videos.outro || videos.wide) && (
                     <video
-                        key={`hostA-${idx}`}
-                        ref={el => videoHostARefs.current[idx] = el}
-                        src={src} muted loop playsInline crossOrigin="anonymous"
-                        className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-500 ease-in-out ${getActiveVideoRef(currentSegmentIndex) === videoHostARefs.current[idx] ? 'opacity-100 z-10' : 'opacity-0 z-0'
-                            }`}
+                        ref={videoOutroRef}
+                        src={videos.outro || videos.wide || undefined}
+                        muted
+                        playsInline
+                        loop
+                        crossOrigin="anonymous"
+                        className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-700 ease-in-out ${phase === 'OUTRO' ? 'opacity-100 z-20' : 'opacity-0 z-0'}`}
                     />
-                ))}
-                {videos.hostB.map((src, idx) => (
-                    <video
-                        key={`hostB-${idx}`}
-                        ref={el => videoHostBRefs.current[idx] = el}
-                        src={src} muted loop playsInline crossOrigin="anonymous"
-                        className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-500 ease-in-out ${getActiveVideoRef(currentSegmentIndex) === videoHostBRefs.current[idx] ? 'opacity-100 z-10' : 'opacity-0 z-0'
-                            }`}
-                    />
-                ))}
+                )}
             </div>
 
             {/* 2. INTRO / OUTRO OVERLAY LAYER */}

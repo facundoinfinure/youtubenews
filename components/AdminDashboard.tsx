@@ -62,11 +62,18 @@ const CharacterEditor: React.FC<{
           onChange={(e) => onChange({ ...profile, voiceName: e.target.value })}
           className="w-full bg-[#111] border border-[#333] rounded px-2 py-1 text-sm text-white"
         >
-          <option value="Puck">Puck (Male, Soft)</option>
-          <option value="Charon">Charon (Male, Deep)</option>
-          <option value="Kore">Kore (Female, Calm)</option>
-          <option value="Fenrir">Fenrir (Male, Intense)</option>
-          <option value="Zephyr">Zephyr (Female, Bright)</option>
+          <optgroup label="Male Voices">
+            <option value="Kore">Kore (Male, Warm) ⭐ Recommended</option>
+            <option value="Puck">Puck (Male, Deep)</option>
+            <option value="Charon">Charon (Male, Deep)</option>
+            <option value="Orus">Orus (Male, British)</option>
+          </optgroup>
+          <optgroup label="Female Voices">
+            <option value="Leda">Leda (Female, Expressive) ⭐ Recommended</option>
+            <option value="Aoede">Aoede (Female, Warm)</option>
+            <option value="Zephyr">Zephyr (Female, Warm)</option>
+            <option value="Hera">Hera (Female, Neutral)</option>
+          </optgroup>
         </select>
       </div>
     </div>

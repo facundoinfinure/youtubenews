@@ -23,6 +23,8 @@ export interface BroadcastSegment {
 }
 
 export interface VideoAssets {
+  intro: string | null;
+  outro: string | null;
   wide: string | null;
   hostA: string[]; // Renamed from rusty
   hostB: string[]; // Renamed from dani
@@ -30,6 +32,7 @@ export interface VideoAssets {
 
 export interface ViralMetadata {
   title: string;
+  titleVariants?: string[]; // Optional array for A/B testing
   description: string;
   tags: string[];
 }

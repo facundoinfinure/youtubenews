@@ -33,7 +33,8 @@ import {
   generateViralHookWithGPT,
   generateTTSAudio,
   generateImageWithDALLE,
-  checkOpenAIConfig
+  checkOpenAIConfig,
+  createTitleVariantFallback
 } from "./openaiService";
 import { 
   fetchNewsWithSerpAPI,
@@ -49,6 +50,17 @@ const isWavespeedConfigured = () => {
   const config = checkWavespeedConfig();
   return config.configured;
 };
+
+// Channel-specific branding overrides (intro/outro assets)
+const CHANNEL_BRANDING_OVERRIDES: Record<string, { intro: string; outro: string }> = {
+  chimpnews: {
+    intro: "https://dbtlmnvcrsbrtruipvyg.supabase.co/storage/v1/object/public/channel-assets/videos/intro_outros/chimp_news_intro.mp4",
+    outro: "https://dbtlmnvcrsbrtruipvyg.supabase.co/storage/v1/object/public/channel-assets/videos/intro_outros/chimp_news_outro.mp4"
+  }
+};
+
+const normalizeChannelKey = (channelName?: string) =>
+  (channelName || '').replace(/\s+/g, '').toLowerCase();
 
 // Helper function to clean and parse JSON from Gemini responses
 // Gemini sometimes returns control characters inside strings which breaks JSON.parse
@@ -309,7 +321,13 @@ export const generateViralMetadata = async (news: NewsItem[], config: ChannelCon
   } catch (error) {
     console.error(`❌ [Metadata] GPT-4o failed:`, (error as Error).message);
     // Return defaults on failure
-    return { title: "Breaking News", description: "", tags: [] };
+    const fallbackTitle = "Breaking News";
+    return { 
+      title: fallbackTitle, 
+      titleVariants: [fallbackTitle, createTitleVariantFallback(fallbackTitle)], 
+      description: "", 
+      tags: [] 
+    };
   }
 };
 
@@ -586,18 +604,22 @@ export const generateBroadcastVisuals = async (
 ): Promise<VideoAssets> => {
   console.log(`[Broadcast Visuals] Setting up intro/outro for channel ${channelId}`);
   
-  // For InfiniteTalk workflow, intro/outro are just the reference image
-  // The actual lip-sync videos are generated per segment
-  const introOutroUrl = config.referenceImageUrl || null;
-  
-  if (introOutroUrl) {
+  const normalizedChannel = normalizeChannelKey(config.channelName);
+  const override = CHANNEL_BRANDING_OVERRIDES[normalizedChannel];
+  const referenceImage = config.referenceImageUrl || null;
+
+  if (override) {
+    console.log(`✅ [Broadcast Visuals] Using fixed intro/outro for ${config.channelName}`);
+  } else if (referenceImage) {
     console.log(`✅ [Broadcast Visuals] Using reference image for intro/outro`);
   } else {
     console.log(`⚠️ [Broadcast Visuals] No reference image - intro/outro will be empty`);
   }
-  
+
   return {
-    wide: introOutroUrl,
+    intro: override?.intro || referenceImage,
+    outro: override?.outro || referenceImage,
+    wide: referenceImage,
     hostA: [],
     hostB: []
   };

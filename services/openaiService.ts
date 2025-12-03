@@ -163,6 +163,19 @@ Rules:
 /**
  * Generate viral metadata (title, description, tags) with fallback
  */
+export const createTitleVariantFallback = (primary: string): string => {
+  const base = primary?.trim() || "Breaking Market Shake-Up";
+  const cleaned = base.replace(/^BREAKING[:\-–]\s*/i, '').trim();
+  const emphasis = cleaned.length > 0 ? cleaned : base;
+  const templates = [
+    (copy: string) => `BREAKING UPDATE ⚡ ${copy}`,
+    (copy: string) => `SHOCKING REVERSAL: ${copy}`,
+    (copy: string) => `EXPLAINED 👉 ${copy}`
+  ];
+  const index = Math.abs(emphasis.length % templates.length);
+  return templates[index](emphasis).substring(0, 100);
+};
+
 export const generateViralMetadataWithGPT = async (
   news: NewsItem[], 
   config: ChannelConfig, 
@@ -173,7 +186,6 @@ export const generateViralMetadataWithGPT = async (
   const topNews = news.slice(0, 3);
   const newsContext = topNews.map(n => `- ${n.headline} (Score: ${n.viralScore})`).join('\n');
   const dateStr = date.toLocaleDateString();
-
   const prompt = `You are a VIRAL YouTube SEO expert with 10+ years optimizing for maximum CTR and discoverability.
 
 Create HIGH-PERFORMANCE metadata for this news broadcast video:
@@ -193,6 +205,12 @@ TITLE (70-80 characters):
 - Add 1-2 relevant emojis for visual appeal
 - Create curiosity gap without clickbait
 
+TITLE VARIANTS (provide two options for A/B testing):
+- Output an array "title_variants" with TWO unique hooks
+- Variation B must emphasize a different emotion or curiosity gap
+- Keep both under 80 characters and punchy
+- The first element MUST match the TITLE exactly
+
 DESCRIPTION (500-700 characters):
 - Line 1: Compelling hook summarizing the main story (this shows in search results)
 - Line 2-3: Key details and context about the news
@@ -206,7 +224,7 @@ TAGS (20 tags):
 - Include trending topics if relevant
 - Must include: ${(config.defaultTags || []).slice(0, 5).join(', ')}
 
-Return ONLY valid JSON: {"title": "...", "description": "...", "tags": [...]}`;
+Return ONLY valid JSON: {"title": "...", "title_variants": ["...", "..."], "description": "...", "tags": [...]}`;
 
   const requestBody = {
     messages: [{ role: 'user', content: prompt }],
@@ -231,8 +249,33 @@ Return ONLY valid JSON: {"title": "...", "description": "...", "tags": [...]}`;
       const metadata = JSON.parse(content);
       console.log(`[Metadata] ✅ Success with ${model}`);
       
+      const rawTitle = metadata.title || metadata.title_primary || metadata.primaryTitle;
+      const rawVariants: string[] = Array.isArray(metadata.title_variants) ? metadata.title_variants : [];
+      const variantCandidates = [
+        rawTitle,
+        ...(rawVariants || []),
+        metadata.variant_title,
+        metadata.altTitle
+      ].filter((value): value is string => Boolean(value)).map((value: string) => value.substring(0, 100));
+
+      const uniqueVariants: string[] = [];
+      for (const title of variantCandidates) {
+        if (title && !uniqueVariants.some(existing => existing.toLowerCase() === title.toLowerCase())) {
+          uniqueVariants.push(title);
+        }
+      }
+
+      if (uniqueVariants.length === 0 && rawTitle) {
+        uniqueVariants.push(rawTitle.substring(0, 100));
+      }
+
+      if (uniqueVariants.length < 2 && uniqueVariants[0]) {
+        uniqueVariants.push(createTitleVariantFallback(uniqueVariants[0]));
+      }
+
       return {
-        title: metadata.title?.substring(0, 100) || "Breaking News",
+        title: uniqueVariants[0]?.substring(0, 100) || "Breaking News",
+        titleVariants: uniqueVariants.slice(0, 2),
         description: metadata.description?.substring(0, 1000) || "",
         tags: Array.isArray(metadata.tags) ? metadata.tags.slice(0, 20) : []
       };
@@ -242,7 +285,13 @@ Return ONLY valid JSON: {"title": "...", "description": "...", "tags": [...]}`;
   }
 
   console.error("[Metadata] ❌ All models failed, using defaults");
-  return { title: "Breaking News", description: "", tags: config.defaultTags || [] };
+  const fallbackTitle = "Breaking News";
+  return { 
+    title: fallbackTitle, 
+    titleVariants: [fallbackTitle, createTitleVariantFallback(fallbackTitle)], 
+    description: "", 
+    tags: config.defaultTags || [] 
+  };
 };
 
 /**
@@ -287,24 +336,25 @@ Return ONLY the hook text, no explanation, no quotes.`;
 // =============================================================================================
 
 // Voice mapping - map character voice names to OpenAI voices
+// Standard: Kore/echo for Male, Leda/shimmer for Female
 const OPENAI_VOICES = {
-  // Male voices
-  'Puck': 'onyx',      // Deep male
-  'Charon': 'onyx',
-  'Kore': 'echo',      // Warm male
-  'Fenrir': 'echo',
-  'Orus': 'fable',     // British male
+  // Male voices - use 'Kore' → 'echo'
+  'Kore': 'echo',      // Standard male voice (warm)
+  'Puck': 'onyx',      // Deep male (alternative)
+  'Charon': 'onyx',    // Deep male (alternative)
+  'Fenrir': 'echo',    // Warm male (legacy)
+  'Orus': 'fable',     // British male (alternative)
   
-  // Female voices
-  'Aoede': 'nova',     // Warm female
-  'Zephyr': 'nova',
-  'Leda': 'shimmer',   // Expressive female
-  'Elara': 'shimmer',
-  'Hera': 'alloy',     // Neutral female
+  // Female voices - use 'Leda' → 'shimmer'
+  'Leda': 'shimmer',   // Standard female voice (expressive)
+  'Aoede': 'nova',     // Warm female (alternative)
+  'Zephyr': 'nova',    // Warm female (alternative)
+  'Elara': 'shimmer',  // Expressive female (alternative)
+  'Hera': 'alloy',     // Neutral female (alternative)
   
   // Default mappings
-  'default_male': 'onyx',
-  'default_female': 'nova'
+  'default_male': 'echo',
+  'default_female': 'shimmer'
 } as const;
 
 type OpenAIVoice = 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer';
