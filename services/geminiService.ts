@@ -15,12 +15,36 @@ const shouldUseWavespeed = () => {
 };
 
 // Wavespeed API helper functions
-const createWavespeedTask = async (prompt: string, aspectRatio: '16:9' | '9:16'): Promise<string> => {
+const createWavespeedTask = async (prompt: string, aspectRatio: '16:9' | '9:16', referenceImageUrl?: string): Promise<string> => {
   const apiKey = getWavespeedApiKey();
   if (!apiKey) throw new Error("Wavespeed API key not configured");
 
   const model = getWavespeedModel();
   const wavespeedApiUrl = "https://api.wavespeed.ai/v1/tasks";
+
+  const requestBody: any = {
+    model: model,
+    prompt: prompt,
+    aspect_ratio: aspectRatio === '9:16' ? '9:16' : '16:9',
+  };
+
+  // Add reference image if available
+  if (referenceImageUrl) {
+    // Ensure the image URL is properly formatted
+    let imageUrl = referenceImageUrl;
+    // If it's a data URI, we might need to handle it differently
+    if (imageUrl.startsWith('data:')) {
+      console.log(`📸 Reference image is a data URI (${imageUrl.length} chars)`);
+      // Wavespeed might need the image uploaded first, but let's try sending it directly
+      requestBody.images = [imageUrl];
+    } else {
+      console.log(`📸 Using reference image URL: ${imageUrl.substring(0, 80)}...`);
+      requestBody.images = [imageUrl];
+    }
+    console.log(`✅ Reference image added to video generation request`);
+  } else {
+    console.warn(`⚠️ No reference image provided - video may not match the intended podcast studio scene`);
+  }
 
   const response = await fetch(wavespeedApiUrl, {
     method: "POST",
@@ -28,12 +52,7 @@ const createWavespeedTask = async (prompt: string, aspectRatio: '16:9' | '9:16')
       "Authorization": `Bearer ${apiKey}`,
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({
-      model: model,
-      prompt: prompt,
-      aspect_ratio: aspectRatio === '9:16' ? '9:16' : '16:9',
-      // Add other Wavespeed-specific parameters as needed
-    })
+    body: JSON.stringify(requestBody)
   });
 
   if (!response.ok) {
@@ -713,23 +732,36 @@ export const generateVideoSegments = async (
 
     // LIP-SYNC PROMPT: Explicitly include the text to be spoken
     const referenceImageContext = config.referenceImageUrl 
-      ? `\nREFERENCE IMAGE: Match the exact visual style, setting, character appearance, and composition from the reference image. Maintain consistency with the reference scene.\n` 
+      ? `\nCRITICAL REFERENCE IMAGE: Use the provided reference image as the EXACT visual template. Match the exact podcast studio setting, character appearance (chimpanzee in podcast studio), lighting, and composition from the reference image. The reference shows the correct scene that must be replicated.\n` 
       : '';
+
+    // Determine if this is a wide shot (both characters) or single character shot
+    const isWideShot = line.speaker === 'Both' || line.speaker.includes('Both');
+    const sceneDescription = isWideShot 
+      ? `Two chimpanzees (${config.characters.hostA.name} and ${config.characters.hostB.name}) in a podcast studio, both visible in frame, sitting at a desk with microphones.`
+      : `${character.name} (a chimpanzee) in a podcast studio setting, sitting at a desk with microphone, professional podcast environment.`;
 
     // IMPROVED PROMPT: More specific with duration, actions, and lip-sync
     const prompt = `
-  Professional news broadcast video segment of ${character.name} speaking.
-  Visual Description: ${character.visualPrompt}
+  Professional news broadcast video segment showing ${sceneDescription}
+  
+  CHARACTER: ${character.name} - ${character.visualPrompt}
+  SCENE: Podcast-style news studio with two chimpanzee hosts. ${isWideShot ? 'Wide shot showing both chimpanzees.' : 'Single character shot.'}
   Camera Angle: ${cameraAngle}
   Action: ${action}
   Dialogue for Lip-Sync: "${line.text}"
   Duration: 5-10 seconds of continuous speaking
   Emotion/Tone: ${config.tone}
-  Setting: Professional news studio with consistent lighting, ${config.format} format.
-  Lighting: Studio lighting, high quality, consistent with reference.
+  Setting: Professional podcast-style news studio (INDOOR, NOT outdoor or landscape). Two chimpanzees presenting news in a modern studio environment with microphones, desk, and professional lighting. ${config.format} format.
+  Lighting: Professional studio lighting, high quality, consistent with podcast aesthetic.
   Expression: Natural, engaging, appropriate for news content.
   ${referenceImageContext}
-  IMPORTANT: The character must be speaking the exact dialogue provided for proper lip-sync. Maintain visual consistency with previous shots of this character.
+  
+  CRITICAL REQUIREMENTS:
+  - MUST show a chimpanzee in a podcast studio setting (NOT a generic landscape or outdoor scene)
+  - The character must be speaking the exact dialogue provided for proper lip-sync
+  - Maintain visual consistency with the podcast studio setting and reference image
+  - Setting must be an indoor podcast studio, not an outdoor or generic scene
     `.trim();
 
     return retryWithBackoff(async () => {
@@ -737,7 +769,7 @@ export const generateVideoSegments = async (
         // Use Wavespeed if API key is available, otherwise fallback to VEO
         if (shouldUseWavespeed()) {
           console.log(`[Wavespeed] Generating video for segment ${index} using model: ${getWavespeedModel()}`);
-          const taskId = await createWavespeedTask(prompt, config.format);
+          const taskId = await createWavespeedTask(prompt, config.format, config.referenceImageUrl);
           const videoUrl = await pollWavespeedTask(taskId);
           CostTracker.track('video', getWavespeedModel(), getCostForTask('video'));
           return videoUrl;
@@ -747,7 +779,9 @@ export const generateVideoSegments = async (
             model: getModelForTask('video'),
             prompt: prompt,
             config: {
-              aspectRatio: config.format === '9:16' ? '9:16' : '16:9'
+              aspectRatio: config.format === '9:16' ? '9:16' : '16:9',
+              // VEO may support reference images differently - check API docs
+              ...(config.referenceImageUrl ? { referenceImage: config.referenceImageUrl } : {})
             }
           });
 
@@ -783,28 +817,42 @@ export const generateBroadcastVisuals = async (
 
   // Build prompt with reference image context if available
   const referenceImageContext = config.referenceImageUrl 
-    ? `\nREFERENCE IMAGE: Use the provided reference image to maintain visual consistency. Match the exact setting, character appearances, lighting, and composition from the reference image.\n` 
+    ? `\nCRITICAL: Use the provided reference image as the EXACT visual template. Match the exact setting, character appearances (2 chimpanzees in podcast studio), lighting, composition, and studio layout from the reference image. The reference image shows the correct scene that must be replicated.\n` 
     : '';
 
+  // Enhanced prompt with explicit podcast studio description
   const prompt = `
-Create a professional ${config.format} news broadcast video with branding.
+Create a professional ${config.format} news broadcast video showing TWO CHIMPANZEES in a PODCAST-STYLE STUDIO giving the news.
+
+SCENE DESCRIPTION (CRITICAL - MUST FOLLOW):
+- Two chimpanzees (${config.characters.hostA.name} and ${config.characters.hostB.name}) sitting in a modern podcast studio
+- Podcast-style setup: two hosts sitting side-by-side or facing each other at a desk/table
+- Professional studio environment with microphones, possibly a backdrop with branding
+- Both chimpanzees are actively speaking and presenting the news
+- Camera angle: wide shot showing both chimpanzees in the frame, or alternating between them
+- Studio lighting: professional, well-lit, modern podcast aesthetic
+- Setting: NOT a generic landscape or outdoor scene - MUST be an indoor podcast studio
 
 CHANNEL: ${config.channelName}
 TAGLINE: ${config.tagline}
 BRANDING COLORS: ${config.logoColor1} and ${config.logoColor2}
-TOPIC: ${newsContext}
-${referenceImageContext}
-CHARACTERS (maintain visual consistency):
+
+CHARACTERS (MUST APPEAR IN VIDEO):
 - ${config.characters.hostA.name}: ${config.characters.hostA.visualPrompt}
 - ${config.characters.hostB.name}: ${config.characters.hostB.visualPrompt}
- 
+
+TOPIC: ${newsContext}
+${referenceImageContext}
+
 DIALOGUE FOR LIP-SYNC:
 ${scriptText}
  
-STYLE: ${config.tone}, professional news studio setting
+STYLE: ${config.tone}, professional podcast-style news studio setting with two chimpanzee hosts
 DURATION: 60 seconds
-QUALITY: High definition, stable camera, good lighting
+QUALITY: High definition, stable camera, professional studio lighting
 BRANDING: Include channel name "${config.channelName}" and tagline "${config.tagline}" visually in the scene. Use brand colors ${config.logoColor1} and ${config.logoColor2} in graphics, logos, or on-screen elements.
+
+IMPORTANT: The video MUST show two chimpanzees in a podcast studio setting. Do NOT generate generic landscapes, outdoor scenes, or unrelated content. The scene must match a professional news podcast with two chimpanzee hosts.
   `.trim();
 
   return retryWithBackoff(async () => {
@@ -812,7 +860,7 @@ BRANDING: Include channel name "${config.channelName}" and tagline "${config.tag
       // Use Wavespeed if API key is available, otherwise fallback to VEO
       if (shouldUseWavespeed()) {
         console.log(`[Wavespeed] Generating broadcast video using model: ${getWavespeedModel()}`);
-        const taskId = await createWavespeedTask(prompt, config.format);
+        const taskId = await createWavespeedTask(prompt, config.format, config.referenceImageUrl);
         const videoUrl = await pollWavespeedTask(taskId);
         CostTracker.track('video', getWavespeedModel(), getCostForTask('video'));
         return {
@@ -826,7 +874,9 @@ BRANDING: Include channel name "${config.channelName}" and tagline "${config.tag
           model: getModelForTask('video'),
           prompt: prompt,
           config: {
-            aspectRatio: config.format === '9:16' ? '9:16' : '16:9'
+            aspectRatio: config.format === '9:16' ? '9:16' : '16:9',
+            // VEO may support reference images differently - check API docs
+            ...(config.referenceImageUrl ? { referenceImage: config.referenceImageUrl } : {})
           }
         });
 
