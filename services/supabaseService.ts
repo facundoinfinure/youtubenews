@@ -753,6 +753,70 @@ export const getAllProductions = async (
   return (data || []).map(normalizeProduction);
 };
 
+/**
+ * Get published productions (completed productions that have been published to YouTube)
+ */
+export const getPublishedProductions = async (
+  channelId: string,
+  userId?: string,
+  limit: number = 50
+): Promise<Production[]> => {
+  if (!supabase) return [];
+
+  // Get all completed productions
+  let query = supabase
+    .from('productions')
+    .select('*')
+    .eq('channel_id', channelId)
+    .eq('status', 'completed')
+    .order('updated_at', { ascending: false })
+    .limit(limit);
+
+  if (userId) {
+    query = query.eq('user_id', userId);
+  }
+
+  const { data: productions, error } = await query;
+
+  if (error) {
+    console.error("Error fetching published productions:", error);
+    return [];
+  }
+
+  // Get all published videos for this channel
+  const { data: videos, error: videosError } = await supabase
+    .from('videos')
+    .select('*')
+    .eq('channel_id', channelId)
+    .eq('is_posted', true)
+    .order('created_at', { ascending: false });
+
+  if (videosError) {
+    console.error("Error fetching published videos:", videosError);
+    return [];
+  }
+
+  // Match productions with published videos by title
+  const publishedProds = (productions || []).filter(prod => {
+    const prodData = normalizeProduction(prod);
+    if (!prodData.viral_metadata?.title) return false;
+    
+    // Check if there's a published video with matching title
+    return (videos || []).some((video: any) => {
+      const videoTitle = video.title || '';
+      const prodTitle = prodData.viral_metadata?.title || '';
+      
+      // Exact match or partial match (for flexibility)
+      return videoTitle === prodTitle || 
+             videoTitle.includes(prodTitle) ||
+             prodTitle.includes(videoTitle) ||
+             videoTitle.includes(prodTitle.substring(0, 30));
+    });
+  });
+
+  return publishedProds.map(normalizeProduction);
+};
+
 export const updateProductionStatus = async (
   id: string,
   status: ProductionStatus,

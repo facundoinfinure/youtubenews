@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { ChannelConfig, CharacterProfile, StoredVideo, Channel, UserProfile, Production } from '../types';
-import { fetchVideosFromDB, saveConfigToDB, getAllChannels, saveChannel, uploadImageToStorage, getIncompleteProductions, getAllProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction } from '../services/supabaseService';
+import { fetchVideosFromDB, saveConfigToDB, getAllChannels, saveChannel, uploadImageToStorage, getIncompleteProductions, getAllProductions, getPublishedProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction } from '../services/supabaseService';
 import { generateReferenceImage } from '../services/geminiService';
 import { CostTracker } from '../services/CostTracker';
 import { ContentCache } from '../services/ContentCache';
@@ -123,7 +123,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
   const [expandedProductions, setExpandedProductions] = useState<Set<string>>(new Set());
   const [selectedProductionForVersions, setSelectedProductionForVersions] = useState<string | null>(null);
   const [productionVersions, setProductionVersions] = useState<Production[]>([]);
-  const [productionFilter, setProductionFilter] = useState<'all' | 'incomplete' | 'completed' | 'failed'>('incomplete');
+  const [productionFilter, setProductionFilter] = useState<'all' | 'incomplete' | 'completed' | 'failed' | 'published'>('incomplete');
   const [showNewChannelModal, setShowNewChannelModal] = useState(false);
   const [newChannelName, setNewChannelName] = useState('');
   const [sceneDescription, setSceneDescription] = useState('');
@@ -139,14 +139,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
   useEffect(() => {
     if (activeTab === 'insights' && activeChannel) {
       setIsLoadingVideos(true);
+      // Only show published videos (is_posted = true) in insights
       fetchVideosFromDB(activeChannel.id)
-        .then(setVideos)
+        .then(videos => {
+          // Filter to only show published videos
+          const publishedVideos = videos.filter(v => v.is_posted);
+          setVideos(publishedVideos);
+        })
         .finally(() => setIsLoadingVideos(false));
     }
     if (activeTab === 'productions' && activeChannel && user) {
       setIsLoadingProductions(true);
       if (productionFilter === 'incomplete') {
         getIncompleteProductions(activeChannel.id, user.email)
+          .then(setProductions)
+          .finally(() => setIsLoadingProductions(false));
+      } else if (productionFilter === 'published') {
+        // Get published productions (completed + has published video)
+        getPublishedProductions(activeChannel.id, user.email, 100)
           .then(setProductions)
           .finally(() => setIsLoadingProductions(false));
       } else {
@@ -367,8 +377,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                 ) : videos.length === 0 ? (
                   <EmptyState
                     icon="🎬"
-                    title="No Videos Yet"
-                    description="Start creating your first video to see analytics and performance data here."
+                    title="No Published Videos"
+                    description="Only videos that have been published to YouTube are shown here. Complete a production and publish it to see analytics."
                   />
                 ) : (
                   videos.map(vid => (
@@ -728,6 +738,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                             } else if (productionFilter === 'incomplete') {
                               const incomplete = await getIncompleteProductions(activeChannel.id, user.email);
                               setProductions(incomplete);
+                            } else if (productionFilter === 'published') {
+                              // Get published productions
+                              const publishedProds = await getPublishedProductions(activeChannel.id, user.email, 100);
+                              setProductions(publishedProds);
                             } else {
                               const allProds = await getAllProductions(activeChannel.id, user.email, 100);
                               setProductions(allProds.filter(p => p.status === productionFilter));
@@ -786,6 +800,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                   >
                     Failed
                   </button>
+                  <button
+                    onClick={() => setProductionFilter('published')}
+                    className={`px-3 py-1 rounded text-sm font-semibold transition-all ${
+                      productionFilter === 'published'
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-[#222] text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    📺 Published
+                  </button>
                 </div>
               </div>
               <p className="text-gray-400 text-sm mb-6">
@@ -793,6 +817,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                   ? 'Resume productions that were abandoned or are still in progress.'
                   : productionFilter === 'all'
                   ? 'View all productions across all statuses.'
+                  : productionFilter === 'published'
+                  ? 'View completed productions that have been published to YouTube.'
                   : `View ${productionFilter} productions.`}
               </p>
 
@@ -808,9 +834,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
               ) : productions.length === 0 ? (
                 <EmptyState
                   icon="📭"
-                  title={`No ${productionFilter === 'all' ? '' : productionFilter === 'incomplete' ? 'Incomplete' : productionFilter} Productions`}
+                  title={`No ${productionFilter === 'all' ? '' : productionFilter === 'incomplete' ? 'Incomplete' : productionFilter === 'published' ? 'Published' : productionFilter} Productions`}
                   description={productionFilter === 'incomplete' 
                     ? "All productions have been completed. Start a new production to create content."
+                    : productionFilter === 'published'
+                    ? "No published productions found. Complete a production and publish it to YouTube to see it here."
                     : `No ${productionFilter} productions found.`}
                 />
               ) : (
@@ -919,6 +947,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                                     } else if (productionFilter === 'incomplete') {
                                       const incomplete = await getIncompleteProductions(activeChannel.id, user.email);
                                       setProductions(incomplete);
+                                    } else if (productionFilter === 'published') {
+                                      // Get published productions
+                                      const publishedProds = await getPublishedProductions(activeChannel.id, user.email, 100);
+                                      setProductions(publishedProds);
                                     } else {
                                       const allProds = await getAllProductions(activeChannel.id, user.email, 100);
                                       setProductions(allProds.filter(p => p.status === productionFilter));
@@ -952,6 +984,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                                       } else if (productionFilter === 'incomplete') {
                                         const incomplete = await getIncompleteProductions(activeChannel.id, user.email);
                                         setProductions(incomplete);
+                                      } else if (productionFilter === 'published') {
+                                        // Get published productions
+                                        const allProds = await getAllProductions(activeChannel.id, user.email, 100);
+                                        const allVideos = await fetchVideosFromDB(activeChannel.id);
+                                        const publishedVideos = allVideos.filter(v => v.is_posted);
+                                        const publishedProds = allProds.filter(prod => {
+                                          if (prod.status !== 'completed') return false;
+                                          if (!prod.viral_metadata?.title) return false;
+                                          return publishedVideos.some(video => 
+                                            video.title === prod.viral_metadata?.title || 
+                                            video.title.includes(prod.viral_metadata?.title || '') ||
+                                            (prod.viral_metadata?.title && video.title.includes(prod.viral_metadata.title.substring(0, 30)))
+                                          );
+                                        });
+                                        setProductions(publishedProds);
                                       } else {
                                         const allProds = await getAllProductions(activeChannel.id, user.email, 100);
                                         setProductions(allProds.filter(p => p.status === productionFilter));
