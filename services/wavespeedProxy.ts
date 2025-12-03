@@ -14,7 +14,25 @@
 const getWavespeedApiKey = () => import.meta.env.VITE_WAVESPEED_API_KEY || "";
 
 // Configuration: Set this to your backend proxy URL if you have one
-const getProxyUrl = () => import.meta.env.VITE_BACKEND_URL || "";
+// Auto-detect Vercel URL in production if not explicitly configured
+const getProxyUrl = (): string => {
+  // First check if explicitly configured
+  const explicitUrl = import.meta.env.VITE_BACKEND_URL || "";
+  if (explicitUrl && explicitUrl.length > 0) {
+    return explicitUrl;
+  }
+  
+  // Auto-detect from current origin (works in production on Vercel)
+  if (typeof window !== 'undefined' && window.location) {
+    const origin = window.location.origin;
+    // Only use auto-detection if we're on a Vercel domain or localhost
+    if (origin.includes('vercel.app') || origin.includes('localhost')) {
+      return origin;
+    }
+  }
+  
+  return "";
+};
 
 /**
  * Check if we should use a backend proxy for Wavespeed calls
@@ -119,7 +137,7 @@ export const createWavespeedVideoTask = async (
   referenceImageUrl?: string,
   model?: string
 ): Promise<string> => {
-  const endpoint = shouldUseProxy() ? '/v1/tasks' : '/v1/tasks';
+  const endpoint = 'v1/tasks';
   
   const requestBody: any = {
     model: model || 'wan-i2v-720p',
@@ -128,8 +146,21 @@ export const createWavespeedVideoTask = async (
   };
 
   if (referenceImageUrl) {
+    // Handle data URIs
+    if (referenceImageUrl.startsWith('data:')) {
+      console.log(`[Wavespeed] 📸 Reference image is a data URI (${referenceImageUrl.length} chars)`);
+    } else {
+      console.log(`[Wavespeed] 📸 Using reference image URL: ${referenceImageUrl.substring(0, 80)}...`);
+    }
     requestBody.images = [referenceImageUrl];
+    console.log(`[Wavespeed] ✅ Reference image added to video generation request`);
+  } else {
+    console.warn(`[Wavespeed] ⚠️ No reference image provided - video may not match the intended podcast studio scene`);
   }
+
+  console.log(`[Wavespeed] 🚀 Creating video generation task with model: ${model || 'wan-i2v-720p'}`);
+  console.log(`[Wavespeed] 📝 Prompt length: ${prompt.length} chars`);
+  console.log(`[Wavespeed] 📐 Aspect ratio: ${aspectRatio}`);
 
   const response = await wavespeedRequest(endpoint, {
     method: 'POST',
@@ -138,16 +169,21 @@ export const createWavespeedVideoTask = async (
 
   if (!response.ok) {
     const errorText = await response.text();
+    console.error(`[Wavespeed] ❌ API error: ${response.status} - ${errorText}`);
     throw new Error(`Wavespeed API error: ${response.status} - ${errorText}`);
   }
 
   const data = await response.json();
+  console.log(`[Wavespeed] 📦 Response data:`, JSON.stringify(data, null, 2));
+  
   const taskId = data.task_id || data.id || data.data?.id || data.data?.task_id;
   
   if (!taskId) {
+    console.error(`[Wavespeed] ❌ No task ID found in response:`, data);
     throw new Error(`Wavespeed API did not return a task ID. Response: ${JSON.stringify(data)}`);
   }
   
+  console.log(`[Wavespeed] ✅ Task created with ID: ${taskId}`);
   return taskId;
 };
 
@@ -155,9 +191,11 @@ export const createWavespeedVideoTask = async (
  * Poll a Wavespeed task for completion
  */
 export const pollWavespeedTask = async (taskId: string): Promise<string> => {
-  const endpoint = shouldUseProxy() ? `/v1/tasks/${taskId}` : `/v1/tasks/${taskId}`;
+  const endpoint = `v1/tasks/${taskId}`;
   const maxRetries = 60; // 5 minutes max
   let retries = 0;
+
+  console.log(`[Wavespeed] 🔄 Starting to poll task: ${taskId}`);
 
   while (retries < maxRetries) {
     await new Promise(resolve => setTimeout(resolve, 5000));
@@ -168,10 +206,13 @@ export const pollWavespeedTask = async (taskId: string): Promise<string> => {
 
     if (!response.ok) {
       const errorText = await response.text();
+      console.error(`[Wavespeed] ❌ Polling error (${response.status}): ${errorText}`);
       throw new Error(`Wavespeed polling error: ${response.status} - ${errorText}`);
     }
 
     const data = await response.json();
+    console.log(`[Wavespeed] 📊 Poll attempt ${retries + 1}/${maxRetries} - Status: ${data.status || data.data?.status || 'unknown'}`);
+    
     const status = data.status || data.data?.status;
     const rawVideoUrl = 
       data.result?.video_url || 
@@ -187,24 +228,124 @@ export const pollWavespeedTask = async (taskId: string): Promise<string> => {
         videoUrl = rawVideoUrl;
       } else if (typeof rawVideoUrl === 'object' && rawVideoUrl !== null) {
         videoUrl = rawVideoUrl.url || rawVideoUrl.video_url || rawVideoUrl.href || null;
+        if (!videoUrl && Array.isArray(rawVideoUrl)) {
+          videoUrl = rawVideoUrl.find((item: any) => typeof item === 'string') || null;
+        }
       }
     }
     
     if (status === "completed") {
       if (videoUrl && typeof videoUrl === 'string') {
+        console.log(`[Wavespeed] ✅ Video generation completed! URL: ${videoUrl.substring(0, 100)}...`);
         return videoUrl;
       } else {
+        console.error(`[Wavespeed] ❌ Task completed but no valid video URL found. Response:`, JSON.stringify(data, null, 2));
         throw new Error(`Wavespeed task completed but no valid video URL was returned. Task ID: ${taskId}`);
       }
     } else if (status === "failed" || data.data?.status === "failed") {
       const errorMsg = data.error || data.data?.error || data.message || "Unknown error";
+      console.error(`[Wavespeed] ❌ Task failed: ${errorMsg}`);
       throw new Error(`Wavespeed task failed: ${errorMsg}`);
+    } else if (status === "processing" || status === "pending" || !status) {
+      console.log(`[Wavespeed] ⏳ Task still processing... (${retries + 1}/${maxRetries})`);
+    } else {
+      console.warn(`[Wavespeed] ⚠️ Unknown status: ${status}, continuing to poll...`);
     }
 
     retries++;
   }
 
+  console.error(`[Wavespeed] ❌ Video generation timed out after ${maxRetries} attempts`);
   throw new Error(`Wavespeed video generation timed out after ${maxRetries} attempts`);
+};
+
+/**
+ * Create a Wavespeed image generation task (Nano Banana Pro Edit)
+ */
+export const createWavespeedImageTask = async (
+  prompt: string,
+  aspectRatio: '16:9' | '9:16' | '1:1' = '16:9',
+  inputImageUrl?: string
+): Promise<string> => {
+  const endpoint = 'api/v3/google/nano-banana-pro/edit';
+  
+  const requestBody: any = {
+    prompt: prompt,
+    aspect_ratio: aspectRatio,
+    resolution: "2k",
+    output_format: "png",
+    enable_sync_mode: false,
+    enable_base64_output: false
+  };
+
+  // Nano Banana Pro Edit requires an input image
+  if (inputImageUrl) {
+    requestBody.images = [inputImageUrl];
+  }
+
+  const response = await wavespeedRequest(endpoint, {
+    method: 'POST',
+    body: requestBody
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Wavespeed image API error: ${response.status} - ${errorText}`);
+  }
+
+  const data = await response.json();
+  
+  // WaveSpeed API v3 returns data.id as the task ID
+  const taskId = data.data?.id || data.id;
+  
+  if (!taskId) {
+    throw new Error(`Wavespeed API did not return a task ID. Response: ${JSON.stringify(data)}`);
+  }
+  
+  return taskId;
+};
+
+/**
+ * Poll a Wavespeed image task for completion
+ */
+export const pollWavespeedImageTask = async (taskId: string): Promise<string> => {
+  const endpoint = `api/v3/predictions/${taskId}/result`;
+  const maxRetries = 60; // 5 minutes max
+  let retries = 0;
+
+  while (retries < maxRetries) {
+    await new Promise(resolve => setTimeout(resolve, 3000)); // Check every 3 seconds for images
+
+    const response = await wavespeedRequest(endpoint, {
+      method: 'GET'
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Wavespeed image polling error: ${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+    
+    // Check for completed status and image URL
+    const status = data.data?.status || data.status;
+    
+    if (status === "completed") {
+      const imageUrl = data.data?.outputs?.[0] || data.outputs?.[0];
+      if (imageUrl) {
+        return typeof imageUrl === 'string' ? imageUrl : imageUrl.url || imageUrl.href || imageUrl;
+      } else {
+        throw new Error(`Wavespeed image task completed but no image URL was returned. Task ID: ${taskId}`);
+      }
+    } else if (status === "failed") {
+      const errorMsg = data.error || data.data?.error || data.message || "Unknown error";
+      throw new Error(`Wavespeed image task failed: ${errorMsg}`);
+    }
+
+    retries++;
+  }
+
+  throw new Error(`Wavespeed image generation timed out after ${maxRetries} attempts`);
 };
 
 /**
@@ -226,12 +367,12 @@ export const checkWavespeedConfig = (): { configured: boolean; message: string }
       configured: false,
       message: `⚠️ Wavespeed API key found but no backend proxy configured. ` +
                 `Direct browser calls will fail due to CORS. ` +
-                `Set VITE_BACKEND_URL to use a backend proxy.`
+                `Proxy will auto-detect Vercel URL in production.`
     };
   }
   
   return {
     configured: false,
-    message: `❌ Wavespeed API key not found. Set VITE_WAVESPEED_API_KEY or configure backend proxy.`
+    message: `❌ Wavespeed API key not found. Set WAVESPEED_API_KEY in Vercel environment variables.`
   };
 };

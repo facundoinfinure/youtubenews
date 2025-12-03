@@ -5,6 +5,7 @@ import { retryWithBackoff } from "./retryUtils";
 import { getModelForTask, getCostForTask, getWavespeedModel } from "./modelStrategy";
 import { CostTracker } from "./CostTracker";
 import { getChannelIntroOutro, saveChannelIntroOutro } from "./supabaseService";
+import { createWavespeedVideoTask, pollWavespeedTask, createWavespeedImageTask, pollWavespeedImageTask } from "./wavespeedProxy";
 
 const getApiKey = () => import.meta.env.VITE_GEMINI_API_KEY || window.env?.API_KEY || process.env.API_KEY || "";
 const getWavespeedApiKey = () => import.meta.env.VITE_WAVESPEED_API_KEY || window.env?.WAVESPEED_API_KEY || process.env.WAVESPEED_API_KEY || "";
@@ -13,175 +14,6 @@ const getAiClient = () => new GoogleGenAI({ apiKey: getApiKey() });
 // Helper function to check if Wavespeed should be used
 const shouldUseWavespeed = () => {
   return !!getWavespeedApiKey();
-};
-
-// Wavespeed API helper functions
-const createWavespeedTask = async (prompt: string, aspectRatio: '16:9' | '9:16', referenceImageUrl?: string): Promise<string> => {
-  const apiKey = getWavespeedApiKey();
-  if (!apiKey) throw new Error("Wavespeed API key not configured");
-
-  const model = getWavespeedModel();
-  const wavespeedApiUrl = "https://api.wavespeed.ai/v1/tasks";
-
-  const requestBody: any = {
-    model: model,
-    prompt: prompt,
-    aspect_ratio: aspectRatio === '9:16' ? '9:16' : '16:9',
-  };
-
-  // Add reference image if available
-  if (referenceImageUrl) {
-    // Ensure the image URL is properly formatted
-    let imageUrl = referenceImageUrl;
-    // If it's a data URI, we might need to handle it differently
-    if (imageUrl.startsWith('data:')) {
-      console.log(`[Wavespeed] 📸 Reference image is a data URI (${imageUrl.length} chars)`);
-      // Wavespeed might need the image uploaded first, but let's try sending it directly
-      requestBody.images = [imageUrl];
-    } else {
-      console.log(`[Wavespeed] 📸 Using reference image URL: ${imageUrl.substring(0, 80)}...`);
-      requestBody.images = [imageUrl];
-    }
-    console.log(`[Wavespeed] ✅ Reference image added to video generation request`);
-  } else {
-    console.warn(`[Wavespeed] ⚠️ No reference image provided - video may not match the intended podcast studio scene`);
-  }
-
-  console.log(`[Wavespeed] 🚀 Creating video generation task with model: ${model}`);
-  console.log(`[Wavespeed] 📝 Prompt length: ${prompt.length} chars`);
-  console.log(`[Wavespeed] 📐 Aspect ratio: ${aspectRatio}`);
-
-  let response: Response;
-  try {
-    response = await fetch(wavespeedApiUrl, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(requestBody)
-    });
-  } catch (fetchError: any) {
-    // Handle CORS and network errors
-    if (fetchError.message?.includes('CORS') || fetchError.message?.includes('Failed to fetch')) {
-      console.error(`[Wavespeed] ❌ CORS error: API calls to Wavespeed must be made from a backend server or through a proxy.`);
-      console.error(`[Wavespeed] Current origin: ${typeof window !== 'undefined' ? window.location.origin : 'unknown'}`);
-      throw new Error(`CORS error: Wavespeed API cannot be called directly from the browser. Please configure a backend proxy or use server-side API calls.`);
-    }
-    throw fetchError;
-  }
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error(`[Wavespeed] ❌ API error: ${response.status} - ${errorText}`);
-    throw new Error(`Wavespeed API error: ${response.status} - ${errorText}`);
-  }
-
-  const data = await response.json();
-  console.log(`[Wavespeed] 📦 Response data:`, JSON.stringify(data, null, 2));
-  
-  // Try multiple possible response formats
-  const taskId = data.task_id || data.id || data.data?.id || data.data?.task_id;
-  
-  if (!taskId) {
-    console.error(`[Wavespeed] ❌ No task ID found in response:`, data);
-    throw new Error(`Wavespeed API did not return a task ID. Response: ${JSON.stringify(data)}`);
-  }
-  
-  console.log(`[Wavespeed] ✅ Task created with ID: ${taskId}`);
-  return taskId;
-};
-
-const pollWavespeedTask = async (taskId: string): Promise<string> => {
-  const apiKey = getWavespeedApiKey();
-  if (!apiKey) throw new Error("Wavespeed API key not configured");
-
-  const wavespeedApiUrl = `https://api.wavespeed.ai/v1/tasks/${taskId}`;
-  let retries = 0;
-  const maxRetries = 60; // 5 minutes max
-
-  console.log(`[Wavespeed] 🔄 Starting to poll task: ${taskId}`);
-
-  while (retries < maxRetries) {
-    await new Promise(resolve => setTimeout(resolve, 5000));
-
-    let response: Response;
-    try {
-      response = await fetch(wavespeedApiUrl, {
-        method: "GET",
-        headers: {
-          "Authorization": `Bearer ${apiKey}`
-        }
-      });
-    } catch (fetchError: any) {
-      // Handle CORS and network errors
-      if (fetchError.message?.includes('CORS') || fetchError.message?.includes('Failed to fetch')) {
-        console.error(`[Wavespeed] ❌ CORS error during polling: API calls to Wavespeed must be made from a backend server.`);
-        throw new Error(`CORS error: Wavespeed API cannot be called directly from the browser. Please configure a backend proxy.`);
-      }
-      throw fetchError;
-    }
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`[Wavespeed] ❌ Polling error (${response.status}): ${errorText}`);
-      throw new Error(`Wavespeed polling error: ${response.status} - ${errorText}`);
-    }
-
-    const data = await response.json();
-    console.log(`[Wavespeed] 📊 Poll attempt ${retries + 1}/${maxRetries} - Status: ${data.status || data.data?.status || 'unknown'}`);
-    
-    // Try multiple possible response formats
-    const status = data.status || data.data?.status;
-    const rawVideoUrl = 
-      data.result?.video_url || 
-      data.data?.result?.video_url ||
-      data.video_url ||
-      data.data?.video_url ||
-      (data.outputs && data.outputs[0]) ||
-      (data.data?.outputs && data.data.outputs[0]);
-    
-    // Bug 2 Fix: Ensure videoUrl is a string, extract URL if it's an object
-    let videoUrl: string | null = null;
-    if (rawVideoUrl) {
-      if (typeof rawVideoUrl === 'string') {
-        videoUrl = rawVideoUrl;
-      } else if (typeof rawVideoUrl === 'object' && rawVideoUrl !== null) {
-        // If it's an object, try to extract a URL property
-        videoUrl = rawVideoUrl.url || rawVideoUrl.video_url || rawVideoUrl.href || null;
-        if (!videoUrl && Array.isArray(rawVideoUrl)) {
-          // If it's an array, get the first string element
-          videoUrl = rawVideoUrl.find((item: any) => typeof item === 'string') || null;
-        }
-      }
-    }
-    
-    // Bug 1 Fix: Handle completed status without valid video URL
-    if (status === "completed") {
-      if (videoUrl && typeof videoUrl === 'string') {
-        console.log(`[Wavespeed] ✅ Video generation completed! URL: ${videoUrl.substring(0, 100)}...`);
-        return videoUrl;
-      } else {
-        // Status is completed but no valid video URL found
-        console.error(`[Wavespeed] ❌ Task completed but no valid video URL found. Response:`, JSON.stringify(data, null, 2));
-        throw new Error(`Wavespeed task completed but no valid video URL was returned. Task ID: ${taskId}`);
-      }
-    } else if (status === "failed" || data.data?.status === "failed") {
-      const errorMsg = data.error || data.data?.error || data.message || "Unknown error";
-      console.error(`[Wavespeed] ❌ Task failed: ${errorMsg}`);
-      throw new Error(`Wavespeed task failed: ${errorMsg}`);
-    } else if (status === "processing" || status === "pending" || !status) {
-      // Continue polling
-      console.log(`[Wavespeed] ⏳ Task still processing... (${retries + 1}/${maxRetries})`);
-    } else {
-      console.warn(`[Wavespeed] ⚠️ Unknown status: ${status}, continuing to poll...`);
-    }
-
-    retries++;
-  }
-
-  console.error(`[Wavespeed] ❌ Video generation timed out after ${maxRetries} attempts`);
-  throw new Error(`Wavespeed video generation timed out after ${maxRetries} attempts`);
 };
 
 // Helper function to create a simple placeholder image as data URI
@@ -212,139 +44,10 @@ const createPlaceholderImage = (width: number = 1024, height: number = 1024): st
   return canvas.toDataURL('image/png');
 };
 
-// Wavespeed image generation helper functions for Nano Banana Pro Edit
-const createWavespeedImageTask = async (
-  prompt: string, 
-  aspectRatio: '16:9' | '9:16' | '1:1' = '16:9',
-  inputImageUrl?: string
-): Promise<string> => {
-  const apiKey = getWavespeedApiKey();
-  if (!apiKey) throw new Error("Wavespeed API key not configured");
-
-  // For Nano Banana Pro Edit, we need an input image
-  // If no input image is provided, we'll create a placeholder and upload it
-  let imageUrl = inputImageUrl;
-  
-  if (!imageUrl) {
-    // Create a placeholder image and upload it to get a URL
-    // For now, we'll use a simple approach: create placeholder and convert to data URL
-    const placeholderDataUri = createPlaceholderImage(
-      aspectRatio === '9:16' ? 576 : aspectRatio === '1:1' ? 1024 : 1024,
-      aspectRatio === '9:16' ? 1024 : aspectRatio === '1:1' ? 1024 : 576
-    );
-    
-    // Upload placeholder to a temporary service or use it directly
-    // For WaveSpeed, we might need to upload to their service first
-    // For now, let's try using the placeholder as base64 in the request
-    imageUrl = placeholderDataUri;
-  }
-
-  const wavespeedApiUrl = "https://api.wavespeed.ai/api/v3/google/nano-banana-pro/edit";
-  
-  // Prepare the request body
-  const requestBody: any = {
-    prompt: prompt,
-    aspect_ratio: aspectRatio,
-    resolution: "2k", // Use 2k for good quality ($0.14 per image)
-    output_format: "png",
-    enable_sync_mode: false,
-    enable_base64_output: false
-  };
-
-  // Nano Banana Pro Edit requires an input image
-  // If imageUrl is a data URI, we need to upload it first or use it as base64
-  // WaveSpeed API v3 might support base64 images directly in the images array
-  if (imageUrl.startsWith('data:')) {
-    // Try sending the data URI directly - WaveSpeed API may support base64
-    // Format: data:image/png;base64,<base64data>
-    requestBody.images = [imageUrl];
-  } else {
-    requestBody.images = [imageUrl];
-  }
-
-  let response: Response;
-  try {
-    response = await fetch(wavespeedApiUrl, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(requestBody)
-    });
-  } catch (fetchError: any) {
-    // Handle CORS and network errors
-    if (fetchError.message?.includes('CORS') || fetchError.message?.includes('Failed to fetch')) {
-      console.error(`[Wavespeed] ❌ CORS error: API calls to Wavespeed must be made from a backend server or through a proxy.`);
-      throw new Error(`CORS error: Wavespeed API cannot be called directly from the browser. Please configure a backend proxy or use server-side API calls.`);
-    }
-    throw fetchError;
-  }
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Wavespeed image API error: ${response.status} - ${errorText}`);
-  }
-
-  const data = await response.json();
-  
-  // WaveSpeed API v3 returns data.id as the task ID
-  if (data.data?.id) {
-    return data.data.id;
-  } else if (data.id) {
-    return data.id;
-  }
-  
-  throw new Error("Invalid response from Wavespeed image API");
-};
-
-const pollWavespeedImageTask = async (taskId: string): Promise<string> => {
-  const apiKey = getWavespeedApiKey();
-  if (!apiKey) throw new Error("Wavespeed API key not configured");
-
-  const wavespeedApiUrl = `https://api.wavespeed.ai/api/v3/predictions/${taskId}/result`;
-  let retries = 0;
-  const maxRetries = 60; // 5 minutes max
-
-  while (retries < maxRetries) {
-    await new Promise(resolve => setTimeout(resolve, 3000)); // Check every 3 seconds for images
-
-    let response: Response;
-    try {
-      response = await fetch(wavespeedApiUrl, {
-        method: "GET",
-        headers: {
-          "Authorization": `Bearer ${apiKey}`
-        }
-      });
-    } catch (fetchError: any) {
-      // Handle CORS and network errors
-      if (fetchError.message?.includes('CORS') || fetchError.message?.includes('Failed to fetch')) {
-        console.error(`[Wavespeed] ❌ CORS error during image polling: API calls to Wavespeed must be made from a backend server.`);
-        throw new Error(`CORS error: Wavespeed API cannot be called directly from the browser. Please configure a backend proxy.`);
-      }
-      throw fetchError;
-    }
-
-    if (!response.ok) {
-      throw new Error(`Wavespeed image polling error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    
-    // Check for completed status and image URL
-    if (data.data?.status === "completed" && data.data?.outputs && data.data.outputs.length > 0) {
-      return data.data.outputs[0]; // Return first image URL
-    } else if (data.status === "completed" && data.outputs && data.outputs.length > 0) {
-      return data.outputs[0];
-    } else if (data.data?.status === "failed" || data.status === "failed") {
-      throw new Error(`Wavespeed image task failed: ${data.error || data.data?.error || "Unknown error"}`);
-    }
-
-    retries++;
-  }
-
-  throw new Error("Wavespeed image generation timed out");
+// Wrapper function to create video task with model from config
+const createWavespeedTask = async (prompt: string, aspectRatio: '16:9' | '9:16', referenceImageUrl?: string): Promise<string> => {
+  const model = getWavespeedModel();
+  return createWavespeedVideoTask(prompt, aspectRatio, referenceImageUrl, model);
 };
 
 export const fetchEconomicNews = async (targetDate: Date | undefined, config: ChannelConfig): Promise<NewsItem[]> => {
@@ -1318,7 +1021,12 @@ IMPORTANT: This image will be used as a reference for maintaining visual consist
       console.log(`[Wavespeed] Generating reference image using Nano Banana Pro Edit`);
       
       const aspectRatio = config.format === '9:16' ? '9:16' : '16:9';
-      const taskId = await createWavespeedImageTask(prompt, aspectRatio);
+      // Create placeholder image for Nano Banana Pro Edit (requires input image)
+      const placeholderImage = createPlaceholderImage(
+        aspectRatio === '9:16' ? 576 : 1024,
+        aspectRatio === '9:16' ? 1024 : 576
+      );
+      const taskId = await createWavespeedImageTask(prompt, aspectRatio, placeholderImage);
       const imageUrl = await pollWavespeedImageTask(taskId);
       
       // Convert image URL to data URI for consistency with the rest of the app
