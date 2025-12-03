@@ -1,6 +1,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { ChannelConfig, StoredVideo, ViralMetadata, NewsItem, Channel, Production, ProductionStatus, ScriptLine, BroadcastSegment, VideoAssets } from '../types';
+import { checkFileExists } from './storageManager';
 
 // Initialize Client with Runtime Fallbacks
 const getSupabaseUrl = () => import.meta.env.VITE_SUPABASE_URL || window.env?.VITE_SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
@@ -484,7 +485,6 @@ export const uploadImageToStorage = async (imageDataUrl: string, fileName: strin
   try {
     // Check if file already exists (deduplication)
     const filePath = `channel-images/${fileName}`;
-    const { checkFileExists } = await import('./storageManager');
     const exists = await checkFileExists('channel-assets', filePath);
     
     if (exists) {
@@ -554,7 +554,6 @@ export const uploadAudioToStorage = async (
   try {
     // Check if file already exists (deduplication)
     const fileName = `productions/${productionId}/audio/segment-${segmentIndex}.mp3`;
-    const { checkFileExists } = await import('./storageManager');
     const exists = await checkFileExists('channel-assets', fileName);
     
     if (exists) {

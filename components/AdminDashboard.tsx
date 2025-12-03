@@ -6,6 +6,7 @@ import { generateReferenceImage } from '../services/geminiService';
 import { CostTracker } from '../services/CostTracker';
 import { ContentCache } from '../services/ContentCache';
 import { VideoListSkeleton, AnalyticsCardSkeleton, EmptyState } from './LoadingStates';
+import { getStorageUsage, cleanupOldFiles } from '../services/storageManager';
 
 interface AdminDashboardProps {
   config: ChannelConfig;
@@ -203,7 +204,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
       const loadStorageUsage = async () => {
         setIsLoadingStorage(true);
         try {
-          const { getStorageUsage } = await import('../services/storageManager');
           const usage = await getStorageUsage('channel-assets');
           setStorageUsage(usage);
         } catch (e) {
@@ -1237,7 +1237,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                         }
                         setIsLoadingStorage(true);
                         try {
-                          const { cleanupOldFiles, getStorageUsage } = await import('../services/storageManager');
                           const result = await cleanupOldFiles('channel-assets', 30, false);
                           setCleanupResult(result);
                           toast.success(`Cleaned up ${result.deleted} files, freed ${(result.freedSpace / 1024 / 1024).toFixed(2)} MB`);

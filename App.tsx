@@ -653,7 +653,6 @@ const App: React.FC = () => {
       let productionId: string | null = null;
       let genScript: ScriptLine[] = [];
       let viralHook: string = '';
-      const costBreakdown: Record<string, number> = {};
 
       // Check if resuming from existing production
       if (resumeFromProduction) {
