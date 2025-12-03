@@ -1,180 +1,58 @@
 # Configuración de Backend Proxy para Wavespeed
 
-Para usar Wavespeed desde el frontend, necesitas un backend que actúe como proxy para evitar errores CORS.
+Para usar Wavespeed desde el frontend, necesitas un backend que actúe como proxy para evitar errores CORS y proteger tu API Key.
 
-## Opciones de Deployment
+## Opción 1: Backend Local / Separado (Recomendado)
 
-### Opción 1: Backend Local (Desarrollo)
+Esta opción te da un backend completo en Python usando FastAPI. Es ideal para tener logs detallados, control total y poder desplegar en cualquier plataforma (Railway, Render, Fly.io, etc.).
 
-**Para desarrollo local:**
+### Instalación y Uso
 
-1. **Instala las dependencias:**
+1. Navega a la carpeta `backend/`:
    ```bash
-   pip install fastapi uvicorn httpx python-dotenv
+   cd backend
    ```
 
-2. **Crea un archivo `.env` en la raíz del proyecto:**
+2. Sigue las instrucciones detalladas en `backend/README.md` para instalar dependencias y ejecutar el servidor.
+
+3. Configura tu frontend para usar este backend:
+   En tu archivo `.env`:
    ```env
-   WAVESPEED_API_KEY=tu_api_key_de_wavespeed
-   CORS_ORIGINS=http://localhost:5173,http://localhost:3000
+   VITE_BACKEND_URL=http://localhost:8080  # Desarrollo
+   VITE_BACKEND_URL=https://tu-backend.railway.app  # Producción
    ```
 
-3. **Ejecuta el servidor:**
-   ```bash
-   python backend_wavespeed_proxy_example.py
-   # O
-   uvicorn backend_wavespeed_proxy_example:app --host 0.0.0.0 --port 8080
-   ```
+## Opción 2: Vercel Serverless Functions
 
-4. **Configura en tu frontend (`.env`):**
-   ```env
-   VITE_BACKEND_URL=http://localhost:8080
-   ```
+Si despliegas tu frontend en Vercel, puedes usar las Serverless Functions incluidas en la carpeta `api/`.
 
-### Opción 2: Vercel Serverless Functions (Recomendado para Producción)
+### Configuración
 
-**Para producción en Vercel:**
-
-1. **Crea la carpeta `api/` en la raíz de tu proyecto**
-
-2. **Crea `api/wavespeed-proxy.ts`:**
-   ```typescript
-   import type { VercelRequest, VercelResponse } from '@vercel/node';
-
-   export default async function handler(
-     req: VercelRequest,
-     res: VercelResponse
-   ) {
-     // Configurar CORS
-     res.setHeader('Access-Control-Allow-Origin', '*');
-     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-
-     if (req.method === 'OPTIONS') {
-       return res.status(200).end();
-     }
-
-     const WAVESPEED_API_KEY = process.env.WAVESPEED_API_KEY;
-     if (!WAVESPEED_API_KEY) {
-       return res.status(500).json({ error: 'WAVESPEED_API_KEY not configured' });
-     }
-
-     const { path, method, body } = req.query;
-     const wavespeedPath = Array.isArray(path) ? path.join('/') : path;
-
-     try {
-       const response = await fetch(`https://api.wavespeed.ai/${wavespeedPath}`, {
-         method: method as string || 'GET',
-         headers: {
-           'Authorization': `Bearer ${WAVESPEED_API_KEY}`,
-           'Content-Type': 'application/json',
-         },
-         body: method === 'POST' ? JSON.stringify(req.body) : undefined,
-       });
-
-       const data = await response.json();
-       return res.status(response.status).json(data);
-     } catch (error: any) {
-       return res.status(500).json({ error: error.message });
-     }
-   }
-   ```
-
-3. **Configura variables de entorno en Vercel:**
+1. **Configura la variable de entorno en Vercel:**
    - Ve a tu proyecto en Vercel Dashboard
    - Settings > Environment Variables
    - Agrega: `WAVESPEED_API_KEY` = tu API key
 
-4. **Configura en tu frontend (`.env` o Vercel Environment Variables):**
-   ```env
-   VITE_BACKEND_URL=https://tu-proyecto.vercel.app
-   ```
+2. **No necesitas configurar `VITE_BACKEND_URL`:**
+   - El frontend detectará automáticamente que está corriendo en Vercel y usará los endpoints relativos `/api/wavespeed-proxy`.
 
-### Opción 3: Railway / Render / Fly.io
+### Troubleshooting Vercel
 
-**Para otros servicios serverless:**
+Si recibes errores 404 en los endpoints de Vercel:
 
-1. **Sube el archivo `backend_wavespeed_proxy_example.py`**
-
-2. **Configura las variables de entorno:**
-   - `WAVESPEED_API_KEY` = tu API key
-   - `CORS_ORIGINS` = tu dominio de frontend
-
-3. **Obtén la URL de tu backend** (ej: `https://tu-backend.railway.app`)
-
-4. **Configura en tu frontend:**
-   ```env
-   VITE_BACKEND_URL=https://tu-backend.railway.app
-   ```
-
-### Opción 4: Usar tu Backend Existente
-
-Si ya tienes un backend (como el mencionado en el README):
-
-1. **Agrega los endpoints de Wavespeed a tu backend existente**
-
-2. **Usa la URL de tu backend existente:**
-   ```env
-   VITE_BACKEND_URL=https://tu-backend-existente.com
-   ```
+1. Verifica que el archivo `api/wavespeed-proxy/[...path].ts` exista.
+2. Verifica que `vercel.json` exista en la raíz con la configuración de rewrites.
+3. Asegúrate de que la variable `WAVESPEED_API_KEY` esté configurada en Vercel.
+4. Revisa los logs en Vercel Dashboard > Functions.
 
 ## Verificación
 
-Después de configurar el backend:
+Para verificar qué método se está usando, abre la consola del navegador:
 
-1. **Verifica que el backend esté corriendo:**
-   ```bash
-   curl http://localhost:8080/  # Debe retornar {"message": "Wavespeed API Proxy", ...}
-   ```
-
-2. **Verifica desde el frontend:**
-   ```javascript
-   // En la consola del navegador
-   const { checkWavespeedConfig } = await import('./services/wavespeedProxy');
-   console.log(checkWavespeedConfig());
-   // Debe mostrar: ✅ Using backend proxy at http://localhost:8080
-   ```
-
-## URLs de Ejemplo
-
-**Desarrollo local:**
-```
-VITE_BACKEND_URL=http://localhost:8080
+```javascript
+const { checkWavespeedConfig } = await import('./services/wavespeedProxy');
+console.log(checkWavespeedConfig());
 ```
 
-**Producción Vercel:**
-```
-VITE_BACKEND_URL=https://tu-proyecto.vercel.app
-```
-
-**Producción Railway:**
-```
-VITE_BACKEND_URL=https://tu-backend.railway.app
-```
-
-**Producción Render:**
-```
-VITE_BACKEND_URL=https://tu-backend.onrender.com
-```
-
-## Notas Importantes
-
-- El backend **debe** tener la variable `WAVESPEED_API_KEY` configurada
-- El backend **debe** permitir CORS desde tu dominio de frontend
-- La URL debe ser accesible públicamente (no usar `localhost` en producción)
-- No incluyas la barra final (`/`) en `VITE_BACKEND_URL`
-
-## Troubleshooting
-
-**Error: "Failed to connect to backend proxy"**
-- Verifica que el backend esté corriendo
-- Verifica que la URL en `VITE_BACKEND_URL` sea correcta
-- Verifica que no haya firewall bloqueando la conexión
-
-**Error: "CORS error"**
-- Asegúrate de que el backend permita CORS desde tu dominio
-- Verifica la configuración de `CORS_ORIGINS` en el backend
-
-**Error: "WAVESPEED_API_KEY not configured"**
-- Verifica que la variable de entorno esté configurada en el backend
-- Reinicia el servidor después de agregar la variable
+- Si devuelve "Using backend proxy at ...", está usando la Opción 1.
+- Si devuelve warnings o usa rutas relativas, está intentando usar la Opción 2 o llamadas directas (que fallarán por CORS).

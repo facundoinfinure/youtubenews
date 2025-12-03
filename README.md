@@ -5,7 +5,9 @@ A viral AI news generator that creates 1-minute news segments hosted by AI chimp
 ## Architecture
 
 - **Frontend (Vercel)**: React app for UI and video playback
-- **Backend (GCP)**: FastAPI service with Ovi (primary) and Gemini VEO 3 (fallback) for video generation
+- **Backend Proxy (Wavespeed)**: Proxy server to handle Wavespeed API requests securely
+  - **Option A**: Vercel Serverless Functions (default)
+  - **Option B**: Standalone FastAPI backend (Python)
 - **Database (Supabase)**: Channel configurations, news items, and video metadata
 
 ## Setup
@@ -24,7 +26,7 @@ A viral AI news generator that creates 1-minute news segments hosted by AI chimp
     ```
     -   `VITE_ADMIN_EMAIL`: The Google email address allowed to login.
     -   `VITE_GEMINI_API_KEY`: Your Google Gemini API Key (for script/audio generation).
-    -   `VITE_BACKEND_URL`: Backend API URL (e.g., `http://localhost:8080` or your GCP instance URL).
+    -   `VITE_BACKEND_URL`: Backend API URL (optional, defaults to Vercel proxy).
     -   `VITE_SUPABASE_URL`: Your Supabase Project URL.
     -   `VITE_SUPABASE_ANON_KEY`: Your Supabase Anon Key.
     -   `VITE_GOOGLE_CLIENT_ID`: Your Google Cloud OAuth Client ID.
@@ -34,54 +36,22 @@ A viral AI news generator that creates 1-minute news segments hosted by AI chimp
     npm run dev
     ```
 
-### Backend Setup
+### Backend Setup (Wavespeed Proxy)
 
-See [backend/README.md](./backend/README.md) for detailed backend setup instructions.
+You need a backend proxy to handle requests to Wavespeed API (video generation). You have two options:
 
-Quick start:
-```bash
-cd backend
-pip install -r requirements.txt
-uvicorn main:app --host 0.0.0.0 --port 8080
-```
+#### Option 1: Vercel Serverless (Recommended for simple setup)
+The project includes Vercel Serverless Functions in `api/`. To use this:
+1. Set `WAVESPEED_API_KEY` in your Vercel Project Settings.
+2. The frontend will automatically use `/api/wavespeed-proxy` endpoints.
 
-## Deployment
+#### Option 2: Standalone Backend (Python/FastAPI)
+For more control or if deploying outside Vercel:
+1. Navigate to `backend/` folder.
+2. Follow instructions in `backend/README.md`.
+3. Set `VITE_BACKEND_URL` in your frontend `.env` to point to your backend URL.
 
-### Frontend (Vercel)
-
-1.  Push your code to a GitHub repository.
-2.  Import the project into Vercel.
-3.  In the Vercel Project Settings, go to **Environment Variables**.
-4.  Add all the variables from your `.env` file, including `VITE_BACKEND_URL`.
-5.  Deploy!
-
-### Backend (Google Cloud Platform)
-
-**Option 1: Compute Engine with GPU (Recommended for Ovi)**
-
-For production with GPU support and Ovi:
-
-```bash
-cd backend
-chmod +x deploy-gcp.sh
-export GCP_PROJECT_ID=your-project-id
-export GEMINI_API_KEY=your-key
-./deploy-gcp.sh
-```
-
-**Option 2: Cloud Run (Serverless, Gemini Only)**
-
-For serverless deployment without GPU:
-
-```bash
-cd backend
-chmod +x deploy-cloud-run.sh
-export GCP_PROJECT_ID=your-project-id
-export GEMINI_API_KEY=your-key
-./deploy-cloud-run.sh
-```
-
-See [backend/README.md](./backend/README.md) for detailed deployment instructions.
+See [WAVESPEED_BACKEND_SETUP.md](./WAVESPEED_BACKEND_SETUP.md) for detailed instructions.
 
 ### Database (Supabase)
 
