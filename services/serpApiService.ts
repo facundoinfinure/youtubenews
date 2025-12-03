@@ -1,0 +1,288 @@
+/**
+ * SerpAPI Service
+ * 
+ * Fetches news from Google News using SerpAPI.
+ * Uses the /api/serpapi proxy for all requests.
+ */
+
+import { NewsItem, ChannelConfig } from "../types";
+import { ContentCache } from "./ContentCache";
+import { CostTracker } from "./CostTracker";
+
+// Get proxy URL (auto-detect in production)
+const getProxyUrl = (): string => {
+  const explicitUrl = import.meta.env.VITE_BACKEND_URL || "";
+  if (explicitUrl) return explicitUrl;
+  
+  if (typeof window !== 'undefined' && window.location) {
+    const origin = window.location.origin;
+    if (origin.includes('vercel.app') || origin.includes('localhost')) {
+      return origin;
+    }
+  }
+  return "";
+};
+
+// Country to language/region mapping
+const COUNTRY_CONFIG: Record<string, { gl: string; hl: string }> = {
+  'Argentina': { gl: 'ar', hl: 'es' },
+  'México': { gl: 'mx', hl: 'es' },
+  'Mexico': { gl: 'mx', hl: 'es' },
+  'España': { gl: 'es', hl: 'es' },
+  'Spain': { gl: 'es', hl: 'es' },
+  'United States': { gl: 'us', hl: 'en' },
+  'USA': { gl: 'us', hl: 'en' },
+  'UK': { gl: 'uk', hl: 'en' },
+  'United Kingdom': { gl: 'uk', hl: 'en' },
+  'Brasil': { gl: 'br', hl: 'pt' },
+  'Brazil': { gl: 'br', hl: 'pt' },
+  'Colombia': { gl: 'co', hl: 'es' },
+  'Chile': { gl: 'cl', hl: 'es' },
+  'Peru': { gl: 'pe', hl: 'es' },
+  'Perú': { gl: 'pe', hl: 'es' },
+};
+
+/**
+ * Make a request to SerpAPI via proxy
+ */
+const serpApiRequest = async (params: Record<string, string>): Promise<any> => {
+  const proxyUrl = getProxyUrl().replace(/\/$/, '');
+  const queryString = new URLSearchParams(params).toString();
+  const url = `${proxyUrl}/api/serpapi?${queryString}`;
+  
+  console.log(`[SerpAPI] 🔍 Searching: ${params.q}`);
+  
+  const response = await fetch(url);
+  
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(`SerpAPI error: ${response.status} - ${errorData.error || 'Unknown error'}`);
+  }
+  
+  return response.json();
+};
+
+/**
+ * Calculate viral score based on various factors
+ */
+const calculateViralScore = (item: any): number => {
+  let score = 50; // Base score
+  
+  // Boost for certain keywords
+  const headline = (item.title || '').toLowerCase();
+  const viralKeywords = ['breaking', 'urgent', 'shocking', 'exclusive', 'just in', 'update'];
+  viralKeywords.forEach(keyword => {
+    if (headline.includes(keyword)) score += 10;
+  });
+  
+  // Boost for major sources
+  const source = (item.source?.name || '').toLowerCase();
+  const majorSources = ['reuters', 'bloomberg', 'cnn', 'bbc', 'nytimes', 'wsj', 'ap news'];
+  if (majorSources.some(s => source.includes(s))) score += 15;
+  
+  // Boost for recent news (within last 6 hours)
+  if (item.date) {
+    const newsDate = new Date(item.date);
+    const hoursAgo = (Date.now() - newsDate.getTime()) / (1000 * 60 * 60);
+    if (hoursAgo < 6) score += 20;
+    else if (hoursAgo < 12) score += 10;
+  }
+  
+  // Cap at 100
+  return Math.min(score, 100);
+};
+
+/**
+ * Extract image keyword from headline
+ */
+const extractImageKeyword = (headline: string): string => {
+  // Remove common words and extract key terms
+  const stopWords = ['the', 'a', 'an', 'in', 'on', 'at', 'to', 'for', 'of', 'and', 'or', 'is', 'are', 'was', 'were'];
+  const words = headline.toLowerCase()
+    .replace(/[^\w\s]/g, '')
+    .split(' ')
+    .filter(w => w.length > 3 && !stopWords.includes(w));
+  
+  // Return first 2-3 meaningful words
+  return words.slice(0, 3).join(' ') || 'breaking news';
+};
+
+/**
+ * Fetch economic/political news for a specific date and country
+ */
+export const fetchNewsWithSerpAPI = async (
+  targetDate: Date | undefined,
+  config: ChannelConfig
+): Promise<NewsItem[]> => {
+  // Determine date to query
+  let dateToQuery = new Date();
+  if (targetDate) {
+    dateToQuery = new Date(targetDate);
+  } else {
+    dateToQuery.setDate(dateToQuery.getDate() - 1);
+  }
+
+  const cacheKey = `serpapi_news_${dateToQuery.toISOString().split('T')[0]}_${config.country}_v1`;
+
+  return ContentCache.getOrGenerate(
+    cacheKey,
+    async () => {
+      // Get country config
+      const countryConfig = COUNTRY_CONFIG[config.country] || { gl: 'us', hl: 'en' };
+      
+      // Build search query based on channel focus
+      // Try to capture economic and political news
+      const searchTerms = [
+        'economy',
+        'markets',
+        'inflation',
+        'stocks',
+        'politics',
+        'breaking news'
+      ];
+      
+      // Use a broad query to get diverse results
+      const query = `${config.country} news economy politics today`;
+      
+      console.log(`[SerpAPI] 📰 Fetching news for ${config.country} (${countryConfig.gl}/${countryConfig.hl})`);
+      
+      const data = await serpApiRequest({
+        q: query,
+        gl: countryConfig.gl,
+        hl: countryConfig.hl,
+        num: '20'  // Request more to filter
+      });
+      
+      // Track cost (~$0.01 per search)
+      CostTracker.track('news', 'serpapi', 0.01);
+      
+      // Combine news_results and top_stories
+      const allNews: any[] = [];
+      
+      // Process news_results
+      if (data.news_results && Array.isArray(data.news_results)) {
+        data.news_results.forEach((item: any) => {
+          allNews.push({
+            headline: item.title,
+            source: item.source?.name || item.source || 'Unknown',
+            url: item.link || '#',
+            summary: item.snippet || item.title,
+            imageUrl: item.thumbnail,
+            date: item.date
+          });
+        });
+      }
+      
+      // Process top_stories
+      if (data.top_stories && Array.isArray(data.top_stories)) {
+        data.top_stories.forEach((item: any) => {
+          allNews.push({
+            headline: item.title,
+            source: item.source?.name || item.source || 'Unknown',
+            url: item.link || '#',
+            summary: item.title, // Top stories usually don't have snippets
+            imageUrl: item.thumbnail,
+            date: item.date
+          });
+        });
+      }
+      
+      // Deduplicate by headline
+      const seen = new Set<string>();
+      const uniqueNews = allNews.filter(item => {
+        const key = item.headline.toLowerCase().substring(0, 50);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      
+      // Process and enhance news items
+      const processedNews: NewsItem[] = uniqueNews.map(item => ({
+        headline: item.headline,
+        source: item.source,
+        url: item.url,
+        summary: item.summary,
+        viralScore: calculateViralScore(item),
+        imageKeyword: extractImageKeyword(item.headline),
+        imageUrl: item.imageUrl || undefined
+      }));
+      
+      // Sort by viral score and take top 15
+      const sortedNews = processedNews
+        .sort((a, b) => b.viralScore - a.viralScore)
+        .slice(0, 15);
+      
+      console.log(`[SerpAPI] ✅ Processed ${sortedNews.length} news items`);
+      
+      // Validate we have enough news
+      if (sortedNews.length === 0) {
+        throw new Error('No news found for the specified date and country');
+      }
+      
+      return sortedNews;
+    },
+    3600000, // 1 hour TTL
+    0.01 // Cost per call
+  );
+};
+
+/**
+ * Fetch trending topics for a country
+ */
+export const fetchTrendingWithSerpAPI = async (country: string): Promise<string[]> => {
+  const cacheKey = `serpapi_trending_${country}_${new Date().toISOString().split('T')[0]}`;
+
+  return ContentCache.getOrGenerate(
+    cacheKey,
+    async () => {
+      const countryConfig = COUNTRY_CONFIG[country] || { gl: 'us', hl: 'en' };
+      
+      // Search for trending topics
+      const data = await serpApiRequest({
+        q: `trending topics ${country} today`,
+        gl: countryConfig.gl,
+        hl: countryConfig.hl,
+        num: '10'
+      });
+      
+      CostTracker.track('trending', 'serpapi', 0.01);
+      
+      // Extract topics from headlines
+      const topics: string[] = [];
+      
+      if (data.news_results) {
+        data.news_results.forEach((item: any) => {
+          // Extract key phrases from headlines
+          const headline = item.title || '';
+          const words = headline.split(' ').slice(0, 3).join(' ');
+          if (words && !topics.includes(words)) {
+            topics.push(words);
+          }
+        });
+      }
+      
+      return topics.slice(0, 10);
+    },
+    7200000, // 2 hour TTL
+    0.01
+  );
+};
+
+/**
+ * Check if SerpAPI proxy is configured
+ */
+export const checkSerpAPIConfig = (): { configured: boolean; message: string } => {
+  const proxyUrl = getProxyUrl();
+  
+  if (proxyUrl) {
+    return {
+      configured: true,
+      message: `✅ Using SerpAPI proxy at ${proxyUrl}/api/serpapi`
+    };
+  }
+  
+  return {
+    configured: false,
+    message: `❌ No proxy URL configured. Set VITE_BACKEND_URL or deploy to Vercel.`
+  };
+};

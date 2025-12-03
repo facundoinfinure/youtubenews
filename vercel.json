@@ -3,6 +3,14 @@
     "api/wavespeed.ts": {
       "maxDuration": 60,
       "memory": 1024
+    },
+    "api/openai.ts": {
+      "maxDuration": 30,
+      "memory": 512
+    },
+    "api/serpapi.ts": {
+      "maxDuration": 15,
+      "memory": 256
     }
   },
   "headers": [

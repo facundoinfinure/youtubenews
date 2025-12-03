@@ -26,6 +26,21 @@ import {
   checkWavespeedConfig 
 } from "./wavespeedProxy";
 
+// Import new services
+import { 
+  generateScriptWithGPT,
+  generateViralMetadataWithGPT,
+  generateViralHookWithGPT,
+  generateTTSAudio,
+  generateImageWithDALLE,
+  checkOpenAIConfig
+} from "./openaiService";
+import { 
+  fetchNewsWithSerpAPI,
+  fetchTrendingWithSerpAPI,
+  checkSerpAPIConfig
+} from "./serpApiService";
+
 const getApiKey = () => import.meta.env.VITE_GEMINI_API_KEY || window.env?.API_KEY || process.env.API_KEY || "";
 const getAiClient = () => new GoogleGenAI({ apiKey: getApiKey() });
 
@@ -239,356 +254,63 @@ Keep character consistency with the reference image at all times.
 };
 
 export const fetchEconomicNews = async (targetDate: Date | undefined, config: ChannelConfig): Promise<NewsItem[]> => {
-  // Use caching for same-day news
-  let dateToQuery = new Date();
-  if (targetDate) {
-    dateToQuery = new Date(targetDate);
-  } else {
-    dateToQuery.setDate(dateToQuery.getDate() - 1);
+  // Use SerpAPI for news fetching (no more Gemini quota issues!)
+  console.log(`📰 [News] Fetching news using SerpAPI...`);
+  
+  try {
+    const news = await fetchNewsWithSerpAPI(targetDate, config);
+    console.log(`✅ [News] Successfully fetched ${news.length} news items via SerpAPI`);
+    return news;
+  } catch (error) {
+    console.error(`❌ [News] SerpAPI failed:`, (error as Error).message);
+    throw error;
   }
-
-  const cacheKey = `news_${dateToQuery.toISOString().split('T')[0]}_${config.country}_v3`;
-
-  return ContentCache.getOrGenerate(
-    cacheKey,
-    async () => {
-      const ai = getAiClient();
-
-      // Fix Timezone Issue: Create date from input string but force it to be treated as local date
-      // by appending time to middle of day to avoid UTC midnight shift
-      let dateToQuery = new Date();
-      if (targetDate) {
-        const d = new Date(targetDate);
-        // Create a new date using the local year, month, date to ensure it matches the user's intent
-        // regardless of how the input date was parsed (UTC vs Local)
-        // Actually, the safest way if targetDate is a Date object from an input type="date" (which is usually YYYY-MM-DD UTC)
-        // is to just use the UTC components if we want that exact date, OR just add a buffer.
-        // Let's try appending T12:00:00 if it's a string, but here it is a Date.
-        // Let's just use the UTC date string which matches the input.
-        dateToQuery = d;
-      } else {
-        dateToQuery.setDate(dateToQuery.getDate() - 1);
-      }
-
-      // Use UTC date string for the prompt to avoid "yesterday" shift in Western Hemisphere
-      const dateString = dateToQuery.toLocaleDateString('en-US', { timeZone: 'UTC', month: 'long', day: 'numeric', year: 'numeric' });
-
-      const prompt = `Search for news from ${dateString} relevant to ${config.country}.
-
-IMPORTANT: Search specifically for news FROM ${dateString}. Do NOT use today's date - use the exact date specified: ${dateString}.
-
-Find EXACTLY 15 impactful economic or political news stories from that date.
-Focus on major market moves, inflation, politics, or social issues.
-
-RESPONSE FORMAT - CRITICAL:
-- Return ONLY a JSON array, no explanations or text before/after
-- Start your response with [ and end with ]
-- Do NOT include any text like "The current date is..." or "I will search for..."
-
-JSON structure for each item:
-- "headline" (string, in ${config.language})
-- "source" (string)
-- "url" (string, use grounding or best guess)
-- "summary" (string, 1 short sentence in ${config.language})
-- "viralScore" (number, 1-100 based on controversy or impact)
-- "imageKeyword" (string, 2-3 words visual description for image generation)
-- "imageUrl" (string, optional - URL of the article's main image if available)
-
-REQUIREMENTS:
-1. Return EXACTLY 15 items
-2. Include imageUrl when available from search results
-3. NO markdown formatting, NO explanatory text
-4. Start response with [ character immediately
-
-Example: [{"headline":"...","source":"...","url":"...","summary":"...","viralScore":85,"imageKeyword":"...","imageUrl":"..."}, ...]`;
-
-      const response = await ai.models.generateContent({
-        model: getModelForTask('news'),
-        contents: prompt,
-        config: {
-          tools: [{ googleSearch: {} }],
-        },
-      });
-
-      CostTracker.track('news', getModelForTask('news'), getCostForTask('news'));
-
-      const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-      const text = response.text || "";
-      
-      // Extract JSON from response - Gemini with googleSearch sometimes returns text before the JSON
-      // Look for the JSON array pattern in the response
-      let jsonStr = text.replace(/```json\n?|\n?```/g, "").trim();
-      
-      // Find the first '[' and last ']' to extract just the JSON array
-      const firstBracket = jsonStr.indexOf('[');
-      const lastBracket = jsonStr.lastIndexOf(']');
-      
-      if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
-        // Log if there was text before the JSON (for debugging)
-        if (firstBracket > 0) {
-          console.log(`⚠️ Stripped ${firstBracket} chars of text before JSON array`);
-        }
-        jsonStr = jsonStr.substring(firstBracket, lastBracket + 1);
-      }
-
-      try {
-        let news: NewsItem[] = JSON.parse(jsonStr);
-
-        // CRITICAL: Validate we got 15 items as requested
-        if (news.length < 15) {
-          console.warn(`⚠️ Only received ${news.length} news items, expected 15`);
-          console.warn(`Response text (first 500 chars): ${text.substring(0, 500)}`);
-          
-          // Log warning but continue with what we have - better than failing completely
-          if (news.length === 0) {
-            throw new Error(`No news items returned. The API may not have data for this date.`);
-          }
-          
-          // If we have fewer than 15 but at least some items, log and continue
-          // The UI will display whatever we have
-          console.log(`📝 Continuing with ${news.length} news items (expected 15)`);
-        }
-
-        // Create a map of URLs to grounding chunks for better matching
-        const urlToGroundingMap = new Map<string, any>();
-        groundingChunks.forEach((chunk: any) => {
-          if (chunk?.web?.uri) {
-            urlToGroundingMap.set(chunk.web.uri, chunk);
-          }
-        });
-
-        const processedNews = news.map((item, index) => {
-          // Prioritize grounding URL if available and missing in item
-          let finalUrl = item.url;
-          let matchedGrounding: any = null;
-          
-          // Try to match by index first
-          if (groundingChunks[index]?.web?.uri) {
-            matchedGrounding = groundingChunks[index];
-            if ((!finalUrl || finalUrl === "#")) {
-              finalUrl = groundingChunks[index].web.uri;
-            }
-          } else if (finalUrl && urlToGroundingMap.has(finalUrl)) {
-            // Try to match by URL
-            matchedGrounding = urlToGroundingMap.get(finalUrl);
-          } else if (groundingChunks.length > 0) {
-            // Fallback: use first available grounding chunk
-            matchedGrounding = groundingChunks[0];
-            if ((!finalUrl || finalUrl === "#") && matchedGrounding?.web?.uri) {
-              finalUrl = matchedGrounding.web.uri;
-            }
-          }
-
-          // Extract image URL from grounding metadata - improved extraction
-          let imageUrl = item.imageUrl;
-          if (!imageUrl && matchedGrounding?.web) {
-            const webChunk = matchedGrounding.web as any;
-            // Try multiple possible image fields
-            imageUrl = webChunk?.image || 
-                      webChunk?.imageUrl || 
-                      webChunk?.thumbnail || 
-                      webChunk?.ogImage ||
-                      webChunk?.metaImage ||
-                      webChunk?.previewImage;
-            
-            if (imageUrl) {
-              console.log(`✅ Found image for "${item.headline}": ${imageUrl}`);
-            }
-          }
-          
-          // Also check grounding metadata at root level
-          if (!imageUrl && matchedGrounding) {
-            const meta = matchedGrounding as any;
-            imageUrl = meta?.image || meta?.imageUrl || meta?.thumbnail;
-            if (imageUrl) {
-              console.log(`✅ Found image (root level) for "${item.headline}": ${imageUrl}`);
-            }
-          }
-          
-          // Log if no image found for debugging
-          if (!imageUrl) {
-            console.log(`⚠️ No image found for "${item.headline}" - will use placeholder`);
-          }
-
-          return {
-            ...item,
-            url: finalUrl,
-            imageUrl: imageUrl || undefined, // Ensure undefined instead of empty string
-            // Fallbacks
-            viralScore: item.viralScore || Math.floor(Math.random() * 40) + 60,
-            summary: item.summary || item.headline,
-            imageKeyword: item.imageKeyword || "breaking news"
-          };
-        });
-
-        // Sort by viral score descending
-        return processedNews.sort((a, b) => b.viralScore - a.viralScore);
-
-      } catch (e) {
-        console.error("Failed to parse news JSON", e);
-        console.error("Response text (first 500 chars):", text.substring(0, 500));
-        throw new Error(`Failed to parse news from Gemini: ${(e as Error).message}`);
-      }
-    },
-    3600000, // 1 hour TTL
-    0.05 // Estimated cost per call
-  );
 };
 
 export const generateScript = async (news: NewsItem[], config: ChannelConfig, viralHook?: string): Promise<ScriptLine[]> => {
-  const ai = getAiClient();
-
-  const newsContext = news.map(n => `- ${n.headline} (Source: ${n.source}). Summary: ${n.summary}`).join('\n');
-
-  const systemPrompt = `
-  You are the showrunner for "${config.channelName}", a short 1-minute news segment hosted by: 
-  1. "${config.characters.hostA.name}" (${config.characters.hostA.bio}).
-  2. "${config.characters.hostB.name}" (${config.characters.hostB.bio}).
+  // Use GPT-4o for script generation (no more Gemini quota issues!)
+  console.log(`📝 [Script] Generating script using GPT-4o...`);
   
-  Tone: ${config.tone}.
-  Language: ${config.language}.
-  
-  They are discussing the selected news.
-  
-  SCRIPT STRUCTURE (60 seconds):
-  - 0-10s: HOOK (grab attention)${viralHook ? ` Use this: "${viralHook}"` : ''}
-  - 10-40s: CONTENT (deliver value, cite sources)
-  - 40-50s: PAYOFF (answer the hook)
-  - 50-60s: CTA (subscribe/like)
-  
-  Rules:
-  - KEEP IT UNDER 150 WORDS TOTAL (approx 1 minute).
-  - CITATION REQUIRED: You MUST explicitly mention the source of the news in the dialogue.
-  - Structure the output as a JSON Array of objects: [{"speaker": "${config.characters.hostA.name}", "text": "..."}, {"speaker": "${config.characters.hostB.name}", "text": "..."}].
-  - Use "Both" as speaker for the intro/outro if they speak together.
-  - Be creative, use puns related to the characters (e.g. if one is a gorilla, use banana puns; if a penguin, ice puns).
-  - Pattern interrupt every 15 seconds
-  - Use "you" language
-  - STRICT JSON OUTPUT. NO MARKDOWN.
-  `;
-
-  const response = await ai.models.generateContent({
-    model: getModelForTask('script'),
-    contents: `Here is the selected news for today's episode:\n${newsContext}\n\nWrite the script in JSON format.`,
-    config: {
-      systemInstruction: systemPrompt,
-      responseMimeType: "application/json"
-    }
-  });
-
-  CostTracker.track('script', getModelForTask('script'), getCostForTask('script'));
-
   try {
-    return cleanAndParseGeminiJSON<ScriptLine[]>(response.text || "[]", []);
-  } catch (e) {
-    throw new Error(`Failed to parse script from Gemini: ${(e as Error).message}`);
+    const script = await generateScriptWithGPT(news, config, viralHook);
+    console.log(`✅ [Script] Successfully generated ${script.length} script lines via GPT-4o`);
+    return script;
+  } catch (error) {
+    console.error(`❌ [Script] GPT-4o failed:`, (error as Error).message);
+    throw error;
   }
 };
 
 export const fetchTrendingTopics = async (country: string): Promise<string[]> => {
-  const cacheKey = `trending_${country}_${new Date().toISOString().split('T')[0]}`;
-
-  return ContentCache.getOrGenerate(
-    cacheKey,
-    async () => {
-      const ai = getAiClient();
-      const response = await ai.models.generateContent({
-        model: getModelForTask('trending'),
-        contents: `What are the top 10 trending topics on YouTube in ${country} today? Focus on news, finance, and current events. Return as JSON array of strings.`,
-        config: {
-          tools: [{ googleSearch: {} }]
-          // responseMimeType: "application/json" // Conflict with tools in some models
-        }
-      });
-
-      CostTracker.track('trending', getModelForTask('trending'), getCostForTask('trending'));
-
-      try {
-        const topics = cleanAndParseGeminiJSON<string[]>(response.text || "[]", []);
-        return Array.isArray(topics) ? topics : [];
-      } catch {
-        return [];
-      }
-    },
-    7200000, // 2 hour TTL
-    0.02
-  );
+  // Use SerpAPI for trending topics (no more Gemini quota issues!)
+  console.log(`📈 [Trending] Fetching trending topics using SerpAPI...`);
+  
+  try {
+    const topics = await fetchTrendingWithSerpAPI(country);
+    console.log(`✅ [Trending] Successfully fetched ${topics.length} trending topics via SerpAPI`);
+    return topics;
+  } catch (error) {
+    console.error(`❌ [Trending] SerpAPI failed:`, (error as Error).message);
+    return []; // Return empty array on failure (non-critical)
+  }
 };
 
 export const generateViralMetadata = async (news: NewsItem[], config: ChannelConfig, date: Date): Promise<ViralMetadata> => {
-  const ai = getAiClient();
-
+  // Use GPT-4o for metadata generation (no more Gemini quota issues!)
+  console.log(`🏷️ [Metadata] Generating viral metadata using GPT-4o...`);
+  
   // Get trending topics for SEO boost
   const trending = await fetchTrendingTopics(config.country);
-  const newsContext = news.map(n => `- ${n.headline} (Viral Score: ${n.viralScore})`).join('\n');
-  const dateStr = date.toLocaleDateString();
-
-  const prompt = `
-You are a VIRAL YouTube expert with 100M+ views across channels.
-
-NEWS STORIES:
-${newsContext}
-
-TRENDING NOW IN ${config.country}:
-${trending.join(', ')}
-
-Create HIGH-CTR metadata:
-
-TITLE RULES (max 60 chars):
-- Use power words: SHOCKING, BREAKING, EXPOSED, WATCH, URGENT, REVEALED
-- Include numbers/percentages if relevant
-- Create curiosity gap (tease but don't reveal)
-- Add ONE emoji that fits the tone
-- Examples:
-  * "MARKET CRASH: 40% Drop INCOMING?! 📉"
-  * "They're HIDING This From You! 🚨"
-  * "BREAKING: 5 Stocks to BUY NOW 💰"
-
-DESCRIPTION RULES (max 250 chars):
-- Hook in first 10 words
-- Include keywords: ${news.map(n => n.imageKeyword).join(', ')}
-- Add trending terms: ${trending.slice(0, 3).join(', ')}
-- Include date: ${dateStr}
-- Call to action
-- Timestamp preview: "0:00 Intro | 0:15 Analysis | 0:45 Prediction"
-- End with tagline: "${config.tagline}"
-
-TAGS RULES (exactly 20 tags):
-- Mix broad + specific
-- Include: ${(config.defaultTags || []).join(', ')}
-- Add trending: ${trending.slice(0, 5).join(', ')}
-- Long-tail keywords
-- Event-specific tags
-
-Return JSON: { title, description, tags }
-  `.trim();
-
-  const cacheKey = `metadata_${news.map(n => n.headline).join('_').substring(0, 50)}_${dateStr}`;
-
-  return ContentCache.getOrGenerate(
-    cacheKey,
-    async () => {
-
-      const response = await ai.models.generateContent({
-        model: getModelForTask('metadata'),
-        contents: prompt,
-        config: { responseMimeType: "application/json" }
-      });
-
-      CostTracker.track('metadata', getModelForTask('metadata'), getCostForTask('metadata'));
-
-      const metadata = cleanAndParseGeminiJSON<{title?: string; description?: string; tags?: string[]}>(response.text || "{}", {});
-
-      // Validate and ensure defaults
-      return {
-        title: metadata.title?.substring(0, 60) || "Breaking News",
-        description: metadata.description?.substring(0, 250) || "",
-        tags: Array.isArray(metadata.tags) ? metadata.tags.slice(0, 20) : []
-      };
-    },
-    1800000, // 30 min TTL
-    0.03
-  );
+  
+  try {
+    const metadata = await generateViralMetadataWithGPT(news, config, date, trending);
+    console.log(`✅ [Metadata] Successfully generated metadata via GPT-4o`);
+    return metadata;
+  } catch (error) {
+    console.error(`❌ [Metadata] GPT-4o failed:`, (error as Error).message);
+    // Return defaults on failure
+    return { title: "Breaking News", description: "", tags: [] };
+  }
 };
 
 // Helper function to import findCachedAudio dynamically to avoid circular dependency
@@ -607,9 +329,10 @@ export const generateSegmentedAudioWithCache = async (
   config: ChannelConfig,
   channelId: string = ''
 ): Promise<BroadcastSegment[]> => {
-  const ai = getAiClient();
+  // Use OpenAI TTS for audio generation (no more Gemini quota issues!)
+  console.log(`🎙️ [Audio] Generating ${script.length} audio segments using OpenAI TTS...`);
 
-  // PARALLEL PROCESSING with cache support - much faster
+  // PARALLEL PROCESSING with cache support
   const audioPromises = script.map(async (line) => {
     let character = config.characters.hostA; // Default
     if (line.speaker === config.characters.hostA.name) {
@@ -628,51 +351,32 @@ export const generateSegmentedAudioWithCache = async (
           text: line.text,
           audioBase64: cachedAudio,
           fromCache: true,
-          audioUrl: undefined // Will be set later if needed
+          audioUrl: undefined
         } as any;
       }
     }
 
-    // Generate new audio if not in cache
-    return retryWithBackoff(async () => {
-      const response = await ai.models.generateContent({
-        model: getModelForTask('audio'),
-        contents: line.text,
-        config: {
-          responseModalities: [Modality.AUDIO],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: {
-                voiceName: character.voiceName,
-                // Enhanced voice parameters
-                ...(character.voiceStyle && { style: character.voiceStyle }),
-                ...(character.speakingRate && { speakingRate: character.speakingRate }),
-                ...(character.pitch && { pitch: character.pitch })
-              }
-            }
-          }
-        }
-      });
-
-      CostTracker.track('audio', getModelForTask('audio'), getCostForTask('audio'));
-
-      const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-      if (!base64Audio) throw new Error('No audio data received');
-
+    // Generate new audio using OpenAI TTS
+    try {
+      const audioBase64 = await generateTTSAudio(line.text, character.voiceName);
+      
+      console.log(`✅ [Audio] Generated audio for "${line.text.substring(0, 30)}..."`);
+      
       return {
         speaker: line.speaker,
         text: line.text,
-        audioBase64: base64Audio,
+        audioBase64: audioBase64,
         fromCache: false
       };
-    }, {
-      maxRetries: 2,
-      baseDelay: 1000,
-      onRetry: (attempt) => console.log(`🎙️ Retrying audio for "${line.text.substring(0, 30)}..." (${attempt}/2)`)
-    });
+    } catch (error) {
+      console.error(`❌ [Audio] Failed for "${line.text.substring(0, 30)}...":`, (error as Error).message);
+      throw error;
+    }
   });
 
-  return Promise.all(audioPromises);
+  const results = await Promise.all(audioPromises);
+  console.log(`✅ [Audio] Successfully generated ${results.length} audio segments via OpenAI TTS`);
+  return results;
 };
 
 // =============================================================================================
@@ -915,12 +619,11 @@ FINAL CHECK: Verify the image contains EXACTLY the characters described (${hostA
 `.trim();
 
   try {
-    // Use WaveSpeed Nano Banana Pro Edit if API key is available
+    // Use WaveSpeed Nano Banana Pro Edit as primary
     if (isWavespeedConfigured()) {
-      console.log(`[Wavespeed] Generating reference image using Nano Banana Pro Edit`);
+      console.log(`🖼️ [Image] Generating reference image using WaveSpeed Nano Banana Pro...`);
       
       const aspectRatio = config.format === '9:16' ? '9:16' : '16:9';
-      // Create placeholder image for Nano Banana Pro Edit (requires input image)
       const placeholderImage = createPlaceholderImage(
         aspectRatio === '9:16' ? 576 : 1024,
         aspectRatio === '9:16' ? 1024 : 576
@@ -928,41 +631,35 @@ FINAL CHECK: Verify the image contains EXACTLY the characters described (${hostA
       const taskId = await createWavespeedImageTask(prompt, aspectRatio, placeholderImage);
       const imageUrl = await pollWavespeedImageTask(taskId);
       
-      // Convert image URL to data URI for consistency with the rest of the app
       const dataUri = await imageUrlToDataUri(imageUrl);
+      CostTracker.track('thumbnail', 'wavespeed/nano-banana-pro', 0.14);
       
-      // Track cost (Nano Banana Pro Edit 2k resolution is $0.14)
-      CostTracker.track('thumbnail', 'google/nano-banana-pro/edit', 0.14);
-      
+      console.log(`✅ [Image] Reference image generated via WaveSpeed`);
       return dataUri;
-    } else {
-      // Fallback to Google Gemini API
-      const ai = getAiClient();
-      const response = await ai.models.generateContent({
-        model: getModelForTask('thumbnail'),
-        contents: prompt,
-        config: {
-          responseModalities: ["IMAGE" as any],
-        }
-      });
-
-      CostTracker.track('thumbnail', getModelForTask('thumbnail'), getCostForTask('thumbnail'));
-
-      const imageBase64 = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-      if (imageBase64) {
-        return `data:image/png;base64,${imageBase64}`;
-      }
-      return null;
     }
-  } catch (e) {
-    console.error("Reference image generation failed", e);
-    return null;
+  } catch (wavespeedError) {
+    console.error(`⚠️ [Image] WaveSpeed failed, trying DALL-E fallback:`, (wavespeedError as Error).message);
   }
+
+  // Fallback to DALL-E 3
+  try {
+    console.log(`🖼️ [Image] Generating reference image using DALL-E 3 (fallback)...`);
+    
+    const size = config.format === '9:16' ? '1024x1792' : '1792x1024';
+    const dalleImage = await generateImageWithDALLE(prompt, size as any);
+    
+    if (dalleImage) {
+      console.log(`✅ [Image] Reference image generated via DALL-E 3`);
+      return dalleImage;
+    }
+  } catch (dalleError) {
+    console.error(`❌ [Image] DALL-E 3 also failed:`, (dalleError as Error).message);
+  }
+
+  return null;
 };
 
 export const generateThumbnail = async (newsContext: string, config: ChannelConfig): Promise<string | null> => {
-  const ai = getAiClient();
-
   const prompt = `
   Create a high-impact YouTube thumbnail for a news video about: ${newsContext}.
   Channel Style: ${config.channelName} (${config.tone}).
@@ -970,28 +667,41 @@ export const generateThumbnail = async (newsContext: string, config: ChannelConf
   Include text overlay if possible or just striking imagery.
   Aspect Ratio: 16:9.
   No photorealistic faces of real politicians if restricted, use stylized or symbolic representations.
-`;
+`.trim();
 
-  try {
-    const response = await ai.models.generateContent({
-      model: getModelForTask('thumbnail'),
-      contents: prompt,
-      config: {
-        responseModalities: ["IMAGE" as any],
-      }
-    });
-
-    CostTracker.track('thumbnail', getModelForTask('thumbnail'), getCostForTask('thumbnail'));
-
-    const imageBase64 = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-    if (imageBase64) {
-      return `data:image/png;base64,${imageBase64}`;
+  // Try WaveSpeed Nano Banana Pro first
+  if (isWavespeedConfigured()) {
+    try {
+      console.log(`🎨 [Thumbnail] Generating thumbnail using WaveSpeed...`);
+      
+      const placeholderImage = createPlaceholderImage(1024, 576);
+      const taskId = await createWavespeedImageTask(prompt, '16:9', placeholderImage);
+      const imageUrl = await pollWavespeedImageTask(taskId);
+      
+      const dataUri = await imageUrlToDataUri(imageUrl);
+      CostTracker.track('thumbnail', 'wavespeed/nano-banana-pro', 0.14);
+      
+      console.log(`✅ [Thumbnail] Generated via WaveSpeed`);
+      return dataUri;
+    } catch (wavespeedError) {
+      console.error(`⚠️ [Thumbnail] WaveSpeed failed, trying DALL-E:`, (wavespeedError as Error).message);
     }
-    return null;
-  } catch (e) {
-    console.error("Thumbnail generation failed", e);
-    return null;
   }
+
+  // Fallback to DALL-E 3
+  try {
+    console.log(`🎨 [Thumbnail] Generating thumbnail using DALL-E 3 (fallback)...`);
+    const dalleImage = await generateImageWithDALLE(prompt, '1792x1024');
+    
+    if (dalleImage) {
+      console.log(`✅ [Thumbnail] Generated via DALL-E 3`);
+      return dalleImage;
+    }
+  } catch (dalleError) {
+    console.error(`❌ [Thumbnail] DALL-E 3 failed:`, (dalleError as Error).message);
+  }
+
+  return null;
 };
 
 export const generateThumbnailVariants = async (
@@ -999,8 +709,6 @@ export const generateThumbnailVariants = async (
   config: ChannelConfig,
   viralMeta: ViralMetadata
 ): Promise<{ primary: string | null; variant: string | null }> => {
-  const ai = getAiClient();
-
   // Define 3 proven thumbnail styles
   const styles = [
     {
@@ -1043,41 +751,44 @@ REQUIREMENTS:
 Make it CLICK-WORTHY!
 `.trim();
 
+  // Helper function to generate a single thumbnail with WaveSpeed + DALL-E fallback
+  const generateSingleThumbnail = async (prompt: string): Promise<string | null> => {
+    // Try WaveSpeed first
+    if (isWavespeedConfigured()) {
+      try {
+        const placeholderImage = createPlaceholderImage(1024, 576);
+        const taskId = await createWavespeedImageTask(prompt, '16:9', placeholderImage);
+        const imageUrl = await pollWavespeedImageTask(taskId);
+        const dataUri = await imageUrlToDataUri(imageUrl);
+        CostTracker.track('thumbnail', 'wavespeed/nano-banana-pro', 0.14);
+        return dataUri;
+      } catch (e) {
+        console.warn(`⚠️ WaveSpeed thumbnail failed, trying DALL-E`);
+      }
+    }
+
+    // Fallback to DALL-E
+    try {
+      const dalleImage = await generateImageWithDALLE(prompt, '1792x1024');
+      return dalleImage;
+    } catch (e) {
+      console.error(`❌ DALL-E thumbnail failed`);
+      return null;
+    }
+  };
+
+  console.log(`🎨 [Thumbnails] Generating 2 thumbnail variants...`);
+
   try {
     const [primary, variant] = await Promise.all([
-      retryWithBackoff(async () => {
-        const response = await ai.models.generateContent({
-          model: getModelForTask('thumbnail'),
-          contents: basePrompt(primaryStyle),
-          config: { responseModalities: ["IMAGE" as any] }
-        });
-
-        CostTracker.track('thumbnail', getModelForTask('thumbnail'), getCostForTask('thumbnail'));
-
-        const imageBase64 = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-        if (!imageBase64) throw new Error('No image data');
-        return `data:image/png;base64,${imageBase64}`;
-      }, { maxRetries: 2, baseDelay: 2000 }),
-
-      retryWithBackoff(async () => {
-        const response = await ai.models.generateContent({
-          model: getModelForTask('thumbnail'),
-          contents: basePrompt(variantStyle),
-          config: { responseModalities: ["IMAGE" as any] }
-        });
-
-        CostTracker.track('thumbnail', getModelForTask('thumbnail'), getCostForTask('thumbnail'));
-
-        const imageBase64 = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-        if (!imageBase64) throw new Error('No image data');
-        return `data:image/png;base64,${imageBase64}`;
-      }, { maxRetries: 2, baseDelay: 2000 })
+      generateSingleThumbnail(basePrompt(primaryStyle)),
+      generateSingleThumbnail(basePrompt(variantStyle))
     ]);
 
+    console.log(`✅ [Thumbnails] Generated ${primary ? 1 : 0} primary + ${variant ? 1 : 0} variant`);
     return { primary, variant };
   } catch (e) {
     console.error("Thumbnail variants generation failed", e);
-    // Fallback to single thumbnail
     const fallback = await generateThumbnail(newsContext, config);
     return { primary: fallback, variant: null };
   }
@@ -1087,43 +798,15 @@ export const generateViralHook = async (
   news: NewsItem[],
   config: ChannelConfig
 ): Promise<string> => {
-  const ai = getAiClient();
-
-  const topStory = news[0];
-
-  const prompt = `
-You are a VIRAL content scriptwriter (100M+ views).
-
-Create an ATTENTION-GRABBING opening hook (2-3 sentences, max 30 words) for this news:
-"${topStory.headline}"
-
-HOOK FORMULA:
-1. Shocking statement OR urgent question
-2. Promise immediate value
-3. Create curiosity gap
-
-POWER WORDS: YOU, THIS, NOW, SHOCKING, BREAKING, EXPOSED, REVEALED
-
-EXAMPLES:
-- "You WON'T believe what just happened to the stock market. In 60 seconds, I'll show you how this affects YOUR money."
-- "BREAKING: This could change EVERYTHING. Here's what the news won't tell you."
-- "They tried to hide THIS from you. Watch before it's deleted."
-
-Channel tone: ${config.tone}
-Return ONLY the hook text, no explanation.
-`.trim();
-
+  // Use GPT-4o for viral hook (no more Gemini quota issues!)
+  console.log(`🎣 [Hook] Generating viral hook using GPT-4o...`);
+  
   try {
-    const response = await ai.models.generateContent({
-      model: getModelForTask('viralHook'),
-      contents: prompt
-    });
-
-    CostTracker.track('viralHook', getModelForTask('viralHook'), getCostForTask('viralHook'));
-
-    return response.text?.trim() || "You won't believe this news...";
-  } catch (e) {
-    console.error("Viral hook generation failed", e);
-    return `Breaking news about ${topStory.headline.substring(0, 30)}...`;
+    const hook = await generateViralHookWithGPT(news, config);
+    console.log(`✅ [Hook] Successfully generated hook via GPT-4o`);
+    return hook;
+  } catch (error) {
+    console.error(`❌ [Hook] GPT-4o failed:`, (error as Error).message);
+    return `Breaking news about ${news[0]?.headline?.substring(0, 30) || 'today'}...`;
   }
 };
