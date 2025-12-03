@@ -1,3 +1,6 @@
+/**
+ * Decode base64 string to Uint8Array
+ */
 export function decode(base64: string): Uint8Array {
   const binaryString = atob(base64);
   const len = binaryString.length;
@@ -8,22 +11,28 @@ export function decode(base64: string): Uint8Array {
   return bytes;
 }
 
+/**
+ * Decode audio data (MP3, WAV, etc.) using Web Audio API
+ * This properly handles compressed formats like MP3 from OpenAI TTS
+ * 
+ * Note: sampleRate and numChannels parameters are kept for backwards compatibility
+ * but are ignored - the Web Audio API determines these from the audio file itself
+ */
 export async function decodeAudioData(
   data: Uint8Array,
-  ctx: AudioContext,
-  sampleRate: number = 24000,
-  numChannels: number = 1,
+  ctx: AudioContext | OfflineAudioContext,
+  _sampleRate: number = 24000,
+  _numChannels: number = 1,
 ): Promise<AudioBuffer> {
-  const dataInt16 = new Int16Array(data.buffer);
-  const frameCount = dataInt16.length / numChannels;
-  const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
-
-  for (let channel = 0; channel < numChannels; channel++) {
-    const channelData = buffer.getChannelData(channel);
-    for (let i = 0; i < frameCount; i++) {
-      // Convert Int16 to Float32 [-1.0, 1.0]
-      channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
-    }
-  }
-  return buffer;
+  // Use Web Audio API's native decodeAudioData which handles MP3, WAV, AAC, etc.
+  // We need to copy the buffer because decodeAudioData detaches it
+  const arrayBuffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+  
+  return new Promise((resolve, reject) => {
+    ctx.decodeAudioData(
+      arrayBuffer,
+      (audioBuffer) => resolve(audioBuffer),
+      (error) => reject(new Error(`Failed to decode audio: ${error}`))
+    );
+  });
 }

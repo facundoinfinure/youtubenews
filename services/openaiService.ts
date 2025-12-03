@@ -174,19 +174,39 @@ export const generateViralMetadataWithGPT = async (
   const newsContext = topNews.map(n => `- ${n.headline} (Score: ${n.viralScore})`).join('\n');
   const dateStr = date.toLocaleDateString();
 
-  const prompt = `VIRAL YouTube metadata expert. Create HIGH-CTR metadata in JSON.
+  const prompt = `You are a VIRAL YouTube SEO expert with 10+ years optimizing for maximum CTR and discoverability.
 
-NEWS:
+Create HIGH-PERFORMANCE metadata for this news broadcast video:
+
+NEWS STORIES:
 ${newsContext}
 
-TRENDING: ${trendingTopics.slice(0, 5).join(', ')}
+TRENDING TOPICS: ${trendingTopics.slice(0, 5).join(', ')}
+DATE: ${dateStr}
+CHANNEL: ${config.tagline}
 
-JSON format:
-- title (max 60 chars): Power words + emoji
-- description (max 250 chars): Hook + date ${dateStr} + "${config.tagline}"
-- tags (20): Include ${(config.defaultTags || []).slice(0, 5).join(', ')}
+Generate metadata following YouTube SEO best practices:
 
-Return ONLY: {"title": "...", "description": "...", "tags": [...]}`;
+TITLE (70-80 characters):
+- Start with POWER WORDS: BREAKING, SHOCKING, EXPOSED, URGENT, REVEALED
+- Include main keyword from top story
+- Add 1-2 relevant emojis for visual appeal
+- Create curiosity gap without clickbait
+
+DESCRIPTION (500-700 characters):
+- Line 1: Compelling hook summarizing the main story (this shows in search results)
+- Line 2-3: Key details and context about the news
+- Include date: ${dateStr}
+- Include channel branding: "${config.tagline}"
+- Add relevant keywords naturally
+- End with call-to-action: subscribe, like, comment prompt
+
+TAGS (20 tags):
+- Mix of broad and specific keywords
+- Include trending topics if relevant
+- Must include: ${(config.defaultTags || []).slice(0, 5).join(', ')}
+
+Return ONLY valid JSON: {"title": "...", "description": "...", "tags": [...]}`;
 
   const requestBody = {
     messages: [{ role: 'user', content: prompt }],
@@ -212,8 +232,8 @@ Return ONLY: {"title": "...", "description": "...", "tags": [...]}`;
       console.log(`[Metadata] ✅ Success with ${model}`);
       
       return {
-        title: metadata.title?.substring(0, 60) || "Breaking News",
-        description: metadata.description?.substring(0, 250) || "",
+        title: metadata.title?.substring(0, 100) || "Breaking News",
+        description: metadata.description?.substring(0, 1000) || "",
         tags: Array.isArray(metadata.tags) ? metadata.tags.slice(0, 20) : []
       };
     } catch (error: any) {

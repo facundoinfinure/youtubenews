@@ -718,6 +718,12 @@ const App: React.FC = () => {
               await saveProductionState(productionId, 3, 'in_progress', {
                 segments: segmentsWithUrls as any
               });
+              
+              // Return segments with audioUrl attached for video generation
+              return segs.map((seg, idx) => ({
+                ...seg,
+                audioUrl: segmentsWithUrls[idx]?.audioUrl
+              }));
             }
             
             return segs;
