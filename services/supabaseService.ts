@@ -184,6 +184,54 @@ export const saveChannel = async (channel: Partial<Channel>): Promise<Channel | 
 };
 
 // =============================================================================================
+// INTRO/OUTRO VIDEO CACHE
+// =============================================================================================
+
+export const getChannelIntroOutro = async (channelId: string): Promise<{ introUrl: string | null; outroUrl: string | null }> => {
+  if (!supabase) return { introUrl: null, outroUrl: null };
+
+  const { data, error } = await supabase
+    .from('channels')
+    .select('intro_video_url, outro_video_url')
+    .eq('id', channelId)
+    .single();
+
+  if (error) {
+    console.error("Error fetching channel intro/outro:", error);
+    return { introUrl: null, outroUrl: null };
+  }
+
+  return {
+    introUrl: data?.intro_video_url || null,
+    outroUrl: data?.outro_video_url || null
+  };
+};
+
+export const saveChannelIntroOutro = async (
+  channelId: string,
+  introUrl: string | null,
+  outroUrl: string | null
+): Promise<boolean> => {
+  if (!supabase) return false;
+
+  const { error } = await supabase
+    .from('channels')
+    .update({
+      intro_video_url: introUrl,
+      outro_video_url: outroUrl
+    })
+    .eq('id', channelId);
+
+  if (error) {
+    console.error("Error saving channel intro/outro:", error);
+    return false;
+  }
+
+  console.log(`✅ Saved intro/outro videos for channel ${channelId}`);
+  return true;
+};
+
+// =============================================================================================
 // NEWS PERSISTENCE
 // =============================================================================================
 

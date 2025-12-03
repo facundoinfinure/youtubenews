@@ -4,6 +4,7 @@ import { ContentCache } from "./ContentCache";
 import { retryWithBackoff } from "./retryUtils";
 import { getModelForTask, getCostForTask, getWavespeedModel } from "./modelStrategy";
 import { CostTracker } from "./CostTracker";
+import { getChannelIntroOutro, saveChannelIntroOutro } from "./supabaseService";
 
 const getApiKey = () => import.meta.env.VITE_GEMINI_API_KEY || window.env?.API_KEY || process.env.API_KEY || "";
 const getWavespeedApiKey = () => import.meta.env.VITE_WAVESPEED_API_KEY || window.env?.WAVESPEED_API_KEY || process.env.WAVESPEED_API_KEY || "";
@@ -34,17 +35,21 @@ const createWavespeedTask = async (prompt: string, aspectRatio: '16:9' | '9:16',
     let imageUrl = referenceImageUrl;
     // If it's a data URI, we might need to handle it differently
     if (imageUrl.startsWith('data:')) {
-      console.log(`📸 Reference image is a data URI (${imageUrl.length} chars)`);
+      console.log(`[Wavespeed] 📸 Reference image is a data URI (${imageUrl.length} chars)`);
       // Wavespeed might need the image uploaded first, but let's try sending it directly
       requestBody.images = [imageUrl];
     } else {
-      console.log(`📸 Using reference image URL: ${imageUrl.substring(0, 80)}...`);
+      console.log(`[Wavespeed] 📸 Using reference image URL: ${imageUrl.substring(0, 80)}...`);
       requestBody.images = [imageUrl];
     }
-    console.log(`✅ Reference image added to video generation request`);
+    console.log(`[Wavespeed] ✅ Reference image added to video generation request`);
   } else {
-    console.warn(`⚠️ No reference image provided - video may not match the intended podcast studio scene`);
+    console.warn(`[Wavespeed] ⚠️ No reference image provided - video may not match the intended podcast studio scene`);
   }
+
+  console.log(`[Wavespeed] 🚀 Creating video generation task with model: ${model}`);
+  console.log(`[Wavespeed] 📝 Prompt length: ${prompt.length} chars`);
+  console.log(`[Wavespeed] 📐 Aspect ratio: ${aspectRatio}`);
 
   const response = await fetch(wavespeedApiUrl, {
     method: "POST",
@@ -57,11 +62,23 @@ const createWavespeedTask = async (prompt: string, aspectRatio: '16:9' | '9:16',
 
   if (!response.ok) {
     const errorText = await response.text();
+    console.error(`[Wavespeed] ❌ API error: ${response.status} - ${errorText}`);
     throw new Error(`Wavespeed API error: ${response.status} - ${errorText}`);
   }
 
   const data = await response.json();
-  return data.task_id; // Wavespeed returns a task ID
+  console.log(`[Wavespeed] 📦 Response data:`, JSON.stringify(data, null, 2));
+  
+  // Try multiple possible response formats
+  const taskId = data.task_id || data.id || data.data?.id || data.data?.task_id;
+  
+  if (!taskId) {
+    console.error(`[Wavespeed] ❌ No task ID found in response:`, data);
+    throw new Error(`Wavespeed API did not return a task ID. Response: ${JSON.stringify(data)}`);
+  }
+  
+  console.log(`[Wavespeed] ✅ Task created with ID: ${taskId}`);
+  return taskId;
 };
 
 const pollWavespeedTask = async (taskId: string): Promise<string> => {
@@ -71,6 +88,8 @@ const pollWavespeedTask = async (taskId: string): Promise<string> => {
   const wavespeedApiUrl = `https://api.wavespeed.ai/v1/tasks/${taskId}`;
   let retries = 0;
   const maxRetries = 60; // 5 minutes max
+
+  console.log(`[Wavespeed] 🔄 Starting to poll task: ${taskId}`);
 
   while (retries < maxRetries) {
     await new Promise(resolve => setTimeout(resolve, 5000));
@@ -83,21 +102,65 @@ const pollWavespeedTask = async (taskId: string): Promise<string> => {
     });
 
     if (!response.ok) {
-      throw new Error(`Wavespeed polling error: ${response.status}`);
+      const errorText = await response.text();
+      console.error(`[Wavespeed] ❌ Polling error (${response.status}): ${errorText}`);
+      throw new Error(`Wavespeed polling error: ${response.status} - ${errorText}`);
     }
 
     const data = await response.json();
+    console.log(`[Wavespeed] 📊 Poll attempt ${retries + 1}/${maxRetries} - Status: ${data.status || data.data?.status || 'unknown'}`);
     
-    if (data.status === "completed" && data.result?.video_url) {
-      return data.result.video_url;
-    } else if (data.status === "failed") {
-      throw new Error(`Wavespeed task failed: ${data.error || "Unknown error"}`);
+    // Try multiple possible response formats
+    const status = data.status || data.data?.status;
+    const rawVideoUrl = 
+      data.result?.video_url || 
+      data.data?.result?.video_url ||
+      data.video_url ||
+      data.data?.video_url ||
+      (data.outputs && data.outputs[0]) ||
+      (data.data?.outputs && data.data.outputs[0]);
+    
+    // Bug 2 Fix: Ensure videoUrl is a string, extract URL if it's an object
+    let videoUrl: string | null = null;
+    if (rawVideoUrl) {
+      if (typeof rawVideoUrl === 'string') {
+        videoUrl = rawVideoUrl;
+      } else if (typeof rawVideoUrl === 'object' && rawVideoUrl !== null) {
+        // If it's an object, try to extract a URL property
+        videoUrl = rawVideoUrl.url || rawVideoUrl.video_url || rawVideoUrl.href || null;
+        if (!videoUrl && Array.isArray(rawVideoUrl)) {
+          // If it's an array, get the first string element
+          videoUrl = rawVideoUrl.find((item: any) => typeof item === 'string') || null;
+        }
+      }
+    }
+    
+    // Bug 1 Fix: Handle completed status without valid video URL
+    if (status === "completed") {
+      if (videoUrl && typeof videoUrl === 'string') {
+        console.log(`[Wavespeed] ✅ Video generation completed! URL: ${videoUrl.substring(0, 100)}...`);
+        return videoUrl;
+      } else {
+        // Status is completed but no valid video URL found
+        console.error(`[Wavespeed] ❌ Task completed but no valid video URL found. Response:`, JSON.stringify(data, null, 2));
+        throw new Error(`Wavespeed task completed but no valid video URL was returned. Task ID: ${taskId}`);
+      }
+    } else if (status === "failed" || data.data?.status === "failed") {
+      const errorMsg = data.error || data.data?.error || data.message || "Unknown error";
+      console.error(`[Wavespeed] ❌ Task failed: ${errorMsg}`);
+      throw new Error(`Wavespeed task failed: ${errorMsg}`);
+    } else if (status === "processing" || status === "pending" || !status) {
+      // Continue polling
+      console.log(`[Wavespeed] ⏳ Task still processing... (${retries + 1}/${maxRetries})`);
+    } else {
+      console.warn(`[Wavespeed] ⚠️ Unknown status: ${status}, continuing to poll...`);
     }
 
     retries++;
   }
 
-  throw new Error("Wavespeed video generation timed out");
+  console.error(`[Wavespeed] ❌ Video generation timed out after ${maxRetries} attempts`);
+  throw new Error(`Wavespeed video generation timed out after ${maxRetries} attempts`);
 };
 
 // Helper function to create a simple placeholder image as data URI
@@ -679,236 +742,487 @@ const pollForVideo = async (operation: any): Promise<string> => {
   return `${videoUri}&key=${getApiKey()}`;
 };
 
-export const generateVideoSegments = async (
-  script: ScriptLine[],
-  config: ChannelConfig
-): Promise<(string | null)[]> => {
-  const ai = getAiClient();
+// =============================================================================================
+// STRUCTURED VIDEO GENERATION FUNCTIONS
+// =============================================================================================
 
-  // IMPROVED: Generate videos for ALL segments (minimum 80%) to avoid repetition
-  // Create multiple variations per character to ensure visual variety
-  // Strategy: Generate for at least 80% of segments, with variations for each character
-
-  // Track character variations to ensure variety
-  const characterVariationCount: Record<string, number> = {
-    [config.characters.hostA.name]: 0,
-    [config.characters.hostB.name]: 0
-  };
-
-  const videoPromises = script.map(async (line, index) => {
-    // Strategy: Generate for at least 80% of segments
-    // Always generate for first and last, then generate for 80% of remaining
-    const totalSegments = script.length;
-    const minSegmentsToGenerate = Math.max(2, Math.ceil(totalSegments * 0.8));
-    
-    // Calculate which segments to generate - ensure we get at least 80%
-    // Always generate first and last, then fill to reach 80%
-    const shouldGenerate = index === 0 || 
-                          index === script.length - 1 || 
-                          index < minSegmentsToGenerate ||
-                          (index < totalSegments && (index % 2 === 0 || Math.random() < 0.5));
-
-    if (!shouldGenerate) return null;
-
-    const character = line.speaker === config.characters.hostA.name
-      ? config.characters.hostA
-      : config.characters.hostB;
-
-    // Track variation number for this character to create variety
-    characterVariationCount[character.name] = (characterVariationCount[character.name] || 0) + 1;
-    const variationNumber = characterVariationCount[character.name] % 5; // Cycle through 5 variations
-
-    // Create variation in camera angle and action based on variation number
-    const cameraAngles = ['front-facing', 'slight 3/4 angle left', 'slight 3/4 angle right', 'front with slight lean', 'front with hand gesture'];
-    const actions = [
-      'Speaking naturally to camera with confident expression',
-      'Speaking to camera with subtle hand gestures emphasizing key points',
-      'Speaking to camera with slight head movements for emphasis',
-      'Speaking to camera with engaged, animated expression',
-      'Speaking to camera with professional, authoritative presence'
-    ];
-    const cameraAngle = cameraAngles[variationNumber];
-    const action = actions[variationNumber];
-
-    // LIP-SYNC PROMPT: Explicitly include the text to be spoken
-    const referenceImageContext = config.referenceImageUrl 
-      ? `\nCRITICAL REFERENCE IMAGE: Use the provided reference image as the EXACT visual template. Match the exact podcast studio setting, character appearance (chimpanzee in podcast studio), lighting, and composition from the reference image. The reference shows the correct scene that must be replicated.\n` 
-      : '';
-
-    // Determine if this is a wide shot (both characters) or single character shot
-    const isWideShot = line.speaker === 'Both' || line.speaker.includes('Both');
-    const sceneDescription = isWideShot 
-      ? `Two chimpanzees (${config.characters.hostA.name} and ${config.characters.hostB.name}) in a podcast studio, both visible in frame, sitting at a desk with microphones.`
-      : `${character.name} (a chimpanzee) in a podcast studio setting, sitting at a desk with microphone, professional podcast environment.`;
-
-    // IMPROVED PROMPT: More specific with duration, actions, and lip-sync
-    const prompt = `
-  Professional news broadcast video segment showing ${sceneDescription}
-  
-  CHARACTER: ${character.name} - ${character.visualPrompt}
-  SCENE: Podcast-style news studio with two chimpanzee hosts. ${isWideShot ? 'Wide shot showing both chimpanzees.' : 'Single character shot.'}
-  Camera Angle: ${cameraAngle}
-  Action: ${action}
-  Dialogue for Lip-Sync: "${line.text}"
-  Duration: 5-10 seconds of continuous speaking
-  Emotion/Tone: ${config.tone}
-  Setting: Professional podcast-style news studio (INDOOR, NOT outdoor or landscape). Two chimpanzees presenting news in a modern studio environment with microphones, desk, and professional lighting. ${config.format} format.
-  Lighting: Professional studio lighting, high quality, consistent with podcast aesthetic.
-  Expression: Natural, engaging, appropriate for news content.
-  ${referenceImageContext}
-  
-  CRITICAL REQUIREMENTS:
-  - MUST show a chimpanzee in a podcast studio setting (NOT a generic landscape or outdoor scene)
-  - The character must be speaking the exact dialogue provided for proper lip-sync
-  - Maintain visual consistency with the podcast studio setting and reference image
-  - Setting must be an indoor podcast studio, not an outdoor or generic scene
-    `.trim();
-
-    return retryWithBackoff(async () => {
-      try {
-        // Use Wavespeed if API key is available, otherwise fallback to VEO
-        if (shouldUseWavespeed()) {
-          console.log(`[Wavespeed] Generating video for segment ${index} using model: ${getWavespeedModel()}`);
-          const taskId = await createWavespeedTask(prompt, config.format, config.referenceImageUrl);
-          const videoUrl = await pollWavespeedTask(taskId);
-          CostTracker.track('video', getWavespeedModel(), getCostForTask('video'));
-          return videoUrl;
-        } else {
-          // Fallback to VEO
-          const operation = await ai.models.generateVideos({
-            model: getModelForTask('video'),
-            prompt: prompt,
-            config: {
-              aspectRatio: config.format === '9:16' ? '9:16' : '16:9',
-              // VEO may support reference images differently - check API docs
-              ...(config.referenceImageUrl ? { referenceImage: config.referenceImageUrl } : {})
-            }
-          });
-
-          CostTracker.track('video', getModelForTask('video'), getCostForTask('video'));
-
-          // VEO returns an async operation that needs polling
-          if (operation) {
-            return await pollForVideo(operation);
-          }
-        }
-
-        return null;
-      } catch (e) {
-        console.warn(`Failed to generate video for segment ${index}`, e);
-        return null;
-      }
-    });
-  });
-
-  return Promise.all(videoPromises);
-};
-export const generateBroadcastVisuals = async (
-  newsContext: string,
+/**
+ * Generate intro video (generic, no dialogue) - reusable per channel
+ */
+export const generateIntroVideo = async (
   config: ChannelConfig,
-  script: ScriptLine[]
-): Promise<VideoAssets> => {
-  const ai = getAiClient();
-
-  // Build prompt with script context for better lip-sync
-  const scriptText = script
-    .map(s => `${s.speaker}: ${s.text}`)
-    .join('\n');
-
-  // Build prompt with reference image context if available
+  channelId: string
+): Promise<string | null> => {
   const referenceImageContext = config.referenceImageUrl 
-    ? `\nCRITICAL: Use the provided reference image as the EXACT visual template. Match the exact setting, character appearances (2 chimpanzees in podcast studio), lighting, composition, and studio layout from the reference image. The reference image shows the correct scene that must be replicated.\n` 
+    ? `\nCRITICAL REFERENCE IMAGE: Use the provided reference image as the EXACT visual template. Match the exact podcast studio setting, character appearances, lighting, and composition from the reference image.\n` 
     : '';
 
-  // Enhanced prompt with explicit podcast studio description
   const prompt = `
-Create a professional ${config.format} news broadcast video showing TWO CHIMPANZEES in a PODCAST-STYLE STUDIO giving the news.
+Create a professional ${config.format} intro video for "${config.channelName}".
 
-SCENE DESCRIPTION (CRITICAL - MUST FOLLOW):
-- Two chimpanzees (${config.characters.hostA.name} and ${config.characters.hostB.name}) sitting in a modern podcast studio
-- Podcast-style setup: two hosts sitting side-by-side or facing each other at a desk/table
-- Professional studio environment with microphones, possibly a backdrop with branding
-- Both chimpanzees are actively speaking and presenting the news
-- Camera angle: wide shot showing both chimpanzees in the frame, or alternating between them
-- Studio lighting: professional, well-lit, modern podcast aesthetic
-- Setting: NOT a generic landscape or outdoor scene - MUST be an indoor podcast studio
+SCENE DESCRIPTION:
+- Two chimpanzees (${config.characters.hostA.name} and ${config.characters.hostB.name}) in a modern podcast studio
+- Both hosts visible in frame, sitting at a desk with microphones
+- Professional studio environment with branding elements
+- Camera: Wide shot showing both chimpanzees
+- Setting: Indoor podcast studio (NOT outdoor or landscape)
+
+CHARACTERS:
+- ${config.characters.hostA.name}: ${config.characters.hostA.visualPrompt}
+- ${config.characters.hostB.name}: ${config.characters.hostB.visualPrompt}
 
 CHANNEL: ${config.channelName}
 TAGLINE: ${config.tagline}
 BRANDING COLORS: ${config.logoColor1} and ${config.logoColor2}
 
-CHARACTERS (MUST APPEAR IN VIDEO):
-- ${config.characters.hostA.name}: ${config.characters.hostA.visualPrompt}
-- ${config.characters.hostB.name}: ${config.characters.hostB.visualPrompt}
-
-TOPIC: ${newsContext}
+STYLE: ${config.tone}, professional podcast-style news studio
+DURATION: 5-6 seconds
+ACTION: Both hosts looking at camera, welcoming gesture, no dialogue (intro music will play)
+BRANDING: Include channel name "${config.channelName}" and tagline "${config.tagline}" visually in the scene. Use brand colors ${config.logoColor1} and ${config.logoColor2} in graphics, logos, or on-screen elements.
 ${referenceImageContext}
 
-DIALOGUE FOR LIP-SYNC:
-${scriptText}
- 
-STYLE: ${config.tone}, professional podcast-style news studio setting with two chimpanzee hosts
-DURATION: 60 seconds
-QUALITY: High definition, stable camera, professional studio lighting
-BRANDING: Include channel name "${config.channelName}" and tagline "${config.tagline}" visually in the scene. Use brand colors ${config.logoColor1} and ${config.logoColor2} in graphics, logos, or on-screen elements.
-
-IMPORTANT: The video MUST show two chimpanzees in a podcast studio setting. Do NOT generate generic landscapes, outdoor scenes, or unrelated content. The scene must match a professional news podcast with two chimpanzee hosts.
+IMPORTANT: This is an intro video with NO dialogue. The hosts should be visible and welcoming, but not speaking. The scene must be an indoor podcast studio.
   `.trim();
 
   return retryWithBackoff(async () => {
     try {
-      // Use Wavespeed if API key is available, otherwise fallback to VEO
       if (shouldUseWavespeed()) {
-        console.log(`[Wavespeed] Generating broadcast video using model: ${getWavespeedModel()}`);
+        console.log(`[Wavespeed] Generating intro video for channel ${channelId}`);
         const taskId = await createWavespeedTask(prompt, config.format, config.referenceImageUrl);
         const videoUrl = await pollWavespeedTask(taskId);
         CostTracker.track('video', getWavespeedModel(), getCostForTask('video'));
-        return {
-          wide: videoUrl,
-          hostA: [],
-          hostB: []
-        };
+        
+        // Save to channel cache
+        const { outroUrl } = await getChannelIntroOutro(channelId);
+        await saveChannelIntroOutro(channelId, videoUrl, outroUrl);
+        
+        return videoUrl;
       } else {
         // Fallback to VEO
+        const ai = getAiClient();
         const operation = await ai.models.generateVideos({
           model: getModelForTask('video'),
           prompt: prompt,
           config: {
             aspectRatio: config.format === '9:16' ? '9:16' : '16:9',
-            // VEO may support reference images differently - check API docs
             ...(config.referenceImageUrl ? { referenceImage: config.referenceImageUrl } : {})
           }
         });
-
         CostTracker.track('video', getModelForTask('video'), getCostForTask('video'));
-
-        // Poll for video completion
         if (operation) {
-          const videoUri = await pollForVideo(operation);
-          return {
-            wide: videoUri,
-            hostA: [],
-            hostB: []
-          };
+          const videoUrl = await pollForVideo(operation);
+          // Save to channel cache
+          const { outroUrl } = await getChannelIntroOutro(channelId);
+          await saveChannelIntroOutro(channelId, videoUrl, outroUrl);
+          return videoUrl;
         }
-
-        throw new Error('No operation returned from VEO');
       }
+      return null;
     } catch (e) {
-      console.error("Video generation failed", e);
-      // Fallback to placeholder for now
-      console.warn("Using placeholder video - video generation failed");
-      return {
-        wide: "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
-        hostA: [],
-        hostB: []
-      };
+      console.error("Intro video generation failed", e);
+      return null;
     }
   }, {
     maxRetries: 2,
     baseDelay: 5000,
-    onRetry: (attempt) => console.log(`🎬 Retrying video generation (${attempt}/2)...`)
+    onRetry: (attempt) => console.log(`🎬 Retrying intro video generation (${attempt}/2)...`)
   });
+};
+
+/**
+ * Generate outro video (generic, no dialogue) - reusable per channel
+ */
+export const generateOutroVideo = async (
+  config: ChannelConfig,
+  channelId: string
+): Promise<string | null> => {
+  const referenceImageContext = config.referenceImageUrl 
+    ? `\nCRITICAL REFERENCE IMAGE: Use the provided reference image as the EXACT visual template. Match the exact podcast studio setting, character appearances, lighting, and composition from the reference image.\n` 
+    : '';
+
+  const prompt = `
+Create a professional ${config.format} outro video for "${config.channelName}".
+
+SCENE DESCRIPTION:
+- Two chimpanzees (${config.characters.hostA.name} and ${config.characters.hostB.name}) in a modern podcast studio
+- Both hosts visible in frame, sitting at a desk with microphones
+- Professional studio environment with branding elements
+- Camera: Wide shot showing both chimpanzees
+- Setting: Indoor podcast studio (NOT outdoor or landscape)
+
+CHARACTERS:
+- ${config.characters.hostA.name}: ${config.characters.hostA.visualPrompt}
+- ${config.characters.hostB.name}: ${config.characters.hostB.visualPrompt}
+
+CHANNEL: ${config.channelName}
+TAGLINE: ${config.tagline}
+BRANDING COLORS: ${config.logoColor1} and ${config.logoColor2}
+
+STYLE: ${config.tone}, professional podcast-style news studio
+DURATION: 5-6 seconds
+ACTION: Both hosts looking at camera, thanking gesture, no dialogue (outro music will play)
+BRANDING: Include channel name "${config.channelName}" and tagline "${config.tagline}" visually in the scene. Use brand colors ${config.logoColor1} and ${config.logoColor2} in graphics, logos, or on-screen elements. Include "Subscribe" and "Like" call-to-action elements.
+${referenceImageContext}
+
+IMPORTANT: This is an outro video with NO dialogue. The hosts should be visible and thanking the audience, but not speaking. The scene must be an indoor podcast studio.
+  `.trim();
+
+  return retryWithBackoff(async () => {
+    try {
+      if (shouldUseWavespeed()) {
+        console.log(`[Wavespeed] Generating outro video for channel ${channelId}`);
+        const taskId = await createWavespeedTask(prompt, config.format, config.referenceImageUrl);
+        const videoUrl = await pollWavespeedTask(taskId);
+        CostTracker.track('video', getWavespeedModel(), getCostForTask('video'));
+        
+        // Save to channel cache
+        const { introUrl } = await getChannelIntroOutro(channelId);
+        await saveChannelIntroOutro(channelId, introUrl, videoUrl);
+        
+        return videoUrl;
+      } else {
+        // Fallback to VEO
+        const ai = getAiClient();
+        const operation = await ai.models.generateVideos({
+          model: getModelForTask('video'),
+          prompt: prompt,
+          config: {
+            aspectRatio: config.format === '9:16' ? '9:16' : '16:9',
+            ...(config.referenceImageUrl ? { referenceImage: config.referenceImageUrl } : {})
+          }
+        });
+        CostTracker.track('video', getModelForTask('video'), getCostForTask('video'));
+        if (operation) {
+          const videoUrl = await pollForVideo(operation);
+          // Save to channel cache
+          const { introUrl } = await getChannelIntroOutro(channelId);
+          await saveChannelIntroOutro(channelId, introUrl, videoUrl);
+          return videoUrl;
+        }
+      }
+      return null;
+    } catch (e) {
+      console.error("Outro video generation failed", e);
+      return null;
+    }
+  }, {
+    maxRetries: 2,
+    baseDelay: 5000,
+    onRetry: (attempt) => console.log(`🎬 Retrying outro video generation (${attempt}/2)...`)
+  });
+};
+
+/**
+ * Generate video of a single host with lip-sync for specific dialogue
+ */
+const generateHostVideoWithLipSync = async (
+  hostName: string,
+  character: any,
+  dialogueText: string,
+  config: ChannelConfig,
+  cameraAngle: string = 'front-facing',
+  action: string = 'Speaking naturally to camera'
+): Promise<string | null> => {
+  const referenceImageContext = config.referenceImageUrl 
+    ? `\nCRITICAL REFERENCE IMAGE: Use the provided reference image as the EXACT visual template. Match the exact podcast studio setting, character appearance, lighting, and composition from the reference image.\n` 
+    : '';
+
+  const prompt = `
+Professional news broadcast video segment showing ${character.name} (a chimpanzee) in a podcast studio setting.
+
+CHARACTER: ${character.name} - ${character.visualPrompt}
+SCENE: Podcast-style news studio. Single character shot, close-up.
+Camera Angle: ${cameraAngle}
+Action: ${action}
+Dialogue for Lip-Sync: "${dialogueText}"
+Duration: 10-15 seconds of continuous speaking
+Emotion/Tone: ${config.tone}
+Setting: Professional podcast-style news studio (INDOOR, NOT outdoor or landscape). ${character.name} presenting news in a modern studio environment with microphone, desk, and professional lighting. ${config.format} format.
+Lighting: Professional studio lighting, high quality, consistent with podcast aesthetic.
+Expression: Natural, engaging, appropriate for news content.
+${referenceImageContext}
+
+CRITICAL REQUIREMENTS:
+- MUST show a chimpanzee in a podcast studio setting (NOT a generic landscape or outdoor scene)
+- The character must be speaking the exact dialogue provided for proper lip-sync
+- Maintain visual consistency with the podcast studio setting and reference image
+- Setting must be an indoor podcast studio, not an outdoor or generic scene
+  `.trim();
+
+  return retryWithBackoff(async () => {
+    try {
+      if (shouldUseWavespeed()) {
+        console.log(`[Wavespeed] Generating video for ${hostName} with lip-sync`);
+        const taskId = await createWavespeedTask(prompt, config.format, config.referenceImageUrl);
+        const videoUrl = await pollWavespeedTask(taskId);
+        CostTracker.track('video', getWavespeedModel(), getCostForTask('video'));
+        return videoUrl;
+      } else {
+        // Fallback to VEO
+        const ai = getAiClient();
+        const operation = await ai.models.generateVideos({
+          model: getModelForTask('video'),
+          prompt: prompt,
+          config: {
+            aspectRatio: config.format === '9:16' ? '9:16' : '16:9',
+            ...(config.referenceImageUrl ? { referenceImage: config.referenceImageUrl } : {})
+          }
+        });
+        CostTracker.track('video', getModelForTask('video'), getCostForTask('video'));
+        if (operation) {
+          return await pollForVideo(operation);
+        }
+      }
+      return null;
+    } catch (e) {
+      console.warn(`Failed to generate video for ${hostName}`, e);
+      return null;
+    }
+  }, {
+    maxRetries: 2,
+    baseDelay: 5000,
+    onRetry: (attempt) => console.log(`🎬 Retrying video generation for ${hostName} (${attempt}/2)...`)
+  });
+};
+
+/**
+ * Generate video of both hosts together with lip-sync for dialogue
+ */
+const generateTwoHostsVideoWithLipSync = async (
+  dialogueText: string,
+  config: ChannelConfig
+): Promise<string | null> => {
+  const referenceImageContext = config.referenceImageUrl 
+    ? `\nCRITICAL REFERENCE IMAGE: Use the provided reference image as the EXACT visual template. Match the exact podcast studio setting, character appearances (2 chimpanzees in podcast studio), lighting, and composition from the reference image.\n` 
+    : '';
+
+  const prompt = `
+Professional news broadcast video segment showing TWO CHIMPANZEES in a PODCAST-STYLE STUDIO.
+
+SCENE DESCRIPTION:
+- Two chimpanzees (${config.characters.hostA.name} and ${config.characters.hostB.name}) in a modern podcast studio
+- Both hosts visible in frame, sitting at a desk with microphones
+- Camera: Wide shot showing both chimpanzees
+- Setting: Indoor podcast studio (NOT outdoor or landscape)
+
+CHARACTERS:
+- ${config.characters.hostA.name}: ${config.characters.hostA.visualPrompt}
+- ${config.characters.hostB.name}: ${config.characters.hostB.visualPrompt}
+
+Dialogue for Lip-Sync: "${dialogueText}"
+Duration: 10-15 seconds
+Emotion/Tone: ${config.tone}
+Setting: Professional podcast-style news studio. ${config.format} format.
+Lighting: Professional studio lighting, high quality.
+${referenceImageContext}
+
+CRITICAL REQUIREMENTS:
+- MUST show two chimpanzees in a podcast studio setting (NOT a generic landscape or outdoor scene)
+- Both characters must be speaking the exact dialogue provided for proper lip-sync
+- Maintain visual consistency with the podcast studio setting and reference image
+- Setting must be an indoor podcast studio, not an outdoor or generic scene
+  `.trim();
+
+  return retryWithBackoff(async () => {
+    try {
+      if (shouldUseWavespeed()) {
+        console.log(`[Wavespeed] Generating video of both hosts with lip-sync`);
+        const taskId = await createWavespeedTask(prompt, config.format, config.referenceImageUrl);
+        const videoUrl = await pollWavespeedTask(taskId);
+        CostTracker.track('video', getWavespeedModel(), getCostForTask('video'));
+        return videoUrl;
+      } else {
+        // Fallback to VEO
+        const ai = getAiClient();
+        const operation = await ai.models.generateVideos({
+          model: getModelForTask('video'),
+          prompt: prompt,
+          config: {
+            aspectRatio: config.format === '9:16' ? '9:16' : '16:9',
+            ...(config.referenceImageUrl ? { referenceImage: config.referenceImageUrl } : {})
+          }
+        });
+        CostTracker.track('video', getModelForTask('video'), getCostForTask('video'));
+        if (operation) {
+          return await pollForVideo(operation);
+        }
+      }
+      return null;
+    } catch (e) {
+      console.warn(`Failed to generate two hosts video`, e);
+      return null;
+    }
+  }, {
+    maxRetries: 2,
+    baseDelay: 5000,
+    onRetry: (attempt) => console.log(`🎬 Retrying two hosts video generation (${attempt}/2)...`)
+  });
+};
+
+/**
+ * Group consecutive segments by the same speaker for efficient video generation
+ */
+const groupSegmentsBySpeaker = (script: ScriptLine[]): Array<{ speaker: string; text: string; startIndex: number; endIndex: number }> => {
+  const groups: Array<{ speaker: string; text: string; startIndex: number; endIndex: number }> = [];
+  
+  if (script.length === 0) return groups;
+  
+  let currentGroup = {
+    speaker: script[0].speaker,
+    text: script[0].text,
+    startIndex: 0,
+    endIndex: 0
+  };
+  
+  for (let i = 1; i < script.length; i++) {
+    if (script[i].speaker === currentGroup.speaker) {
+      // Same speaker, append text
+      currentGroup.text += ' ' + script[i].text;
+      currentGroup.endIndex = i;
+    } else {
+      // Different speaker, save current group and start new one
+      groups.push(currentGroup);
+      currentGroup = {
+        speaker: script[i].speaker,
+        text: script[i].text,
+        startIndex: i,
+        endIndex: i
+      };
+    }
+  }
+  
+  // Don't forget the last group
+  groups.push(currentGroup);
+  
+  return groups;
+};
+
+export const generateVideoSegments = async (
+  script: ScriptLine[],
+  config: ChannelConfig
+): Promise<(string | null)[]> => {
+  // Group consecutive segments by speaker to generate longer videos with lip-sync
+  const groupedSegments = groupSegmentsBySpeaker(script);
+  
+  console.log(`[Video Generation] Grouped ${script.length} segments into ${groupedSegments.length} video groups`);
+  
+  // Track character variations for visual variety
+  const characterVariationCount: Record<string, number> = {
+    [config.characters.hostA.name]: 0,
+    [config.characters.hostB.name]: 0,
+    'Both': 0
+  };
+  
+  // Camera angles and actions for variety
+  const cameraAngles = ['front-facing', 'slight 3/4 angle left', 'slight 3/4 angle right', 'front with slight lean', 'front with hand gesture'];
+  const actions = [
+    'Speaking naturally to camera with confident expression',
+    'Speaking to camera with subtle hand gestures emphasizing key points',
+    'Speaking to camera with slight head movements for emphasis',
+    'Speaking to camera with engaged, animated expression',
+    'Speaking to camera with professional, authoritative presence'
+  ];
+  
+  // Generate videos for each group
+  const videoPromises = groupedSegments.map(async (group) => {
+    const isWideShot = group.speaker === 'Both' || group.speaker.includes('Both');
+    
+    // Determine character
+    let character = config.characters.hostA;
+    if (group.speaker === config.characters.hostB.name) {
+      character = config.characters.hostB;
+    }
+    
+    // Track variation for visual variety
+    const speakerKey = isWideShot ? 'Both' : character.name;
+    characterVariationCount[speakerKey] = (characterVariationCount[speakerKey] || 0) + 1;
+    const variationNumber = characterVariationCount[speakerKey] % 5;
+    const cameraAngle = cameraAngles[variationNumber];
+    const action = actions[variationNumber];
+    
+    // Generate video with lip-sync
+    let videoUrl: string | null = null;
+    
+    if (isWideShot) {
+      // Both hosts together
+      videoUrl = await generateTwoHostsVideoWithLipSync(group.text, config);
+    } else {
+      // Single host
+      videoUrl = await generateHostVideoWithLipSync(
+        group.speaker,
+        character,
+        group.text,
+        config,
+        cameraAngle,
+        action
+      );
+    }
+    
+    // Return video URL for all segments in this group
+    return {
+      videoUrl,
+      startIndex: group.startIndex,
+      endIndex: group.endIndex
+    };
+  });
+  
+  const videoResults = await Promise.all(videoPromises);
+  
+  // Map grouped videos back to individual segments
+  const segmentVideos: (string | null)[] = new Array(script.length).fill(null);
+  
+  videoResults.forEach((result) => {
+    // Assign the same video URL to all segments in this group
+    for (let i = result.startIndex; i <= result.endIndex; i++) {
+      segmentVideos[i] = result.videoUrl;
+    }
+  });
+  
+  console.log(`[Video Generation] Generated ${videoResults.filter(r => r.videoUrl).length} videos for ${script.length} segments`);
+  
+  return segmentVideos;
+};
+/**
+ * Generate or retrieve intro/outro videos for a channel
+ * This function now only handles intro/outro caching, not the main content videos
+ */
+export const generateBroadcastVisuals = async (
+  newsContext: string,
+  config: ChannelConfig,
+  script: ScriptLine[],
+  channelId: string
+): Promise<VideoAssets> => {
+  console.log(`[Broadcast Visuals] Getting intro/outro videos for channel ${channelId}`);
+  
+  // Get cached intro/outro from database
+  const { introUrl, outroUrl } = await getChannelIntroOutro(channelId);
+  
+  let finalIntroUrl = introUrl;
+  let finalOutroUrl = outroUrl;
+  
+  // Generate intro if not cached
+  if (!finalIntroUrl) {
+    console.log(`[Broadcast Visuals] No cached intro found, generating new intro...`);
+    finalIntroUrl = await generateIntroVideo(config, channelId);
+  } else {
+    console.log(`[Broadcast Visuals] ✅ Using cached intro video`);
+  }
+  
+  // Generate outro if not cached
+  if (!finalOutroUrl) {
+    console.log(`[Broadcast Visuals] No cached outro found, generating new outro...`);
+    finalOutroUrl = await generateOutroVideo(config, channelId);
+  } else {
+    console.log(`[Broadcast Visuals] ✅ Using cached outro video`);
+  }
+  
+  // Return VideoAssets structure
+  // Note: hostA and hostB arrays will be populated by generateVideoSegments()
+  return {
+    wide: finalIntroUrl || finalOutroUrl || null, // Use intro/outro for wide shot (used during intro/outro phases)
+    hostA: [], // Will be populated by generateVideoSegments
+    hostB: []  // Will be populated by generateVideoSegments
+  };
 };
 
 // Helper function to convert image URL to data URI

@@ -601,10 +601,10 @@ const App: React.FC = () => {
       const mainContext = finalNews[0]?.headline || "News";
       const backgroundVideoTask = backgroundVideos.wide
         ? Promise.resolve(backgroundVideos)
-        : generateBroadcastVisuals(mainContext, config, genScript)
+        : generateBroadcastVisuals(mainContext, config, genScript, activeChannel.id)
             .then(vids => {
               setVideos(vids);
-              addLog("✅ Video feeds established.");
+              addLog("✅ Intro/outro videos ready.");
               return vids;
             });
 
@@ -639,10 +639,36 @@ const App: React.FC = () => {
         videoUrl: videoSegments[i] || undefined // Attach specific video if generated
       }));
 
+      // Organize videos by host for BroadcastPlayer
+      // Extract hostA and hostB videos from segments
+      const hostAVideos: string[] = [];
+      const hostBVideos: string[] = [];
+      
+      finalSegments.forEach((seg, i) => {
+        if (seg.videoUrl) {
+          if (seg.speaker === config.characters.hostA.name) {
+            if (!hostAVideos.includes(seg.videoUrl)) {
+              hostAVideos.push(seg.videoUrl);
+            }
+          } else if (seg.speaker === config.characters.hostB.name) {
+            if (!hostBVideos.includes(seg.videoUrl)) {
+              hostBVideos.push(seg.videoUrl);
+            }
+          }
+        }
+      });
+
+      // Update video assets with organized host videos
+      const organizedVideos: VideoAssets = {
+        wide: backgroundVideos.wide, // Intro/outro video
+        hostA: hostAVideos,
+        hostB: hostBVideos
+      };
+
       setSegments(finalSegments);
-      setVideos(backgroundVideos);
+      setVideos(organizedVideos);
       setViralMeta(metadata);
-      addLog(`✅ Media ready: ${audioSegments.length} audio clips, ${videoSegments.filter(v => v).length} unique video clips.`);
+      addLog(`✅ Media ready: ${audioSegments.length} audio clips, ${hostAVideos.length} Host A videos, ${hostBVideos.length} Host B videos.`);
 
       // Save video assets
       if (productionId) {
