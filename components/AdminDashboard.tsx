@@ -1353,7 +1353,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                       }}
                       className="w-full bg-red-600 hover:bg-red-500 px-4 py-2 rounded-lg font-bold transition-colors"
                     >
-                      🗑️ Cleanup Old Files (>30 days)
+                      🗑️ Cleanup Old Files (&gt;30 days)
                     </button>
                     {cleanupResult && (
                       <div className="bg-green-900/30 border border-green-500/50 p-3 rounded text-sm">
