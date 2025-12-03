@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { AppState, ChannelConfig, NewsItem, BroadcastSegment, VideoAssets, ViralMetadata, UserProfile, Channel, ScriptLine, StoredVideo } from './types';
 import { signInWithGoogle, getSession, signOut, getAllChannels, saveChannel, saveVideoToDB, getNewsByDate, saveNewsToDB, markNewsAsSelected, deleteVideoFromDB, loadConfigFromDB, supabase, fetchVideosFromDB, saveProduction, getIncompleteProductions, getProductionById, updateProductionStatus, uploadAudioToStorage, getAudioFromStorage, findCachedScript, findCachedAudio, getAllProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction, verifyStorageBucket, getCompletedProductionsWithVideoInfo, ProductionWithVideoInfo } from './services/supabaseService';
-import { fetchEconomicNews, generateScript, generateSegmentedAudio, generateSegmentedAudioWithCache, setFindCachedAudioFunction, generateBroadcastVisuals, generateViralMetadata, generateThumbnail, generateThumbnailVariants, generateViralHook, generateVideoSegments } from './services/geminiService';
+import { fetchEconomicNews, generateScript, generateSegmentedAudio, generateSegmentedAudioWithCache, setFindCachedAudioFunction, generateBroadcastVisuals, generateViralMetadata, generateThumbnail, generateThumbnailVariants, generateViralHook, generateVideoSegmentsWithInfiniteTalk } from './services/geminiService';
 import { uploadVideoToYouTube, deleteVideoFromYouTube } from './services/youtubeService';
 import { ContentCache } from './services/ContentCache';
 import { NewsSelector } from './components/NewsSelector';
@@ -728,41 +728,9 @@ const App: React.FC = () => {
         setSegments(audioSegments);
       }
 
-      // NEW: Granular Video Generation
-      // Check if videos already exist before generating
-      let videoSegments: (string | null)[] = [];
-      let backgroundVideos: VideoAssets = { wide: null, hostA: [], hostB: [] };
-      
-      if (resumeFromProduction?.video_assets && resumeFromProduction.video_assets.wide) {
-        // Validate existing video assets - check if URLs are still valid
-        addLog("🔍 Validating existing video assets...");
-        const existingVideos = resumeFromProduction.video_assets as VideoAssets;
-        
-        // For now, we'll trust the stored assets. In future, could validate URLs
-        backgroundVideos = existingVideos;
-        setVideos(existingVideos);
-        
-        // Check if segment videos exist
-        if (resumeFromProduction.segments) {
-          videoSegments = resumeFromProduction.segments.map((seg: any) => seg.videoUrl || null);
-          addLog("✅ Using existing video assets.");
-        }
-      }
-      
-      const videoSegmentsTask = videoSegments.length === 0 
-        ? generateVideoSegments(genScript, config, activeChannel.id, productionId || undefined)
-        : Promise.resolve(videoSegments);
-
+      // Generate SEO metadata in parallel while we prepare for video generation
       const mainContext = finalNews[0]?.headline || "News";
-      const backgroundVideoTask = backgroundVideos.wide
-        ? Promise.resolve(backgroundVideos)
-        : generateBroadcastVisuals(mainContext, config, genScript, activeChannel.id, productionId || undefined)
-            .then(vids => {
-              setVideos(vids);
-              addLog("✅ Intro/outro videos ready.");
-              return vids;
-            });
-
+      
       const metaTask = generateViralMetadata(finalNews, config, parseSelectedDate(selectedDate))
         .then(async (meta) => {
           setViralMeta(meta);
@@ -776,14 +744,51 @@ const App: React.FC = () => {
           return meta;
         });
 
-      const [videoSegmentsResult, backgroundVideosResult, metadata] = await Promise.all([
-        videoSegmentsTask,
-        backgroundVideoTask,
-        metaTask
-      ]);
+      // Get intro/outro (just reference image for InfiniteTalk workflow)
+      const backgroundVideos = await generateBroadcastVisuals(mainContext, config, genScript, activeChannel.id, productionId || undefined);
+      setVideos(backgroundVideos);
+      addLog("✅ Reference image ready for video generation.");
+
+      // Wait for metadata
+      const metadata = await metaTask;
+
+      // INFINITETALK VIDEO GENERATION
+      // Now that audio is uploaded and has URLs, generate lip-sync videos
+      let videoSegments: (string | null)[] = [];
       
-      videoSegments = videoSegmentsResult;
-      backgroundVideos = backgroundVideosResult;
+      // Check if videos already exist from resumed production
+      if (resumeFromProduction?.segments) {
+        const existingVideoUrls = resumeFromProduction.segments.map((seg: any) => seg.videoUrl || null);
+        const hasVideos = existingVideoUrls.some((url: string | null) => url !== null);
+        
+        if (hasVideos) {
+          videoSegments = existingVideoUrls;
+          addLog("✅ Using existing video assets from previous production.");
+        }
+      }
+
+      // Generate videos with InfiniteTalk if not already generated
+      if (videoSegments.length === 0 || !videoSegments.some(v => v !== null)) {
+        addLog("🎬 Generating lip-sync videos with WaveSpeed InfiniteTalk Multi...");
+        addLog(`🖼️ Using reference image for two-character lip-sync`);
+        
+        // Prepare segments with audio URLs for InfiniteTalk
+        const segmentsForVideo = audioSegments.map((seg, idx) => ({
+          ...seg,
+          audioUrl: (seg as any).audioUrl // Get the URL from when we uploaded
+        }));
+        
+        // Generate videos using InfiniteTalk Multi
+        videoSegments = await generateVideoSegmentsWithInfiniteTalk(
+          segmentsForVideo,
+          config,
+          activeChannel.id,
+          productionId || undefined
+        );
+        
+        const generatedCount = videoSegments.filter(v => v !== null).length;
+        addLog(`✅ Generated ${generatedCount}/${audioSegments.length} lip-sync videos.`);
+      }
 
       // Step 4: Merge segments
       setProductionProgress({ current: 4, total: TOTAL_STEPS, step: 'Merging media segments...' });

@@ -430,3 +430,208 @@ export const checkWavespeedConfig = (): { configured: boolean; message: string }
     message: `❌ Wavespeed API key not found. Set WAVESPEED_API_KEY in Vercel environment variables.`
   };
 };
+
+// =============================================================================================
+// INFINITETALK MULTI - Two Character Lip-Sync Video Generation
+// =============================================================================================
+
+export type SpeakingOrder = 'left_first' | 'right_first' | 'meanwhile';
+
+export interface InfiniteTalkMultiOptions {
+  leftAudioUrl: string;      // URL to left character's audio (MP3)
+  rightAudioUrl: string;     // URL to right character's audio (MP3)
+  imageUrl: string;          // URL to image with both characters
+  order?: SpeakingOrder;     // Speaking order: left_first, right_first, or meanwhile
+  resolution?: '480p' | '720p';
+  prompt?: string;           // Optional prompt for additional control
+  seed?: number;
+}
+
+/**
+ * Create an InfiniteTalk Multi video task
+ * Converts image + two audio inputs into multi-character lip-sync video
+ * 
+ * Pricing: 480p = $0.15/5s, 720p = $0.30/5s
+ * Max length: 10 minutes
+ * 
+ * @see https://wavespeed.ai/es/models/wavespeed-ai/infinitetalk/multi
+ */
+export const createInfiniteTalkMultiTask = async (
+  options: InfiniteTalkMultiOptions
+): Promise<string> => {
+  const {
+    leftAudioUrl,
+    rightAudioUrl,
+    imageUrl,
+    order = 'meanwhile',
+    resolution = '720p',
+    prompt = '',
+    seed = -1
+  } = options;
+
+  const endpoint = 'api/v3/wavespeed-ai/infinitetalk/multi';
+
+  const requestBody = {
+    left_audio: leftAudioUrl,
+    right_audio: rightAudioUrl,
+    image: imageUrl,
+    order: order === 'left_first' ? 'left to right' : order === 'right_first' ? 'right to left' : 'meanwhile',
+    resolution,
+    prompt,
+    seed
+  };
+
+  console.log(`[InfiniteTalk Multi] 🚀 Creating lip-sync video task`);
+  console.log(`[InfiniteTalk Multi] 👈 Left audio: ${leftAudioUrl.substring(0, 60)}...`);
+  console.log(`[InfiniteTalk Multi] 👉 Right audio: ${rightAudioUrl.substring(0, 60)}...`);
+  console.log(`[InfiniteTalk Multi] 🖼️ Image: ${imageUrl.substring(0, 60)}...`);
+  console.log(`[InfiniteTalk Multi] 📐 Resolution: ${resolution}`);
+  console.log(`[InfiniteTalk Multi] 🔄 Order: ${order}`);
+
+  const response = await wavespeedRequest(endpoint, {
+    method: 'POST',
+    body: requestBody
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error(`[InfiniteTalk Multi] ❌ API error: ${response.status} - ${errorText}`);
+    throw new Error(`InfiniteTalk Multi API error: ${response.status} - ${errorText}`);
+  }
+
+  const data = await response.json();
+  console.log(`[InfiniteTalk Multi] 📦 Response:`, JSON.stringify(data, null, 2));
+
+  const taskId = data.data?.id || data.id || data.requestId || data.request_id;
+
+  if (!taskId) {
+    console.error(`[InfiniteTalk Multi] ❌ No task ID in response:`, data);
+    throw new Error(`InfiniteTalk Multi did not return a task ID`);
+  }
+
+  console.log(`[InfiniteTalk Multi] ✅ Task created: ${taskId}`);
+  return taskId;
+};
+
+/**
+ * Create an InfiniteTalk Single video task (one character)
+ * For segments where only one host is speaking
+ */
+export const createInfiniteTalkSingleTask = async (
+  audioUrl: string,
+  imageUrl: string,
+  resolution: '480p' | '720p' = '720p',
+  prompt: string = '',
+  seed: number = -1
+): Promise<string> => {
+  const endpoint = 'api/v3/wavespeed-ai/infinitetalk';
+
+  const requestBody = {
+    audio: audioUrl,
+    image: imageUrl,
+    resolution,
+    prompt,
+    seed
+  };
+
+  console.log(`[InfiniteTalk] 🚀 Creating single character lip-sync video`);
+  console.log(`[InfiniteTalk] 🎙️ Audio: ${audioUrl.substring(0, 60)}...`);
+  console.log(`[InfiniteTalk] 🖼️ Image: ${imageUrl.substring(0, 60)}...`);
+  console.log(`[InfiniteTalk] 📐 Resolution: ${resolution}`);
+
+  const response = await wavespeedRequest(endpoint, {
+    method: 'POST',
+    body: requestBody
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error(`[InfiniteTalk] ❌ API error: ${response.status} - ${errorText}`);
+    throw new Error(`InfiniteTalk API error: ${response.status} - ${errorText}`);
+  }
+
+  const data = await response.json();
+  console.log(`[InfiniteTalk] 📦 Response:`, JSON.stringify(data, null, 2));
+
+  const taskId = data.data?.id || data.id || data.requestId || data.request_id;
+
+  if (!taskId) {
+    console.error(`[InfiniteTalk] ❌ No task ID in response:`, data);
+    throw new Error(`InfiniteTalk did not return a task ID`);
+  }
+
+  console.log(`[InfiniteTalk] ✅ Task created: ${taskId}`);
+  return taskId;
+};
+
+/**
+ * Poll an InfiniteTalk task for completion
+ * Works for both single and multi character tasks
+ */
+export const pollInfiniteTalkTask = async (taskId: string): Promise<string> => {
+  const endpoint = `api/v3/predictions/${taskId}/result`;
+  const maxRetries = 120; // 10 minutes max (InfiniteTalk can take longer for long videos)
+  let retries = 0;
+
+  console.log(`[InfiniteTalk] 🔄 Polling task: ${taskId}`);
+
+  while (retries < maxRetries) {
+    await new Promise(resolve => setTimeout(resolve, 5000)); // Check every 5 seconds
+
+    const response = await wavespeedRequest(endpoint, { method: 'GET' });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      if (response.status === 404 && retries < 20) {
+        console.log(`[InfiniteTalk] ⏳ Task not ready yet... (${retries + 1}/${maxRetries})`);
+        retries++;
+        continue;
+      }
+      console.error(`[InfiniteTalk] ❌ Polling error: ${response.status} - ${errorText}`);
+      throw new Error(`InfiniteTalk polling error: ${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+    const status = data.status || data.data?.status;
+
+    console.log(`[InfiniteTalk] 📊 Poll ${retries + 1}/${maxRetries} - Status: ${status || 'unknown'}`);
+
+    // Extract video URL from response
+    const videoUrl = 
+      data.data?.outputs?.[0] ||
+      data.outputs?.[0] ||
+      data.result?.video_url ||
+      data.data?.result?.video_url ||
+      data.video_url ||
+      data.data?.video_url;
+
+    if (status === 'completed' || status === 'success') {
+      if (videoUrl && typeof videoUrl === 'string') {
+        console.log(`[InfiniteTalk] ✅ Video ready: ${videoUrl.substring(0, 80)}...`);
+        return videoUrl;
+      } else if (typeof videoUrl === 'object' && videoUrl?.url) {
+        console.log(`[InfiniteTalk] ✅ Video ready: ${videoUrl.url.substring(0, 80)}...`);
+        return videoUrl.url;
+      }
+      throw new Error(`InfiniteTalk completed but no video URL found`);
+    } else if (status === 'failed' || status === 'error') {
+      const errorMsg = data.error || data.data?.error || data.message || 'Unknown error';
+      console.error(`[InfiniteTalk] ❌ Task failed: ${errorMsg}`);
+      throw new Error(`InfiniteTalk task failed: ${errorMsg}`);
+    }
+
+    retries++;
+  }
+
+  throw new Error(`InfiniteTalk timed out after ${maxRetries * 5} seconds`);
+};
+
+/**
+ * Generate a silent audio file URL (for when only one host speaks)
+ * Returns a URL to a 1-second silent MP3
+ */
+export const getSilentAudioUrl = (): string => {
+  // A publicly accessible silent audio file
+  // This is a common trick - use a very short silent MP3
+  return 'https://github.com/anars/blank-audio/raw/master/1-second-of-silence.mp3';
+};

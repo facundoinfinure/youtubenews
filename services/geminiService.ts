@@ -2,7 +2,7 @@ import { GoogleGenAI, Modality } from "@google/genai";
 import { NewsItem, ScriptLine, BroadcastSegment, VideoAssets, ViralMetadata, ChannelConfig } from "../types";
 import { ContentCache } from "./ContentCache";
 import { retryWithBackoff } from "./retryUtils";
-import { getModelForTask, getCostForTask, getWavespeedModel } from "./modelStrategy";
+import { getModelForTask, getCostForTask } from "./modelStrategy";
 import { CostTracker } from "./CostTracker";
 import { 
   getChannelIntroOutro, 
@@ -13,24 +13,30 @@ import {
   getCachedChannelVideos,
   createPromptHash,
   VideoType,
-  VideoProvider
+  VideoProvider,
+  uploadAudioToStorage
 } from "./supabaseService";
-import { createWavespeedVideoTask, pollWavespeedTask, createWavespeedImageTask, pollWavespeedImageTask } from "./wavespeedProxy";
+import { 
+  createInfiniteTalkMultiTask,
+  createInfiniteTalkSingleTask,
+  pollInfiniteTalkTask,
+  getSilentAudioUrl,
+  createWavespeedImageTask, 
+  pollWavespeedImageTask 
+} from "./wavespeedProxy";
 
 const getApiKey = () => import.meta.env.VITE_GEMINI_API_KEY || window.env?.API_KEY || process.env.API_KEY || "";
 const getWavespeedApiKey = () => import.meta.env.VITE_WAVESPEED_API_KEY || window.env?.WAVESPEED_API_KEY || process.env.WAVESPEED_API_KEY || "";
 const getAiClient = () => new GoogleGenAI({ apiKey: getApiKey() });
 
-// Helper function to check if Wavespeed should be used
-const shouldUseWavespeed = () => {
+// Helper function to check if Wavespeed is configured
+const isWavespeedConfigured = () => {
   return !!getWavespeedApiKey();
 };
 
 // Helper function to create a simple placeholder image as data URI
-// This creates a minimal image that Nano Banana Pro Edit can use as a starting point
 const createPlaceholderImage = (width: number = 1024, height: number = 1024): string => {
   if (typeof document === 'undefined') {
-    // Fallback for non-browser environments - return a minimal 1x1 PNG data URI
     return 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
   }
   
@@ -39,154 +45,168 @@ const createPlaceholderImage = (width: number = 1024, height: number = 1024): st
   canvas.height = height;
   const ctx = canvas.getContext('2d');
   if (ctx) {
-    // Create a simple gradient background that represents a basic studio setting
     const gradient = ctx.createLinearGradient(0, 0, width, height);
     gradient.addColorStop(0, '#1a1a1a');
     gradient.addColorStop(0.5, '#2a2a2a');
     gradient.addColorStop(1, '#1a1a1a');
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, width, height);
-    
-    // Add a subtle center area to suggest a studio space
     ctx.fillStyle = 'rgba(40, 40, 40, 0.3)';
     ctx.fillRect(width * 0.2, height * 0.2, width * 0.6, height * 0.6);
   }
   return canvas.toDataURL('image/png');
 };
 
-// Wrapper function to create video task with model from config
-const createWavespeedTask = async (prompt: string, aspectRatio: '16:9' | '9:16', referenceImageUrl?: string): Promise<string> => {
-  const model = getWavespeedModel();
-  return createWavespeedVideoTask(prompt, aspectRatio, referenceImageUrl, model);
-};
-
 // =============================================================================================
-// VIDEO GENERATION WITH CACHE AND FALLBACK
+// INFINITETALK VIDEO GENERATION (WaveSpeed Only - No VEO3)
 // =============================================================================================
 
-interface VideoGenerationOptions {
+/**
+ * InfiniteTalk pricing (per 5 seconds):
+ * - 480p: $0.15
+ * - 720p: $0.30
+ */
+const INFINITETALK_COST_480P = 0.15;
+const INFINITETALK_COST_720P = 0.30;
+
+interface InfiniteTalkVideoOptions {
   channelId: string;
   productionId?: string;
-  videoType: VideoType;
-  segmentIndex?: number;
-  prompt: string;
-  dialogueText?: string;
-  aspectRatio: '16:9' | '9:16';
-  referenceImageUrl?: string;
+  segmentIndex: number;
+  audioUrl: string;           // URL to the audio file
+  referenceImageUrl: string;  // URL to the reference image with both hosts
+  speaker: string;            // Who is speaking: hostA name, hostB name, or "Both"
+  dialogueText: string;       // The dialogue text for caching
+  hostAName: string;          // Name of host A (left in image)
+  hostBName: string;          // Name of host B (right in image)
+  hostAVisualPrompt: string;  // Visual description of host A
+  hostBVisualPrompt: string;  // Visual description of host B
+  resolution?: '480p' | '720p';
 }
 
 /**
- * Generate a video with intelligent caching and provider fallback
- * Order: Cache -> WaveSpeed -> VEO 3
- * Saves to cache after successful generation
+ * Generate a lip-sync video using WaveSpeed InfiniteTalk
+ * Uses the MULTI model for two-character scenes
+ * IMPORTANT: Uses strict prompts to maintain character consistency
  */
-const generateVideoWithCacheAndFallback = async (
-  options: VideoGenerationOptions
-): Promise<{ url: string | null; provider: VideoProvider; fromCache: boolean }> => {
-  const { channelId, productionId, videoType, segmentIndex, prompt, dialogueText, aspectRatio, referenceImageUrl } = options;
-  const promptHash = createPromptHash(prompt);
+const generateInfiniteTalkVideo = async (
+  options: InfiniteTalkVideoOptions
+): Promise<{ url: string | null; fromCache: boolean }> => {
+  const { 
+    channelId, 
+    productionId, 
+    segmentIndex,
+    audioUrl, 
+    referenceImageUrl, 
+    speaker,
+    dialogueText,
+    hostAName,
+    hostBName,
+    hostAVisualPrompt,
+    hostBVisualPrompt,
+    resolution = '720p'
+  } = options;
 
-  // Step 1: Check cache first
-  let cachedVideo = null;
-  
-  if (dialogueText) {
-    // For lip-sync videos, match by dialogue text
-    cachedVideo = await findCachedVideoByDialogue(channelId, videoType, dialogueText, aspectRatio);
-  } else {
-    // For non-dialogue videos (intro/outro), match by prompt hash
-    cachedVideo = await findCachedVideo(channelId, videoType, promptHash, aspectRatio);
+  // Determine video type based on speaker
+  let videoType: VideoType = 'segment';
+  if (speaker === hostAName) {
+    videoType = 'host_a';
+  } else if (speaker === hostBName) {
+    videoType = 'host_b';
+  } else if (speaker === 'Both' || speaker.includes('Both')) {
+    videoType = 'both_hosts';
   }
 
+  // Check cache first
+  const cachedVideo = await findCachedVideoByDialogue(channelId, videoType, dialogueText, '16:9');
   if (cachedVideo && cachedVideo.video_url) {
-    console.log(`✅ [Video Cache] Using cached ${videoType} video`);
-    return { url: cachedVideo.video_url, provider: cachedVideo.provider as VideoProvider, fromCache: true };
+    console.log(`✅ [InfiniteTalk] Using cached video for segment ${segmentIndex}`);
+    return { url: cachedVideo.video_url, fromCache: true };
   }
 
-  // Step 2: Try WaveSpeed first (primary provider for lip-sync)
-  if (shouldUseWavespeed()) {
-    try {
-      console.log(`🎬 [WaveSpeed] Generating ${videoType} video...`);
-      const taskId = await createWavespeedTask(prompt, aspectRatio, referenceImageUrl);
-      const videoUrl = await pollWavespeedTask(taskId);
-      
-      if (videoUrl) {
-        CostTracker.track('video', getWavespeedModel(), getCostForTask('video'));
-        
-        // Save to cache
-        await saveGeneratedVideo({
-          channel_id: channelId,
-          production_id: productionId || null,
-          video_type: videoType,
-          segment_index: segmentIndex ?? null,
-          prompt_hash: promptHash,
-          dialogue_text: dialogueText || null,
-          video_url: videoUrl,
-          provider: 'wavespeed',
-          aspect_ratio: aspectRatio,
-          duration_seconds: null,
-          status: 'completed',
-          error_message: null,
-          reference_image_hash: referenceImageUrl ? createPromptHash(referenceImageUrl.substring(0, 100)) : null,
-          expires_at: null
-        });
+  // Generate new video with InfiniteTalk Multi
+  const silentAudioUrl = getSilentAudioUrl();
+  
+  // Determine which audio goes to which side
+  // Host A = left, Host B = right (based on typical two-person shot)
+  let leftAudio = silentAudioUrl;
+  let rightAudio = silentAudioUrl;
+  let order: 'left_first' | 'right_first' | 'meanwhile' = 'meanwhile';
 
-        console.log(`✅ [WaveSpeed] ${videoType} video generated and cached`);
-        return { url: videoUrl, provider: 'wavespeed', fromCache: false };
-      }
-    } catch (wavespeedError) {
-      console.warn(`⚠️ [WaveSpeed] Failed for ${videoType}:`, (wavespeedError as Error).message);
-      // Continue to VEO 3 fallback
-    }
+  if (speaker === hostAName) {
+    leftAudio = audioUrl;
+    order = 'left_first';
+  } else if (speaker === hostBName) {
+    rightAudio = audioUrl;
+    order = 'right_first';
+  } else {
+    // Both speaking - use same audio for simplicity (they speak in unison)
+    leftAudio = audioUrl;
+    rightAudio = audioUrl;
+    order = 'meanwhile';
   }
 
-  // Step 3: Fallback to VEO 3
+  // Build strict character-specific prompt
+  // CRITICAL: Be very specific about the characters to avoid generating humans
+  const characterPrompt = `
+STRICT CHARACTER REQUIREMENTS - DO NOT DEVIATE:
+- LEFT CHARACTER: ${hostAName} - ${hostAVisualPrompt}
+- RIGHT CHARACTER: ${hostBName} - ${hostBVisualPrompt}
+
+SCENE: Professional podcast news studio with two animated characters.
+SPEAKING: ${speaker} is currently speaking with lip-sync animation.
+STYLE: Maintain exact character appearances from the reference image.
+
+CRITICAL: These are NOT human beings. They are animated/CGI characters as described above. 
+Keep character consistency with the reference image at all times.
+`.trim();
+
   try {
-    console.log(`🎬 [VEO 3] Fallback: Generating ${videoType} video...`);
-    const ai = getAiClient();
-    const operation = await ai.models.generateVideos({
-      model: getModelForTask('video'),
-      prompt: prompt,
-      config: {
-        aspectRatio: aspectRatio,
-        ...(referenceImageUrl ? { referenceImage: referenceImageUrl } : {})
-      }
+    console.log(`🎬 [InfiniteTalk Multi] Generating video for segment ${segmentIndex} (${speaker})`);
+    console.log(`📝 [InfiniteTalk Multi] Character prompt: ${hostAName} (${hostAVisualPrompt.substring(0, 50)}...) & ${hostBName}`);
+    
+    const taskId = await createInfiniteTalkMultiTask({
+      leftAudioUrl: leftAudio,
+      rightAudioUrl: rightAudio,
+      imageUrl: referenceImageUrl,
+      order,
+      resolution,
+      prompt: characterPrompt
     });
 
-    CostTracker.track('video', getModelForTask('video'), getCostForTask('video'));
+    const videoUrl = await pollInfiniteTalkTask(taskId);
 
-    if (operation) {
-      const videoUrl = await pollForVideo(operation);
-      
-      if (videoUrl) {
-        // Save to cache
-        await saveGeneratedVideo({
-          channel_id: channelId,
-          production_id: productionId || null,
-          video_type: videoType,
-          segment_index: segmentIndex ?? null,
-          prompt_hash: promptHash,
-          dialogue_text: dialogueText || null,
-          video_url: videoUrl,
-          provider: 'veo3',
-          aspect_ratio: aspectRatio,
-          duration_seconds: null,
-          status: 'completed',
-          error_message: null,
-          reference_image_hash: referenceImageUrl ? createPromptHash(referenceImageUrl.substring(0, 100)) : null,
-          expires_at: null
-        });
+    if (videoUrl) {
+      // Track cost
+      const cost = resolution === '720p' ? INFINITETALK_COST_720P : INFINITETALK_COST_480P;
+      CostTracker.track('video', 'infinitetalk-multi', cost);
 
-        console.log(`✅ [VEO 3] ${videoType} video generated and cached`);
-        return { url: videoUrl, provider: 'veo3', fromCache: false };
-      }
+      // Save to cache
+      await saveGeneratedVideo({
+        channel_id: channelId,
+        production_id: productionId || null,
+        video_type: videoType,
+        segment_index: segmentIndex,
+        prompt_hash: createPromptHash(dialogueText),
+        dialogue_text: dialogueText,
+        video_url: videoUrl,
+        provider: 'wavespeed',
+        aspect_ratio: '16:9',
+        duration_seconds: null,
+        status: 'completed',
+        error_message: null,
+        reference_image_hash: createPromptHash(referenceImageUrl.substring(0, 100)),
+        expires_at: null
+      });
+
+      console.log(`✅ [InfiniteTalk Multi] Video generated and cached for segment ${segmentIndex}`);
+      return { url: videoUrl, fromCache: false };
     }
-  } catch (veo3Error) {
-    console.error(`❌ [VEO 3] Failed for ${videoType}:`, (veo3Error as Error).message);
+  } catch (error) {
+    console.error(`❌ [InfiniteTalk Multi] Failed for segment ${segmentIndex}:`, (error as Error).message);
   }
 
-  // All providers failed
-  console.error(`❌ All video providers failed for ${videoType}`);
-  return { url: null, provider: 'other', fromCache: false };
+  return { url: null, fromCache: false };
 };
 
 export const fetchEconomicNews = async (targetDate: Date | undefined, config: ChannelConfig): Promise<NewsItem[]> => {
@@ -609,473 +629,152 @@ export const generateSegmentedAudioWithCache = async (
   return Promise.all(audioPromises);
 };
 
-// Helper for video polling
-const pollForVideo = async (operation: any): Promise<string> => {
-  const ai = getAiClient();
-  let retries = 0;
-  while (!operation.done && retries < 60) { // Increased timeout for VEO
-    await new Promise(resolve => setTimeout(resolve, 5000));
-    operation = await ai.operations.getVideosOperation({ operation });
-    retries++;
-  }
-  if (!operation.done) throw new Error("Video generation timed out");
-  const videoUri = operation.response?.generatedVideos?.[0]?.video?.uri;
-  if (!videoUri) throw new Error("No video URI");
-  // Append Key here using the getter helper logic, not process.env directly
-  return `${videoUri}&key=${getApiKey()}`;
-};
-
 // =============================================================================================
-// STRUCTURED VIDEO GENERATION FUNCTIONS
+// INFINITETALK VIDEO GENERATION FUNCTIONS (WaveSpeed Only)
 // =============================================================================================
 
 /**
- * Generate intro video (generic, no dialogue) - reusable per channel
- * Uses intelligent caching: Cache -> WaveSpeed -> VEO 3
+ * For intro/outro, we use the reference image as a static frame
+ * InfiniteTalk requires audio, so intro/outro will just use the reference image
+ * The actual lip-sync videos are generated per segment
  */
 export const generateIntroVideo = async (
   config: ChannelConfig,
   channelId: string,
   productionId?: string
 ): Promise<string | null> => {
-  const referenceImageContext = config.referenceImageUrl 
-    ? `\nCRITICAL REFERENCE IMAGE: Use the provided reference image as the EXACT visual template. Match the exact podcast studio setting, character appearances, lighting, and composition from the reference image.\n` 
-    : '';
-
-  const prompt = `
-Create a professional ${config.format} intro video for "${config.channelName}".
-
-SCENE DESCRIPTION:
-- Two chimpanzees (${config.characters.hostA.name} and ${config.characters.hostB.name}) in a modern podcast studio
-- Both hosts visible in frame, sitting at a desk with microphones
-- Professional studio environment with branding elements
-- Camera: Wide shot showing both chimpanzees
-- Setting: Indoor podcast studio (NOT outdoor or landscape)
-
-CHARACTERS:
-- ${config.characters.hostA.name}: ${config.characters.hostA.visualPrompt}
-- ${config.characters.hostB.name}: ${config.characters.hostB.visualPrompt}
-
-CHANNEL: ${config.channelName}
-TAGLINE: ${config.tagline}
-BRANDING COLORS: ${config.logoColor1} and ${config.logoColor2}
-
-STYLE: ${config.tone}, professional podcast-style news studio
-DURATION: 5-6 seconds
-ACTION: Both hosts looking at camera, welcoming gesture, no dialogue (intro music will play)
-BRANDING: Include channel name "${config.channelName}" and tagline "${config.tagline}" visually in the scene. Use brand colors ${config.logoColor1} and ${config.logoColor2} in graphics, logos, or on-screen elements.
-${referenceImageContext}
-
-IMPORTANT: This is an intro video with NO dialogue. The hosts should be visible and welcoming, but not speaking. The scene must be an indoor podcast studio.
-  `.trim();
-
-  return retryWithBackoff(async () => {
-    try {
-      const result = await generateVideoWithCacheAndFallback({
-        channelId,
-        productionId,
-        videoType: 'intro',
-        prompt,
-        aspectRatio: config.format,
-        referenceImageUrl: config.referenceImageUrl
-      });
-
-      if (result.url) {
-        // Save to channel cache (legacy support)
-        const { outroUrl } = await getChannelIntroOutro(channelId);
-        await saveChannelIntroOutro(channelId, result.url, outroUrl);
-        
-        if (result.fromCache) {
-          console.log(`✅ [Intro] Using cached video`);
-        } else {
-          console.log(`✅ [Intro] Generated with ${result.provider}`);
-        }
-        
-        return result.url;
-      }
-      return null;
-    } catch (e) {
-      console.error("Intro video generation failed", e);
-      return null;
-    }
-  }, {
-    maxRetries: 2,
-    baseDelay: 5000,
-    onRetry: (attempt) => console.log(`🎬 Retrying intro video generation (${attempt}/2)...`)
-  });
+  // For intro, we just return the reference image URL
+  // The BroadcastPlayer will handle displaying it as a static intro
+  if (config.referenceImageUrl) {
+    console.log(`✅ [Intro] Using reference image as intro frame`);
+    return config.referenceImageUrl;
+  }
+  
+  // If no reference image, return null (no intro video)
+  console.log(`⚠️ [Intro] No reference image available for intro`);
+  return null;
 };
 
 /**
- * Generate outro video (generic, no dialogue) - reusable per channel
- * Uses intelligent caching: Cache -> WaveSpeed -> VEO 3
+ * Generate outro video - uses reference image as static frame
  */
 export const generateOutroVideo = async (
   config: ChannelConfig,
   channelId: string,
   productionId?: string
 ): Promise<string | null> => {
-  const referenceImageContext = config.referenceImageUrl 
-    ? `\nCRITICAL REFERENCE IMAGE: Use the provided reference image as the EXACT visual template. Match the exact podcast studio setting, character appearances, lighting, and composition from the reference image.\n` 
-    : '';
-
-  const prompt = `
-Create a professional ${config.format} outro video for "${config.channelName}".
-
-SCENE DESCRIPTION:
-- Two chimpanzees (${config.characters.hostA.name} and ${config.characters.hostB.name}) in a modern podcast studio
-- Both hosts visible in frame, sitting at a desk with microphones
-- Professional studio environment with branding elements
-- Camera: Wide shot showing both chimpanzees
-- Setting: Indoor podcast studio (NOT outdoor or landscape)
-
-CHARACTERS:
-- ${config.characters.hostA.name}: ${config.characters.hostA.visualPrompt}
-- ${config.characters.hostB.name}: ${config.characters.hostB.visualPrompt}
-
-CHANNEL: ${config.channelName}
-TAGLINE: ${config.tagline}
-BRANDING COLORS: ${config.logoColor1} and ${config.logoColor2}
-
-STYLE: ${config.tone}, professional podcast-style news studio
-DURATION: 5-6 seconds
-ACTION: Both hosts looking at camera, thanking gesture, no dialogue (outro music will play)
-BRANDING: Include channel name "${config.channelName}" and tagline "${config.tagline}" visually in the scene. Use brand colors ${config.logoColor1} and ${config.logoColor2} in graphics, logos, or on-screen elements. Include "Subscribe" and "Like" call-to-action elements.
-${referenceImageContext}
-
-IMPORTANT: This is an outro video with NO dialogue. The hosts should be visible and thanking the audience, but not speaking. The scene must be an indoor podcast studio.
-  `.trim();
-
-  return retryWithBackoff(async () => {
-    try {
-      const result = await generateVideoWithCacheAndFallback({
-        channelId,
-        productionId,
-        videoType: 'outro',
-        prompt,
-        aspectRatio: config.format,
-        referenceImageUrl: config.referenceImageUrl
-      });
-
-      if (result.url) {
-        // Save to channel cache (legacy support)
-        const { introUrl } = await getChannelIntroOutro(channelId);
-        await saveChannelIntroOutro(channelId, introUrl, result.url);
-        
-        if (result.fromCache) {
-          console.log(`✅ [Outro] Using cached video`);
-        } else {
-          console.log(`✅ [Outro] Generated with ${result.provider}`);
-        }
-        
-        return result.url;
-      }
-      return null;
-    } catch (e) {
-      console.error("Outro video generation failed", e);
-      return null;
-    }
-  }, {
-    maxRetries: 2,
-    baseDelay: 5000,
-    onRetry: (attempt) => console.log(`🎬 Retrying outro video generation (${attempt}/2)...`)
-  });
-};
-
-/**
- * Generate video of a single host with lip-sync for specific dialogue
- * Uses intelligent caching: Cache -> WaveSpeed -> VEO 3
- */
-const generateHostVideoWithLipSync = async (
-  hostName: string,
-  character: any,
-  dialogueText: string,
-  config: ChannelConfig,
-  channelId: string,
-  productionId?: string,
-  segmentIndex?: number,
-  cameraAngle: string = 'front-facing',
-  action: string = 'Speaking naturally to camera'
-): Promise<string | null> => {
-  const referenceImageContext = config.referenceImageUrl 
-    ? `\nCRITICAL REFERENCE IMAGE: Use the provided reference image as the EXACT visual template. Match the exact podcast studio setting, character appearance, lighting, and composition from the reference image.\n` 
-    : '';
-
-  const prompt = `
-Professional news broadcast video segment showing ${character.name} (a chimpanzee) in a podcast studio setting.
-
-CHARACTER: ${character.name} - ${character.visualPrompt}
-SCENE: Podcast-style news studio. Single character shot, close-up.
-Camera Angle: ${cameraAngle}
-Action: ${action}
-Dialogue for Lip-Sync: "${dialogueText}"
-Duration: 10-15 seconds of continuous speaking
-Emotion/Tone: ${config.tone}
-Setting: Professional podcast-style news studio (INDOOR, NOT outdoor or landscape). ${character.name} presenting news in a modern studio environment with microphone, desk, and professional lighting. ${config.format} format.
-Lighting: Professional studio lighting, high quality, consistent with podcast aesthetic.
-Expression: Natural, engaging, appropriate for news content.
-${referenceImageContext}
-
-CRITICAL REQUIREMENTS:
-- MUST show a chimpanzee in a podcast studio setting (NOT a generic landscape or outdoor scene)
-- The character must be speaking the exact dialogue provided for proper lip-sync
-- Maintain visual consistency with the podcast studio setting and reference image
-- Setting must be an indoor podcast studio, not an outdoor or generic scene
-  `.trim();
-
-  // Determine video type based on host
-  const videoType: VideoType = hostName === config.characters.hostA.name ? 'host_a' : 'host_b';
-
-  return retryWithBackoff(async () => {
-    try {
-      const result = await generateVideoWithCacheAndFallback({
-        channelId,
-        productionId,
-        videoType,
-        segmentIndex,
-        prompt,
-        dialogueText, // Include dialogue for cache matching
-        aspectRatio: config.format,
-        referenceImageUrl: config.referenceImageUrl
-      });
-
-      if (result.url) {
-        if (result.fromCache) {
-          console.log(`✅ [${hostName}] Using cached video`);
-        } else {
-          console.log(`✅ [${hostName}] Generated with ${result.provider}`);
-        }
-        return result.url;
-      }
-      return null;
-    } catch (e) {
-      console.warn(`Failed to generate video for ${hostName}`, e);
-      return null;
-    }
-  }, {
-    maxRetries: 2,
-    baseDelay: 5000,
-    onRetry: (attempt) => console.log(`🎬 Retrying video generation for ${hostName} (${attempt}/2)...`)
-  });
-};
-
-/**
- * Generate video of both hosts together with lip-sync for dialogue
- * Uses intelligent caching: Cache -> WaveSpeed -> VEO 3
- */
-const generateTwoHostsVideoWithLipSync = async (
-  dialogueText: string,
-  config: ChannelConfig,
-  channelId: string,
-  productionId?: string,
-  segmentIndex?: number
-): Promise<string | null> => {
-  const referenceImageContext = config.referenceImageUrl 
-    ? `\nCRITICAL REFERENCE IMAGE: Use the provided reference image as the EXACT visual template. Match the exact podcast studio setting, character appearances (2 chimpanzees in podcast studio), lighting, and composition from the reference image.\n` 
-    : '';
-
-  const prompt = `
-Professional news broadcast video segment showing TWO CHIMPANZEES in a PODCAST-STYLE STUDIO.
-
-SCENE DESCRIPTION:
-- Two chimpanzees (${config.characters.hostA.name} and ${config.characters.hostB.name}) in a modern podcast studio
-- Both hosts visible in frame, sitting at a desk with microphones
-- Camera: Wide shot showing both chimpanzees
-- Setting: Indoor podcast studio (NOT outdoor or landscape)
-
-CHARACTERS:
-- ${config.characters.hostA.name}: ${config.characters.hostA.visualPrompt}
-- ${config.characters.hostB.name}: ${config.characters.hostB.visualPrompt}
-
-Dialogue for Lip-Sync: "${dialogueText}"
-Duration: 10-15 seconds
-Emotion/Tone: ${config.tone}
-Setting: Professional podcast-style news studio. ${config.format} format.
-Lighting: Professional studio lighting, high quality.
-${referenceImageContext}
-
-CRITICAL REQUIREMENTS:
-- MUST show two chimpanzees in a podcast studio setting (NOT a generic landscape or outdoor scene)
-- Both characters must be speaking the exact dialogue provided for proper lip-sync
-- Maintain visual consistency with the podcast studio setting and reference image
-- Setting must be an indoor podcast studio, not an outdoor or generic scene
-  `.trim();
-
-  return retryWithBackoff(async () => {
-    try {
-      const result = await generateVideoWithCacheAndFallback({
-        channelId,
-        productionId,
-        videoType: 'both_hosts',
-        segmentIndex,
-        prompt,
-        dialogueText, // Include dialogue for cache matching
-        aspectRatio: config.format,
-        referenceImageUrl: config.referenceImageUrl
-      });
-
-      if (result.url) {
-        if (result.fromCache) {
-          console.log(`✅ [Both Hosts] Using cached video`);
-        } else {
-          console.log(`✅ [Both Hosts] Generated with ${result.provider}`);
-        }
-        return result.url;
-      }
-      return null;
-    } catch (e) {
-      console.warn(`Failed to generate two hosts video`, e);
-      return null;
-    }
-  }, {
-    maxRetries: 2,
-    baseDelay: 5000,
-    onRetry: (attempt) => console.log(`🎬 Retrying two hosts video generation (${attempt}/2)...`)
-  });
-};
-
-/**
- * Group consecutive segments by the same speaker for efficient video generation
- */
-const groupSegmentsBySpeaker = (script: ScriptLine[]): Array<{ speaker: string; text: string; startIndex: number; endIndex: number }> => {
-  const groups: Array<{ speaker: string; text: string; startIndex: number; endIndex: number }> = [];
-  
-  if (script.length === 0) return groups;
-  
-  let currentGroup = {
-    speaker: script[0].speaker,
-    text: script[0].text,
-    startIndex: 0,
-    endIndex: 0
-  };
-  
-  for (let i = 1; i < script.length; i++) {
-    if (script[i].speaker === currentGroup.speaker) {
-      // Same speaker, append text
-      currentGroup.text += ' ' + script[i].text;
-      currentGroup.endIndex = i;
-    } else {
-      // Different speaker, save current group and start new one
-      groups.push(currentGroup);
-      currentGroup = {
-        speaker: script[i].speaker,
-        text: script[i].text,
-        startIndex: i,
-        endIndex: i
-      };
-    }
+  // For outro, we just return the reference image URL
+  if (config.referenceImageUrl) {
+    console.log(`✅ [Outro] Using reference image as outro frame`);
+    return config.referenceImageUrl;
   }
   
-  // Don't forget the last group
-  groups.push(currentGroup);
-  
-  return groups;
+  console.log(`⚠️ [Outro] No reference image available for outro`);
+  return null;
 };
 
+/**
+ * Generate lip-sync videos for each segment using WaveSpeed InfiniteTalk Multi
+ * 
+ * This function takes segments WITH audio already generated and creates
+ * lip-sync videos for each segment using InfiniteTalk Multi API.
+ * 
+ * IMPORTANT: Segments must have audioUrl (uploaded to storage) before calling this.
+ * 
+ * @param segments - Array of segments with audio URLs
+ * @param config - Channel configuration (needs referenceImageUrl)
+ * @param channelId - Channel ID for caching
+ * @param productionId - Production ID for caching
+ */
+export const generateVideoSegmentsWithInfiniteTalk = async (
+  segments: BroadcastSegment[],
+  config: ChannelConfig,
+  channelId: string,
+  productionId?: string
+): Promise<(string | null)[]> => {
+  if (!config.referenceImageUrl) {
+    console.error(`❌ [InfiniteTalk] No reference image URL provided. Cannot generate lip-sync videos.`);
+    console.error(`❌ [InfiniteTalk] Please set a reference image in the channel settings.`);
+    return new Array(segments.length).fill(null);
+  }
+
+  if (!isWavespeedConfigured()) {
+    console.error(`❌ [InfiniteTalk] WaveSpeed not configured. Set WAVESPEED_API_KEY.`);
+    return new Array(segments.length).fill(null);
+  }
+
+  console.log(`🎬 [InfiniteTalk Multi] Generating ${segments.length} lip-sync videos`);
+  console.log(`🖼️ [InfiniteTalk Multi] Reference image: ${config.referenceImageUrl.substring(0, 60)}...`);
+  
+  // Log character descriptions to verify they're being used
+  const hostAName = config.characters.hostA.name;
+  const hostBName = config.characters.hostB.name;
+  const hostAVisualPrompt = config.characters.hostA.visualPrompt;
+  const hostBVisualPrompt = config.characters.hostB.visualPrompt;
+  
+  console.log(`👤 [InfiniteTalk Multi] Host A: ${hostAName} - ${hostAVisualPrompt}`);
+  console.log(`👤 [InfiniteTalk Multi] Host B: ${hostBName} - ${hostBVisualPrompt}`);
+
+  // Generate videos for each segment (one video per segment)
+  const videoPromises = segments.map(async (segment, index) => {
+    // Get audio URL - it should be in segment.audioUrl after being uploaded
+    const audioUrl = (segment as any).audioUrl;
+    
+    if (!audioUrl) {
+      console.warn(`⚠️ [InfiniteTalk] Segment ${index} has no audio URL, skipping video generation`);
+      return null;
+    }
+
+    try {
+      const result = await generateInfiniteTalkVideo({
+        channelId,
+        productionId,
+        segmentIndex: index,
+        audioUrl,
+        referenceImageUrl: config.referenceImageUrl!,
+        speaker: segment.speaker,
+        dialogueText: segment.text,
+        hostAName,
+        hostBName,
+        hostAVisualPrompt,  // Pass visual description
+        hostBVisualPrompt,  // Pass visual description
+        resolution: '720p'
+      });
+
+      console.log(`✅ [InfiniteTalk] Segment ${index + 1}/${segments.length} complete${result.fromCache ? ' (cached)' : ''}`);
+      return result.url;
+    } catch (error) {
+      console.error(`❌ [InfiniteTalk] Segment ${index} failed:`, (error as Error).message);
+      return null;
+    }
+  });
+
+  const videoUrls = await Promise.all(videoPromises);
+  
+  const successCount = videoUrls.filter(url => url !== null).length;
+  console.log(`✅ [InfiniteTalk Multi] Generated ${successCount}/${segments.length} videos`);
+
+  return videoUrls;
+};
+
+/**
+ * Legacy function for compatibility - now just returns empty arrays
+ * Actual video generation happens in generateVideoSegmentsWithInfiniteTalk
+ */
 export const generateVideoSegments = async (
   script: ScriptLine[],
   config: ChannelConfig,
   channelId: string,
   productionId?: string
 ): Promise<(string | null)[]> => {
-  // Group consecutive segments by speaker to generate longer videos with lip-sync
-  const groupedSegments = groupSegmentsBySpeaker(script);
-  
-  console.log(`[Video Generation] Grouped ${script.length} segments into ${groupedSegments.length} video groups`);
-  console.log(`[Video Generation] Using cache-first strategy: Cache -> WaveSpeed -> VEO 3`);
-  
-  // Track character variations for visual variety
-  const characterVariationCount: Record<string, number> = {
-    [config.characters.hostA.name]: 0,
-    [config.characters.hostB.name]: 0,
-    'Both': 0
-  };
-  
-  // Camera angles and actions for variety
-  const cameraAngles = ['front-facing', 'slight 3/4 angle left', 'slight 3/4 angle right', 'front with slight lean', 'front with hand gesture'];
-  const actions = [
-    'Speaking naturally to camera with confident expression',
-    'Speaking to camera with subtle hand gestures emphasizing key points',
-    'Speaking to camera with slight head movements for emphasis',
-    'Speaking to camera with engaged, animated expression',
-    'Speaking to camera with professional, authoritative presence'
-  ];
-  
-  // Generate videos for each group (with incremental saving to cache)
-  const videoPromises = groupedSegments.map(async (group, groupIndex) => {
-    const isWideShot = group.speaker === 'Both' || group.speaker.includes('Both');
-    
-    // Determine character
-    let character = config.characters.hostA;
-    if (group.speaker === config.characters.hostB.name) {
-      character = config.characters.hostB;
-    }
-    
-    // Track variation for visual variety
-    const speakerKey = isWideShot ? 'Both' : character.name;
-    characterVariationCount[speakerKey] = (characterVariationCount[speakerKey] || 0) + 1;
-    const variationNumber = characterVariationCount[speakerKey] % 5;
-    const cameraAngle = cameraAngles[variationNumber];
-    const action = actions[variationNumber];
-    
-    // Generate video with lip-sync (includes caching and fallback)
-    let videoUrl: string | null = null;
-    
-    if (isWideShot) {
-      // Both hosts together
-      videoUrl = await generateTwoHostsVideoWithLipSync(
-        group.text, 
-        config,
-        channelId,
-        productionId,
-        group.startIndex
-      );
-    } else {
-      // Single host
-      videoUrl = await generateHostVideoWithLipSync(
-        group.speaker,
-        character,
-        group.text,
-        config,
-        channelId,
-        productionId,
-        group.startIndex,
-        cameraAngle,
-        action
-      );
-    }
-    
-    // Log progress after each video is generated/cached
-    console.log(`[Video Generation] Segment group ${groupIndex + 1}/${groupedSegments.length} complete`);
-    
-    // Return video URL for all segments in this group
-    return {
-      videoUrl,
-      startIndex: group.startIndex,
-      endIndex: group.endIndex
-    };
-  });
-  
-  const videoResults = await Promise.all(videoPromises);
-  
-  // Map grouped videos back to individual segments
-  const segmentVideos: (string | null)[] = new Array(script.length).fill(null);
-  
-  videoResults.forEach((result) => {
-    // Assign the same video URL to all segments in this group
-    for (let i = result.startIndex; i <= result.endIndex; i++) {
-      segmentVideos[i] = result.videoUrl;
-    }
-  });
-  
-  const cachedCount = videoResults.filter(r => r.videoUrl).length;
-  console.log(`[Video Generation] Completed: ${cachedCount} videos for ${script.length} segments`);
-  
-  return segmentVideos;
+  console.log(`⚠️ [Video Generation] generateVideoSegments called but videos are generated separately with InfiniteTalk`);
+  console.log(`⚠️ [Video Generation] Use generateVideoSegmentsWithInfiniteTalk after audio is uploaded`);
+  return new Array(script.length).fill(null);
 };
+
 /**
- * Generate or retrieve intro/outro videos for a channel
- * This function now only handles intro/outro caching, not the main content videos
- * Uses intelligent caching: Cache -> WaveSpeed -> VEO 3
+ * Generate or retrieve intro/outro for a channel
+ * For InfiniteTalk, we just use the reference image as static intro/outro frames
  */
 export const generateBroadcastVisuals = async (
   newsContext: string,
@@ -1084,40 +783,22 @@ export const generateBroadcastVisuals = async (
   channelId: string,
   productionId?: string
 ): Promise<VideoAssets> => {
-  console.log(`[Broadcast Visuals] Getting intro/outro videos for channel ${channelId}`);
-  console.log(`[Broadcast Visuals] Using cache-first strategy: Cache -> WaveSpeed -> VEO 3`);
+  console.log(`[Broadcast Visuals] Setting up intro/outro for channel ${channelId}`);
   
-  // Check generated_videos cache first (new system)
-  const cachedChannelVideos = await getCachedChannelVideos(channelId, config.format);
+  // For InfiniteTalk workflow, intro/outro are just the reference image
+  // The actual lip-sync videos are generated per segment
+  const introOutroUrl = config.referenceImageUrl || null;
   
-  // Also check legacy channel cache
-  const { introUrl: legacyIntroUrl, outroUrl: legacyOutroUrl } = await getChannelIntroOutro(channelId);
-  
-  let finalIntroUrl = cachedChannelVideos.intro?.video_url || legacyIntroUrl;
-  let finalOutroUrl = cachedChannelVideos.outro?.video_url || legacyOutroUrl;
-  
-  // Generate intro if not cached
-  if (!finalIntroUrl) {
-    console.log(`[Broadcast Visuals] No cached intro found, generating new intro...`);
-    finalIntroUrl = await generateIntroVideo(config, channelId, productionId);
+  if (introOutroUrl) {
+    console.log(`✅ [Broadcast Visuals] Using reference image for intro/outro`);
   } else {
-    console.log(`[Broadcast Visuals] ✅ Using cached intro video`);
+    console.log(`⚠️ [Broadcast Visuals] No reference image - intro/outro will be empty`);
   }
   
-  // Generate outro if not cached
-  if (!finalOutroUrl) {
-    console.log(`[Broadcast Visuals] No cached outro found, generating new outro...`);
-    finalOutroUrl = await generateOutroVideo(config, channelId, productionId);
-  } else {
-    console.log(`[Broadcast Visuals] ✅ Using cached outro video`);
-  }
-  
-  // Return VideoAssets structure
-  // Note: hostA and hostB arrays will be populated by generateVideoSegments()
   return {
-    wide: finalIntroUrl || finalOutroUrl || null, // Use intro/outro for wide shot (used during intro/outro phases)
-    hostA: [], // Will be populated by generateVideoSegments
-    hostB: []  // Will be populated by generateVideoSegments
+    wide: introOutroUrl,
+    hostA: [],
+    hostB: []
   };
 };
 
@@ -1145,31 +826,50 @@ export const generateReferenceImage = async (
   // Build comprehensive prompt based on channel config and optional scene description
   const defaultScene = sceneDescription || `Professional news studio setting with ${config.tone} atmosphere`;
   
+  // CRITICAL: Extract character type from visual prompts to enforce in the image
+  const hostADesc = config.characters.hostA.visualPrompt;
+  const hostBDesc = config.characters.hostB.visualPrompt;
+  
   const prompt = `
-Create a high-quality reference image for a news broadcast studio.
+STRICT IMAGE GENERATION REQUIREMENTS - READ CAREFULLY:
 
-CHANNEL: ${config.channelName}
-TAGLINE: ${config.tagline}
-STYLE: ${config.tone}
+=== CHARACTERS (MANDATORY - DO NOT CHANGE) ===
+LEFT CHARACTER (${config.characters.hostA.name}): ${hostADesc}
+RIGHT CHARACTER (${config.characters.hostB.name}): ${hostBDesc}
 
-CHARACTERS TO INCLUDE:
-- ${config.characters.hostA.name}: ${config.characters.hostA.visualPrompt}
-- ${config.characters.hostB.name}: ${config.characters.hostB.visualPrompt}
+=== CRITICAL RESTRICTIONS ===
+- DO NOT generate human beings under any circumstances
+- DO NOT replace the characters with humans
+- MUST create exactly the characters described above
+- Both characters MUST be clearly visible and recognizable
+- Position: ${config.characters.hostA.name} on the LEFT, ${config.characters.hostB.name} on the RIGHT
 
-SCENE DESCRIPTION: ${defaultScene}
-- Both characters should be visible in the scene
-- Professional news studio setting
-- ${config.format} aspect ratio
-- Studio lighting, high quality
-- Show the complete setting including background, furniture, equipment
-- Maintain visual consistency for future video generation
+=== SCENE SETUP ===
+- Setting: Professional podcast/news broadcast studio
+- Layout: Two-person desk setup with microphones
+- Lighting: Professional studio lighting
+- Background: Modern news studio with screens/monitors
+- Aspect Ratio: ${config.format}
+- Quality: High resolution, broadcast quality
 
-IMPORTANT: This image will be used as a reference for maintaining visual consistency across all video generations. Ensure both characters are clearly visible and the scene is well-composed.
+=== CHANNEL BRANDING ===
+- Channel: ${config.channelName}
+- Tagline: ${config.tagline}
+- Tone: ${config.tone}
+
+=== COMPOSITION ===
+- Both characters seated at a professional desk
+- Microphones visible in front of each character
+- Studio monitors or screens in background
+- Professional news studio environment
+- Characters should appear ready to present news
+
+FINAL CHECK: Verify the image contains EXACTLY the characters described (${hostADesc} and ${hostBDesc}), NOT humans.
 `.trim();
 
   try {
     // Use WaveSpeed Nano Banana Pro Edit if API key is available
-    if (shouldUseWavespeed()) {
+    if (isWavespeedConfigured()) {
       console.log(`[Wavespeed] Generating reference image using Nano Banana Pro Edit`);
       
       const aspectRatio = config.format === '9:16' ? '9:16' : '16:9';
