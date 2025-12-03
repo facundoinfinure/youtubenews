@@ -273,27 +273,69 @@ export const BroadcastPlayer: React.FC<BroadcastPlayerProps> = ({
         const canvasWidth = isShorts ? 720 : 1280;
         const canvasHeight = isShorts ? 1280 : 720;
 
-        // Helper to load video
-        const loadVideoBlob = async (url: string | null) => {
-            if (!url) return null;
-            const res = await fetch(url);
-            const blob = await res.blob();
-            const vid = document.createElement('video');
-            vid.src = URL.createObjectURL(blob);
-            vid.muted = true;
-            vid.loop = true;
-            vid.crossOrigin = "anonymous";
-            return vid;
+        // Helper to check if URL is an image
+        const isImageUrl = (url: string): boolean => {
+            const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'];
+            const lowerUrl = url.toLowerCase();
+            // Check extension or data URI
+            if (lowerUrl.startsWith('data:image/')) return true;
+            return imageExtensions.some(ext => lowerUrl.includes(ext));
         };
 
-        const vWide = await loadVideoBlob(videos.wide);
+        // Helper to load image
+        const loadImageBlob = async (url: string | null): Promise<HTMLImageElement | null> => {
+            if (!url) return null;
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                img.crossOrigin = "anonymous";
+                img.onload = () => resolve(img);
+                img.onerror = (e) => {
+                    console.error("Failed to load image:", url.substring(0, 60));
+                    reject(e);
+                };
+                img.src = url;
+            });
+        };
+
+        // Helper to load video
+        const loadVideoBlob = async (url: string | null): Promise<HTMLVideoElement | null> => {
+            if (!url) return null;
+            try {
+                const res = await fetch(url);
+                const blob = await res.blob();
+                const vid = document.createElement('video');
+                vid.src = URL.createObjectURL(blob);
+                vid.muted = true;
+                vid.loop = true;
+                vid.crossOrigin = "anonymous";
+                return vid;
+            } catch (error) {
+                console.error("Failed to load video:", url.substring(0, 60), error);
+                return null;
+            }
+        };
+
+        // Load wide asset (could be image or video)
+        let wideImage: HTMLImageElement | null = null;
+        let vWide: HTMLVideoElement | null = null;
+        
+        if (videos.wide) {
+            if (isImageUrl(videos.wide)) {
+                console.log("[Render] Loading intro/outro as image");
+                wideImage = await loadImageBlob(videos.wide);
+            } else {
+                console.log("[Render] Loading intro/outro as video");
+                vWide = await loadVideoBlob(videos.wide);
+            }
+        }
+
         const vHostAs = await Promise.all(videos.hostA.map(loadVideoBlob));
         const vHostBs = await Promise.all(videos.hostB.map(loadVideoBlob));
 
-        // Warm up videos
-        if (vWide) await vWide.play().then(() => vWide.pause());
-        for (const v of vHostAs) if (v) await v.play().then(() => v.pause());
-        for (const v of vHostBs) if (v) await v.play().then(() => v.pause());
+        // Warm up videos (skip images)
+        if (vWide) await vWide.play().then(() => vWide.pause()).catch(() => {});
+        for (const v of vHostAs) if (v) await v.play().then(() => v.pause()).catch(() => {});
+        for (const v of vHostBs) if (v) await v.play().then(() => v.pause()).catch(() => {});
 
         const canvas = document.createElement('canvas');
         canvas.width = canvasWidth;
@@ -410,23 +452,58 @@ export const BroadcastPlayer: React.FC<BroadcastPlayerProps> = ({
                 }
 
                 if (elapsedSec < introSec) {
-                    // Intro
-                    if (vWide && vWide.paused) vWide.play();
+                    // Intro - use image or logo
                     const progress = elapsedSec / introSec;
                     const scale = 2 - progress;
-                    drawLogo(1, scale);
+                    
+                    if (wideImage) {
+                        // Draw reference image as intro background
+                        const hRatio = canvas.width / wideImage.width;
+                        const vRatio = canvas.height / wideImage.height;
+                        const ratio = Math.max(hRatio, vRatio);
+                        const centerShift_x = (canvas.width - wideImage.width * ratio) / 2;
+                        const centerShift_y = (canvas.height - wideImage.height * ratio) / 2;
+                        ctx.drawImage(wideImage, centerShift_x, centerShift_y, wideImage.width * ratio, wideImage.height * ratio);
+                        // Overlay with fade-in effect
+                        ctx.fillStyle = `rgba(0,0,0,${1 - progress})`;
+                        ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    } else if (vWide) {
+                        if (vWide.paused) vWide.play();
+                        const hRatio = canvas.width / vWide.videoWidth;
+                        const vRatio = canvas.height / vWide.videoHeight;
+                        const ratio = Math.max(hRatio, vRatio);
+                        const centerShift_x = (canvas.width - vWide.videoWidth * ratio) / 2;
+                        const centerShift_y = (canvas.height - vWide.videoHeight * ratio) / 2;
+                        ctx.drawImage(vWide, centerShift_x, centerShift_y, vWide.videoWidth * ratio, vWide.videoHeight * ratio);
+                    } else {
+                        drawLogo(1, scale);
+                    }
                 }
                 else if (elapsedSec >= outroStartSec) {
-                    // Outro
+                    // Outro - use image or logo
                     const progress = (elapsedSec - outroStartSec) / (OUTRO_DURATION / 1000);
-                    ctx.fillStyle = "black";
-                    ctx.fillRect(0, 0, canvas.width, canvas.height);
-                    drawLogo(progress, 1);
+                    
+                    if (wideImage) {
+                        // Draw reference image as outro background
+                        const hRatio = canvas.width / wideImage.width;
+                        const vRatio = canvas.height / wideImage.height;
+                        const ratio = Math.max(hRatio, vRatio);
+                        const centerShift_x = (canvas.width - wideImage.width * ratio) / 2;
+                        const centerShift_y = (canvas.height - wideImage.height * ratio) / 2;
+                        ctx.drawImage(wideImage, centerShift_x, centerShift_y, wideImage.width * ratio, wideImage.height * ratio);
+                        // Overlay with fade-out effect
+                        ctx.fillStyle = `rgba(0,0,0,${progress})`;
+                        ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    } else {
+                        ctx.fillStyle = "black";
+                        ctx.fillRect(0, 0, canvas.width, canvas.height);
+                        drawLogo(progress, 1);
+                    }
                 }
                 else {
                     // Content
                     const currentSeg = segmentTimings.find(s => elapsedSec >= s.start && elapsedSec < s.end);
-                    let activeVid = vWide;
+                    let activeVid: HTMLVideoElement | null = null;
 
                     if (currentSeg) {
                         if (currentSeg.speaker === config.characters.hostA.name && vHostAs.length > 0) {
@@ -455,6 +532,14 @@ export const BroadcastPlayer: React.FC<BroadcastPlayerProps> = ({
                             0, 0, activeVid.videoWidth, activeVid.videoHeight,
                             centerShift_x, centerShift_y, activeVid.videoWidth * ratio, activeVid.videoHeight * ratio
                         );
+                    } else if (wideImage) {
+                        // Fallback to reference image if no video available
+                        const hRatio = canvas.width / wideImage.width;
+                        const vRatio = canvas.height / wideImage.height;
+                        const ratio = Math.max(hRatio, vRatio);
+                        const centerShift_x = (canvas.width - wideImage.width * ratio) / 2;
+                        const centerShift_y = (canvas.height - wideImage.height * ratio) / 2;
+                        ctx.drawImage(wideImage, centerShift_x, centerShift_y, wideImage.width * ratio, wideImage.height * ratio);
                     } else {
                         ctx.fillStyle = "#111";
                         ctx.fillRect(0, 0, canvas.width, canvas.height);
