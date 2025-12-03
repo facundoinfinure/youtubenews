@@ -424,6 +424,21 @@ export const fetchVideosFromDB = async (channelId: string): Promise<StoredVideo[
 // PRODUCTION PERSISTENCE
 // =============================================================================================
 
+// Helper to convert null to undefined for optional Production fields
+const normalizeProduction = (data: any): Production => ({
+  ...data,
+  script: data.script ?? undefined,
+  viral_hook: data.viral_hook ?? undefined,
+  viral_metadata: data.viral_metadata ?? undefined,
+  segments: data.segments ?? undefined,
+  video_assets: data.video_assets ?? undefined,
+  thumbnail_urls: data.thumbnail_urls ?? undefined,
+  user_id: data.user_id ?? undefined,
+  version: data.version ?? undefined,
+  parent_production_id: data.parent_production_id ?? undefined,
+  completed_at: data.completed_at ?? undefined
+});
+
 export const saveProduction = async (
   production: Partial<Production>,
   userId?: string
@@ -468,7 +483,7 @@ export const saveProduction = async (
       console.error("Error updating production:", error);
       return null;
     }
-    return data as Production;
+    return normalizeProduction(data);
   } else {
     // Create new
     const { data, error } = await supabase
@@ -481,7 +496,7 @@ export const saveProduction = async (
       console.error("Error creating production:", error);
       return null;
     }
-    return data as Production;
+    return normalizeProduction(data);
   }
 };
 
@@ -499,7 +514,7 @@ export const getProductionById = async (id: string): Promise<Production | null> 
     return null;
   }
 
-  return data as Production;
+  return normalizeProduction(data);
 };
 
 export const getIncompleteProductions = async (
@@ -526,7 +541,7 @@ export const getIncompleteProductions = async (
     return [];
   }
 
-  return (data || []) as Production[];
+  return (data || []).map(normalizeProduction);
 };
 
 export const getAllProductions = async (
@@ -554,7 +569,7 @@ export const getAllProductions = async (
     return [];
   }
 
-  return (data || []) as Production[];
+  return (data || []).map(normalizeProduction);
 };
 
 export const updateProductionStatus = async (
@@ -736,12 +751,12 @@ export const createProductionVersion = async (
       news_date: parent.news_date,
       status: 'draft',
       selected_news_ids: parent.selected_news_ids || [],
-      script: parent.script || null,
-      viral_hook: parent.viral_hook || null,
-      viral_metadata: parent.viral_metadata || null,
-      segments: null, // Start fresh for new version
-      video_assets: null,
-      thumbnail_urls: null,
+      script: parent.script || undefined,
+      viral_hook: parent.viral_hook || undefined,
+      viral_metadata: parent.viral_metadata || undefined,
+      segments: undefined, // Start fresh for new version
+      video_assets: undefined,
+      thumbnail_urls: undefined,
       progress_step: 0,
       version: nextVersion,
       parent_production_id: parentProductionId
@@ -771,7 +786,7 @@ export const getProductionVersions = async (
       return [];
     }
 
-    return (data || []) as Production[];
+    return (data || []).map(normalizeProduction);
   } catch (error) {
     console.error("Error in getProductionVersions:", error);
     return [];
@@ -850,15 +865,15 @@ export const importProduction = async (
       news_date: importedData.news_date,
       status: 'draft' as ProductionStatus, // Start as draft for review
       selected_news_ids: importedData.selected_news_ids || [],
-      script: importedData.script || null,
-      viral_hook: importedData.viral_hook || null,
-      viral_metadata: importedData.viral_metadata || null,
-      segments: null, // We'll need to upload audio separately
-      video_assets: importedData.video_assets || null,
-      thumbnail_urls: importedData.thumbnail_urls || null,
+      script: importedData.script || undefined,
+      viral_hook: importedData.viral_hook || undefined,
+      viral_metadata: importedData.viral_metadata || undefined,
+      segments: undefined, // We'll need to upload audio separately
+      video_assets: importedData.video_assets || undefined,
+      thumbnail_urls: importedData.thumbnail_urls || undefined,
       progress_step: importedData.progress_step || 0,
       version: 1, // New production starts at version 1
-      parent_production_id: null // Import creates a new production, not a version
+      parent_production_id: undefined // Import creates a new production, not a version
     };
 
     const savedProduction = await saveProduction(newProduction, userId);
