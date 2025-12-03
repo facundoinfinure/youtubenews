@@ -581,58 +581,6 @@ export const updateProductionStatus = async (
 };
 
 // Cache functions for scripts and audio
-export const findCachedScript = async (
-  newsItems: NewsItem[],
-  channelId: string,
-  config: ChannelConfig
-): Promise<ScriptLine[] | null> => {
-  if (!supabase) return null;
-
-  try {
-    // Create a hash of selected news headlines for matching
-    const newsHash = newsItems
-      .map(n => n.headline)
-      .sort()
-      .join('|');
-    
-    // Search for completed productions with the same news items
-    const { data, error } = await supabase
-      .from('productions')
-      .select('script, selected_news_ids')
-      .eq('channel_id', channelId)
-      .eq('status', 'completed')
-      .not('script', 'is', null)
-      .order('created_at', { ascending: false })
-      .limit(10);
-
-    if (error) {
-      console.error("Error searching for cached script:", error);
-      return null;
-    }
-
-    if (!data || data.length === 0) return null;
-
-    // Find a production with matching news items
-    for (const production of data) {
-      if (production.selected_news_ids && Array.isArray(production.selected_news_ids)) {
-        const productionNewsHash = production.selected_news_ids
-          .sort()
-          .join('|');
-        
-        if (productionNewsHash === newsHash && production.script) {
-          console.log("✅ Found cached script for same news items");
-          return production.script as ScriptLine[];
-        }
-      }
-    }
-
-    return null;
-  } catch (e) {
-    console.error("Error in findCachedScript:", e);
-    return null;
-  }
-};
-
 export const findCachedAudio = async (
   text: string,
   voiceName: string,
