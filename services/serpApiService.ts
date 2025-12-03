@@ -151,6 +151,71 @@ const extractImageKeyword = (headline: string): string => {
 };
 
 /**
+ * Parse publication date from SerpAPI date string
+ * Formats can be: "2 hours ago", "1 day ago", "April 3, 2025", "2025-04-03", etc.
+ * Returns a Date object or null if parsing fails
+ */
+const parsePublicationDate = (dateStr: string | undefined, targetDate: Date): Date | null => {
+  if (!dateStr) return null;
+  
+  try {
+    // Try to parse as relative time (e.g., "2 hours ago", "1 day ago")
+    const relativeMatch = dateStr.match(/(\d+)\s*(hour|hours|day|days|minute|minutes|week|weeks)\s*ago/i);
+    if (relativeMatch) {
+      const amount = parseInt(relativeMatch[1]);
+      const unit = relativeMatch[2].toLowerCase();
+      const now = new Date();
+      const parsed = new Date(now);
+      
+      if (unit.includes('hour') || unit.includes('minute')) {
+        // For hours/minutes, use the target date as reference
+        parsed.setTime(targetDate.getTime());
+        if (unit.includes('hour')) {
+          parsed.setHours(parsed.getHours() - amount);
+        } else {
+          parsed.setMinutes(parsed.getMinutes() - amount);
+        }
+        return parsed;
+      } else if (unit.includes('day')) {
+        parsed.setDate(parsed.getDate() - amount);
+        return parsed;
+      } else if (unit.includes('week')) {
+        parsed.setDate(parsed.getDate() - (amount * 7));
+        return parsed;
+      }
+    }
+    
+    // Try to parse as absolute date (e.g., "April 3, 2025", "2025-04-03")
+    const parsed = new Date(dateStr);
+    if (!isNaN(parsed.getTime())) {
+      return parsed;
+    }
+    
+    // Try common date formats
+    const formats = [
+      /(\w+)\s+(\d+),\s+(\d+)/, // "April 3, 2025"
+      /(\d{4})-(\d{2})-(\d{2})/, // "2025-04-03"
+      /(\d{2})\/(\d{2})\/(\d{4})/, // "04/03/2025"
+    ];
+    
+    for (const format of formats) {
+      const match = dateStr.match(format);
+      if (match) {
+        const parsed = new Date(dateStr);
+        if (!isNaN(parsed.getTime())) {
+          return parsed;
+        }
+      }
+    }
+    
+    return null;
+  } catch (e) {
+    console.warn(`⚠️ Could not parse date: "${dateStr}"`, e);
+    return null;
+  }
+};
+
+/**
  * Fetch economic/political news for a specific date and country
  */
 export const fetchNewsWithSerpAPI = async (
@@ -254,15 +319,45 @@ export const fetchNewsWithSerpAPI = async (
       const viralScores = await calculateViralScoresBatch(itemsForScoring);
       
       // Process and enhance news items with calculated scores
-      const processedNews: NewsItem[] = uniqueNews.map((item, index) => ({
-        headline: item.headline,
-        source: item.source,
-        url: item.url,
-        summary: item.summary,
-        viralScore: viralScores[index] || 50, // Fallback to 50 if score calculation failed
-        imageKeyword: extractImageKeyword(item.headline),
-        imageUrl: item.imageUrl || undefined
-      }));
+      // Filter by publication date to ensure only news from the target date is included
+      const targetDateStr = dateToQuery.toISOString().split('T')[0];
+      const processedNews: NewsItem[] = uniqueNews
+        .map((item, index) => {
+          // Parse publication date
+          const publicationDate = parsePublicationDate(item.date, dateToQuery);
+          
+          return {
+            headline: item.headline,
+            source: item.source,
+            url: item.url,
+            summary: item.summary,
+            viralScore: viralScores[index] || 50, // Fallback to 50 if score calculation failed
+            imageKeyword: extractImageKeyword(item.headline),
+            imageUrl: item.imageUrl || undefined,
+            publicationDate: publicationDate || undefined
+          };
+        })
+        .filter((item) => {
+          // Only include news items that have a publication date matching the target date
+          if (!item.publicationDate) {
+            // If we can't parse the date, include it (backward compatibility)
+            // But log a warning
+            console.warn(`⚠️ News item "${item.headline}" has no parseable publication date, including anyway`);
+            return true;
+          }
+          
+          const pubDate = typeof item.publicationDate === 'string' 
+            ? new Date(item.publicationDate) 
+            : item.publicationDate;
+          const pubDateStr = pubDate.toISOString().split('T')[0];
+          
+          // Include if publication date matches target date
+          const matches = pubDateStr === targetDateStr;
+          if (!matches) {
+            console.log(`⏭️ Filtering out "${item.headline}" - publication date: ${pubDateStr}, target: ${targetDateStr}`);
+          }
+          return matches;
+        });
       
       // Sort by viral score and take top 15
       const sortedNews = processedNews

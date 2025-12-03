@@ -8,6 +8,7 @@ export interface NewsItem {
   viralScore: number;
   imageKeyword: string;
   imageUrl?: string; // Real image URL from Google News
+  publicationDate?: Date | string; // Actual publication date of the news article
 }
 
 export interface ScriptLine {

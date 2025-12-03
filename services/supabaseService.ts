@@ -340,18 +340,36 @@ export const saveNewsToDB = async (newsDate: Date, news: NewsItem[], channelId: 
   }
 
   // Insert new news items
-  const newsRecords = news.map(item => ({
-    news_date: dateStr,
-    channel_id: channelId,
-    headline: item.headline,
-    source: item.source,
-    url: item.url,
-    summary: item.summary,
-    viral_score: item.viralScore,
-    image_keyword: item.imageKeyword,
-    image_url: item.imageUrl || null,
-    selected: false
-  }));
+  const newsRecords = news.map(item => {
+    // Parse publication date from item, fallback to newsDate if not available
+    let publicationDateStr = dateStr; // Default to selected date
+    if (item.publicationDate) {
+      try {
+        const pubDate = typeof item.publicationDate === 'string' 
+          ? new Date(item.publicationDate) 
+          : item.publicationDate;
+        if (!isNaN(pubDate.getTime())) {
+          publicationDateStr = pubDate.toISOString().split('T')[0];
+        }
+      } catch (e) {
+        console.warn(`⚠️ Could not parse publication date for "${item.headline}", using news_date`);
+      }
+    }
+    
+    return {
+      news_date: dateStr,
+      publication_date: publicationDateStr,
+      channel_id: channelId,
+      headline: item.headline,
+      source: item.source,
+      url: item.url,
+      summary: item.summary,
+      viral_score: item.viralScore,
+      image_keyword: item.imageKeyword,
+      image_url: item.imageUrl || null,
+      selected: false
+    };
+  });
 
   // Insert in batches if needed (Supabase has a limit, but 15 items should be fine)
   const { data, error } = await supabase
@@ -375,10 +393,12 @@ export const getNewsByDate = async (newsDate: Date, channelId: string): Promise<
 
   const dateStr = newsDate.toISOString().split('T')[0];
 
+  // First, get all news items for this news_date and channel
+  // We'll filter by publication_date on the client side to ensure accuracy
   const { data, error } = await supabase
     .from('news_items')
     .select('*')
-    .eq('news_date', dateStr)
+    .eq('news_date', dateStr) // Filter by news_date first (for backward compatibility)
     .eq('channel_id', channelId)
     .order('viral_score', { ascending: false })
     .limit(100); // Explicit limit to ensure we get all news (Supabase default is 1000, but being explicit)
@@ -393,9 +413,22 @@ export const getNewsByDate = async (newsDate: Date, channelId: string): Promise<
     return [];
   }
 
-  console.log(`📰 Retrieved ${data.length} news items from database for date ${dateStr}`);
+  // Filter by publication_date to ensure we only get news published on the selected date
+  // This ensures that news articles match the date the user selected, not just when they were saved
+  // For backward compatibility: if publication_date is null, use news_date
+  const filteredData = data.filter((row: any) => {
+    if (row.publication_date) {
+      // If publication_date exists, it must match the target date
+      return row.publication_date === dateStr;
+    } else {
+      // If no publication_date (old records), use news_date
+      return row.news_date === dateStr;
+    }
+  });
+
+  console.log(`📰 Retrieved ${filteredData.length} news items from database for publication date ${dateStr} (filtered from ${data.length} total)`);
   
-  return data.map((row: any) => ({
+  return filteredData.map((row: any) => ({
     id: row.id, // Include UUID from database
     headline: row.headline,
     source: row.source,
@@ -403,7 +436,8 @@ export const getNewsByDate = async (newsDate: Date, channelId: string): Promise<
     summary: row.summary,
     viralScore: row.viral_score,
     imageKeyword: row.image_keyword,
-    imageUrl: row.image_url
+    imageUrl: row.image_url,
+    publicationDate: row.publication_date || row.news_date // Include publication date
   }));
 };
 
