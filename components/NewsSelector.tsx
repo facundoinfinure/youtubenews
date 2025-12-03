@@ -73,7 +73,7 @@ export const NewsSelector: React.FC<NewsSelectorProps> = ({ news, onConfirmSelec
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
+      <div className="space-y-3 mb-8 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
         {news.map((item, idx) => {
           const isSelected = selectedIndices.includes(idx);
           const isUsed = item.id ? usedNewsIds.has(item.id) : false;
@@ -85,57 +85,78 @@ export const NewsSelector: React.FC<NewsSelectorProps> = ({ news, onConfirmSelec
               onClick={() => !isDisabled && toggleSelection(idx)}
               className={`
                 relative rounded-lg overflow-hidden border-2 cursor-pointer transition-all duration-200 group
-                ${isSelected ? 'border-yellow-500 bg-[#1f1f1f] transform scale-[1.02]' : 'border-[#333] bg-[#1a1a1a] hover:border-gray-500'}
+                ${isSelected ? 'border-yellow-500 bg-[#1f1f1f] shadow-lg shadow-yellow-500/20' : 'border-[#333] bg-[#1a1a1a] hover:border-gray-500 hover:bg-[#1f1f1f]'}
                 ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}
                 ${isUsed ? 'border-red-500/50 bg-[#1a0a0a]' : ''}
               `}
             >
-              {/* News Image - use real URL if available, fallback to gradient */}
-              <div className="h-32 w-full bg-gradient-to-br from-gray-800 to-gray-900 relative overflow-hidden">
-                {item.imageUrl ? (
-                  <img
-                    src={item.imageUrl}
-                    alt={item.headline}
-                    className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
-                    loading="lazy"
-                    onError={(e) => {
-                      // Hide broken image and show gradient background
-                      e.currentTarget.style.display = 'none';
-                    }}
-                  />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-gray-600 text-xs">
-                    {item.imageKeyword}
-                  </div>
-                )}
-                <div className="absolute top-2 right-2 bg-black/70 backdrop-blur text-xs font-bold px-2 py-1 rounded text-white flex items-center gap-1">
-                  🔥 {item.viralScore}
-                </div>
-              </div>
-
-              <div className="p-4">
-                <div className="text-xs text-blue-400 font-bold mb-1 uppercase tracking-wider">{item.source}</div>
-                <h3 className="text-sm font-bold text-white leading-tight mb-2 line-clamp-2">{item.headline}</h3>
-                <p className="text-xs text-gray-400 line-clamp-3 mb-3">{item.summary}</p>
-
-                <div className="flex items-center justify-between mt-auto">
-                  {isUsed ? (
-                    <div className="bg-red-500/20 text-red-400 text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1 border border-red-500/50">
-                      ⚠️ ALREADY USED
-                    </div>
-                  ) : isSelected ? (
-                    <div className="bg-yellow-500 text-black text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1">
-                      ✓ SELECTED
-                    </div>
+              <div className="flex gap-4 p-4">
+                {/* News Image - Thumbnail on the left */}
+                <div className="w-36 h-28 bg-gradient-to-br from-gray-800 to-gray-900 relative overflow-hidden rounded-lg flex-shrink-0 border border-[#333]">
+                  {item.imageUrl ? (
+                    <img
+                      src={item.imageUrl}
+                      alt={item.headline}
+                      className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity"
+                      loading="lazy"
+                      onError={(e) => {
+                        // Hide broken image and show gradient background
+                        e.currentTarget.style.display = 'none';
+                      }}
+                    />
                   ) : (
-                    <div className="text-xs text-gray-600 font-medium">Click to Add</div>
+                    <div className="w-full h-full flex items-center justify-center text-gray-500 text-xs px-2 text-center">
+                      {item.imageKeyword}
+                    </div>
                   )}
+                  <div className="absolute top-2 right-2 bg-black/80 backdrop-blur-sm text-xs font-bold px-2 py-1 rounded-md text-yellow-400 flex items-center gap-1 shadow-lg">
+                    🔥 {item.viralScore}
+                  </div>
+                </div>
+
+                {/* Content on the right */}
+                <div className="flex-1 flex flex-col min-w-0 justify-between">
+                  <div>
+                    <div className="flex items-center justify-between gap-3 mb-2">
+                      <div className="text-xs text-blue-400 font-bold uppercase tracking-wider">{item.source}</div>
+                      {isUsed ? (
+                        <div className="bg-red-500/20 text-red-400 text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1 border border-red-500/50 flex-shrink-0">
+                          ⚠️ USED
+                        </div>
+                      ) : isSelected ? (
+                        <div className="bg-yellow-500 text-black text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1 flex-shrink-0">
+                          ✓ SELECTED
+                        </div>
+                      ) : (
+                        <div className="text-xs text-gray-500 font-medium flex-shrink-0">Click to Add</div>
+                      )}
+                    </div>
+                    <h3 className="text-base font-bold text-white leading-tight mb-2 line-clamp-2 group-hover:text-yellow-400 transition-colors">{item.headline}</h3>
+                    <p className="text-sm text-gray-400 line-clamp-3 leading-relaxed">{item.summary}</p>
+                  </div>
                 </div>
               </div>
             </div>
           );
         })}
       </div>
+      
+      <style>{`
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 8px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: #1a1a1a;
+          border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: #444;
+          border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: #555;
+        }
+      `}</style>
 
       <div className="flex justify-center">
         <button
