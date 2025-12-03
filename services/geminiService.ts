@@ -35,6 +35,34 @@ const isWavespeedConfigured = () => {
   return config.configured;
 };
 
+// Helper function to clean and parse JSON from Gemini responses
+// Gemini sometimes returns control characters inside strings which breaks JSON.parse
+const cleanAndParseGeminiJSON = <T>(text: string, fallback: T): T => {
+  // Cleanup markdown code blocks and trim
+  let cleanText = text.replace(/```json\n?/g, "").replace(/```/g, "").trim();
+  
+  // Fix control characters INSIDE JSON string values (common Gemini issue)
+  // This regex finds string content between quotes and escapes control chars
+  cleanText = cleanText.replace(/"([^"\\]*(\\.[^"\\]*)*)"/g, (match) => {
+    return match.replace(/[\x00-\x1F\x7F]/g, (char) => {
+      switch (char) {
+        case '\n': return '\\n';
+        case '\r': return '\\r';
+        case '\t': return '\\t';
+        default: return ''; // Remove other control characters
+      }
+    });
+  });
+
+  try {
+    return JSON.parse(cleanText) as T;
+  } catch (e) {
+    console.error("JSON parsing error:", e);
+    console.error("Cleaned text (first 300 chars):", cleanText.substring(0, 300));
+    throw e;
+  }
+};
+
 // Helper function to create a simple placeholder image as data URI
 const createPlaceholderImage = (width: number = 1024, height: number = 1024): string => {
   if (typeof document === 'undefined') {
@@ -427,15 +455,8 @@ export const generateScript = async (news: NewsItem[], config: ChannelConfig, vi
   CostTracker.track('script', getModelForTask('script'), getCostForTask('script'));
 
   try {
-    const text = response.text || "[]";
-    // Cleanup markdown code blocks and trim
-    const cleanText = text.replace(/```json\n?/g, "").replace(/```/g, "").trim();
-
-    return JSON.parse(cleanText) as ScriptLine[];
+    return cleanAndParseGeminiJSON<ScriptLine[]>(response.text || "[]", []);
   } catch (e) {
-    console.error("Script parsing error", e);
-    const text = response.text || "[]";
-    console.error("Response text (first 200 chars):", text.substring(0, 200));
     throw new Error(`Failed to parse script from Gemini: ${(e as Error).message}`);
   }
 };
@@ -459,7 +480,7 @@ export const fetchTrendingTopics = async (country: string): Promise<string[]> =>
       CostTracker.track('trending', getModelForTask('trending'), getCostForTask('trending'));
 
       try {
-        const topics = JSON.parse(response.text || "[]");
+        const topics = cleanAndParseGeminiJSON<string[]>(response.text || "[]", []);
         return Array.isArray(topics) ? topics : [];
       } catch {
         return [];
@@ -532,7 +553,7 @@ Return JSON: { title, description, tags }
 
       CostTracker.track('metadata', getModelForTask('metadata'), getCostForTask('metadata'));
 
-      const metadata = JSON.parse(response.text || "{}");
+      const metadata = cleanAndParseGeminiJSON<{title?: string; description?: string; tags?: string[]}>(response.text || "{}", {});
 
       // Validate and ensure defaults
       return {
