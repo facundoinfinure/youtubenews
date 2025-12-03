@@ -22,16 +22,17 @@ import {
   pollInfiniteTalkTask,
   getSilentAudioUrl,
   createWavespeedImageTask, 
-  pollWavespeedImageTask 
+  pollWavespeedImageTask,
+  checkWavespeedConfig 
 } from "./wavespeedProxy";
 
 const getApiKey = () => import.meta.env.VITE_GEMINI_API_KEY || window.env?.API_KEY || process.env.API_KEY || "";
-const getWavespeedApiKey = () => import.meta.env.VITE_WAVESPEED_API_KEY || window.env?.WAVESPEED_API_KEY || process.env.WAVESPEED_API_KEY || "";
 const getAiClient = () => new GoogleGenAI({ apiKey: getApiKey() });
 
-// Helper function to check if Wavespeed is configured
+// Helper function to check if Wavespeed is configured (via proxy or direct API key)
 const isWavespeedConfigured = () => {
-  return !!getWavespeedApiKey();
+  const config = checkWavespeedConfig();
+  return config.configured;
 };
 
 // Helper function to create a simple placeholder image as data URI
@@ -699,7 +700,8 @@ export const generateVideoSegmentsWithInfiniteTalk = async (
   }
 
   if (!isWavespeedConfigured()) {
-    console.error(`❌ [InfiniteTalk] WaveSpeed not configured. Set WAVESPEED_API_KEY.`);
+    const configStatus = checkWavespeedConfig();
+    console.error(`❌ [InfiniteTalk] WaveSpeed not configured: ${configStatus.message}`);
     return new Array(segments.length).fill(null);
   }
 
