@@ -3,7 +3,7 @@ export const MODEL_STRATEGY = {
     // Critical tasks - need high quality
     news: "gemini-2.5-flash",           // Needs grounding
     audio: "gemini-2.5-flash-preview-tts", // Quality matters
-    video: "veo-3.1-generate-preview",  // VEO 3.1 - official model name from docs
+    video: "veo-3.1-generate-preview",  // VEO 3.1 - official model name from docs (fallback)
     thumbnail: "imagen-3.0-generate-001", // Quality matters
 
     // Simple tasks - can use cheaper models
@@ -19,6 +19,24 @@ export type TaskType = keyof typeof MODEL_STRATEGY;
 
 export function getModelForTask(task: TaskType): string {
     return MODEL_STRATEGY[task];
+}
+
+export function getWavespeedModel(): string {
+    // Get Wavespeed model from environment variables with fallback
+    try {
+        if (typeof window !== 'undefined' && window.env?.WAVESPEED_MODEL) {
+            return window.env.WAVESPEED_MODEL;
+        }
+        // @ts-ignore - import.meta is available in Vite
+        if (import.meta?.env?.VITE_WAVESPEED_MODEL) {
+            // @ts-ignore
+            return import.meta.env.VITE_WAVESPEED_MODEL;
+        }
+    } catch (e) {
+        // Ignore errors accessing environment variables
+    }
+    // Default Wavespeed model
+    return "wan-i2v-720p";
 }
 
 // Cost estimates per task (in USD)

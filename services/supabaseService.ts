@@ -1,6 +1,6 @@
 
 import { createClient } from '@supabase/supabase-js';
-import { ChannelConfig, StoredVideo, ViralMetadata, NewsItem, Channel } from '../types';
+import { ChannelConfig, StoredVideo, ViralMetadata, NewsItem, Channel, Production, ProductionStatus, ScriptLine, BroadcastSegment, VideoAssets } from '../types';
 
 // Initialize Client with Runtime Fallbacks
 const getSupabaseUrl = () => import.meta.env.VITE_SUPABASE_URL || window.env?.VITE_SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
@@ -223,7 +223,7 @@ export const getNewsByDate = async (newsDate: Date, channelId: string): Promise<
     .select('*')
     .eq('news_date', dateStr)
     .eq('channel_id', channelId)
-    .order('created_at', { ascending: true });
+    .order('viral_score', { ascending: false }); // FIX: Order by viral_score descending
 
   if (error) {
     console.error("Error fetching news:", error);
@@ -266,6 +266,125 @@ export const markNewsAsSelected = async (newsDate: Date, selectedNews: NewsItem[
   }
 };
 
+export const uploadImageToStorage = async (imageDataUrl: string, fileName: string): Promise<string | null> => {
+  if (!supabase) return null;
+
+  try {
+    // Convert data URL to blob
+    const response = await fetch(imageDataUrl);
+    const blob = await response.blob();
+    
+    // Upload to Supabase Storage
+    const fileExt = fileName.split('.').pop() || 'png';
+    const filePath = `channel-images/${fileName}`;
+
+    const { data, error } = await supabase.storage
+      .from('channel-assets') // You may need to create this bucket
+      .upload(filePath, blob, {
+        contentType: blob.type,
+        upsert: true
+      });
+
+    if (error) {
+      console.error("Error uploading image:", error);
+      // Fallback: return data URL if storage upload fails
+      return imageDataUrl;
+    }
+
+    // Get public URL
+    const { data: urlData } = supabase.storage
+      .from('channel-assets')
+      .getPublicUrl(filePath);
+
+    return urlData.publicUrl;
+  } catch (e) {
+    console.error("Error processing image upload:", e);
+    // Fallback: return data URL
+    return imageDataUrl;
+  }
+};
+
+export const uploadAudioToStorage = async (
+  audioBase64: string,
+  productionId: string,
+  segmentIndex: number
+): Promise<string | null> => {
+  if (!supabase) return null;
+
+  try {
+    // Convert base64 to blob
+    const base64Data = audioBase64.split(',')[1] || audioBase64;
+    const byteCharacters = atob(base64Data);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    const blob = new Blob([byteArray], { type: 'audio/mpeg' });
+
+    // Upload to Supabase Storage
+    const fileName = `productions/${productionId}/audio/segment-${segmentIndex}.mp3`;
+    const { data, error } = await supabase.storage
+      .from('channel-assets')
+      .upload(fileName, blob, {
+        contentType: 'audio/mpeg',
+        upsert: true
+      });
+
+    if (error) {
+      console.error("Error uploading audio:", error);
+      return null;
+    }
+
+    // Get public URL
+    const { data: urlData } = supabase.storage
+      .from('channel-assets')
+      .getPublicUrl(data.path);
+
+    return urlData.publicUrl;
+  } catch (e) {
+    console.error("Error processing audio upload:", e);
+    return null;
+  }
+};
+
+export const getAudioFromStorage = async (audioUrl: string): Promise<string | null> => {
+  if (!supabase) return null;
+
+  try {
+    // Extract path from URL
+    const urlParts = audioUrl.split('/');
+    const pathIndex = urlParts.findIndex(part => part === 'channel-assets');
+    if (pathIndex === -1) return null;
+
+    const path = urlParts.slice(pathIndex + 1).join('/');
+    
+    // Download from Storage
+    const { data, error } = await supabase.storage
+      .from('channel-assets')
+      .download(path);
+
+    if (error) {
+      console.error("Error downloading audio:", error);
+      return null;
+    }
+
+    // Convert blob to base64
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64 = reader.result as string;
+        resolve(base64);
+      };
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(data);
+    });
+  } catch (e) {
+    console.error("Error processing audio download:", e);
+    return null;
+  }
+};
+
 export const fetchVideosFromDB = async (channelId: string): Promise<StoredVideo[]> => {
   if (!supabase) {
     return [];
@@ -299,4 +418,164 @@ export const fetchVideosFromDB = async (channelId: string): Promise<StoredVideo[
       retentionData: row.retention_data || []
     }
   }));
+};
+
+// =============================================================================================
+// PRODUCTION PERSISTENCE
+// =============================================================================================
+
+export const saveProduction = async (
+  production: Partial<Production>,
+  userId?: string
+): Promise<Production | null> => {
+  if (!supabase) return null;
+
+  // Prepare segments without audioBase64 for storage
+  const segmentsForStorage = production.segments?.map(seg => ({
+    speaker: seg.speaker,
+    text: seg.text,
+    videoUrl: seg.videoUrl
+    // audioBase64 is NOT stored in DB, only in Storage
+  }));
+
+  const productionData: any = {
+    channel_id: production.channel_id,
+    news_date: production.news_date,
+    status: production.status || 'draft',
+    selected_news_ids: production.selected_news_ids || [],
+    script: production.script || null,
+    viral_hook: production.viral_hook || null,
+    viral_metadata: production.viral_metadata || null,
+    segments: segmentsForStorage || null,
+    video_assets: production.video_assets || null,
+    thumbnail_urls: production.thumbnail_urls || null,
+    progress_step: production.progress_step || 0,
+    user_id: userId || null
+  };
+
+  if (production.id) {
+    // Update existing
+    const { data, error } = await supabase
+      .from('productions')
+      .update(productionData)
+      .eq('id', production.id)
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Error updating production:", error);
+      return null;
+    }
+    return data as Production;
+  } else {
+    // Create new
+    const { data, error } = await supabase
+      .from('productions')
+      .insert(productionData)
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Error creating production:", error);
+      return null;
+    }
+    return data as Production;
+  }
+};
+
+export const getProductionById = async (id: string): Promise<Production | null> => {
+  if (!supabase) return null;
+
+  const { data, error } = await supabase
+    .from('productions')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (error) {
+    console.error("Error fetching production:", error);
+    return null;
+  }
+
+  return data as Production;
+};
+
+export const getIncompleteProductions = async (
+  channelId: string,
+  userId?: string
+): Promise<Production[]> => {
+  if (!supabase) return [];
+
+  let query = supabase
+    .from('productions')
+    .select('*')
+    .eq('channel_id', channelId)
+    .in('status', ['draft', 'in_progress'])
+    .order('updated_at', { ascending: false });
+
+  if (userId) {
+    query = query.eq('user_id', userId);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error("Error fetching incomplete productions:", error);
+    return [];
+  }
+
+  return (data || []) as Production[];
+};
+
+export const getAllProductions = async (
+  channelId: string,
+  userId?: string,
+  limit: number = 50
+): Promise<Production[]> => {
+  if (!supabase) return [];
+
+  let query = supabase
+    .from('productions')
+    .select('*')
+    .eq('channel_id', channelId)
+    .order('updated_at', { ascending: false })
+    .limit(limit);
+
+  if (userId) {
+    query = query.eq('user_id', userId);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error("Error fetching productions:", error);
+    return [];
+  }
+
+  return (data || []) as Production[];
+};
+
+export const updateProductionStatus = async (
+  id: string,
+  status: ProductionStatus,
+  completedAt?: Date
+): Promise<boolean> => {
+  if (!supabase) return false;
+
+  const updateData: any = { status };
+  if (completedAt) {
+    updateData.completed_at = completedAt.toISOString();
+  }
+
+  const { error } = await supabase
+    .from('productions')
+    .update(updateData)
+    .eq('id', id);
+
+  if (error) {
+    console.error("Error updating production status:", error);
+    return false;
+  }
+
+  return true;
 };

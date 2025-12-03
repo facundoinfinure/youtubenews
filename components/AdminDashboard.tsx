@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
-import { ChannelConfig, CharacterProfile, StoredVideo, Channel } from '../types';
-import { fetchVideosFromDB, saveConfigToDB, getAllChannels, saveChannel } from '../services/supabaseService';
+import { ChannelConfig, CharacterProfile, StoredVideo, Channel, UserProfile, Production } from '../types';
+import { fetchVideosFromDB, saveConfigToDB, getAllChannels, saveChannel, uploadImageToStorage, getIncompleteProductions } from '../services/supabaseService';
+import { generateReferenceImage } from '../services/geminiService';
 import { CostTracker } from '../services/CostTracker';
 import { ContentCache } from '../services/ContentCache';
 import { VideoListSkeleton, AnalyticsCardSkeleton, EmptyState } from './LoadingStates';
@@ -14,6 +15,8 @@ interface AdminDashboardProps {
   channels: Channel[];
   onChannelChange: (channel: Channel) => void;
   onDeleteVideo: (videoId: string, youtubeId: string | null) => Promise<void>;
+  onResumeProduction?: (production: Production) => Promise<void>;
+  user: UserProfile | null;
 }
 
 const CharacterEditor: React.FC<{
@@ -109,12 +112,20 @@ const RetentionChart: React.FC<{ data: number[], color: string }> = ({ data, col
   );
 };
 
-export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdateConfig, onExit, activeChannel, channels, onChannelChange, onDeleteVideo }) => {
+export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdateConfig, onExit, activeChannel, channels, onChannelChange, onDeleteVideo, onResumeProduction, user }) => {
   const [tempConfig, setTempConfig] = useState<ChannelConfig>(config);
-  const [activeTab, setActiveTab] = useState<'insights' | 'settings' | 'costs' | 'cache'>('insights');
+  const [activeTab, setActiveTab] = useState<'insights' | 'settings' | 'costs' | 'cache' | 'productions'>('insights');
   const [videos, setVideos] = useState<StoredVideo[]>([]);
   const [selectedVideo, setSelectedVideo] = useState<StoredVideo | null>(null);
   const [isLoadingVideos, setIsLoadingVideos] = useState(false);
+  const [productions, setProductions] = useState<Production[]>([]);
+  const [isLoadingProductions, setIsLoadingProductions] = useState(false);
+  const [showNewChannelModal, setShowNewChannelModal] = useState(false);
+  const [newChannelName, setNewChannelName] = useState('');
+  const [sceneDescription, setSceneDescription] = useState('');
+  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Sync tempConfig when config changes (e.g., when switching channels)
   useEffect(() => {
@@ -128,7 +139,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
         .then(setVideos)
         .finally(() => setIsLoadingVideos(false));
     }
-  }, [activeTab, activeChannel]);
+    if (activeTab === 'productions' && activeChannel && user) {
+      setIsLoadingProductions(true);
+      getIncompleteProductions(activeChannel.id, user.email)
+        .then(setProductions)
+        .finally(() => setIsLoadingProductions(false));
+    }
+  }, [activeTab, activeChannel, user]);
 
   const handleSave = async () => {
     if (!activeChannel) return;
@@ -141,20 +158,94 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
     toast.success('Configuration saved & synced to database!');
   };
 
+  const handleGenerateReferenceImage = async () => {
+    setIsGeneratingImage(true);
+    try {
+      const imageUrl = await generateReferenceImage(tempConfig, sceneDescription);
+      if (imageUrl) {
+        // Upload to storage and get permanent URL
+        setIsUploadingImage(true);
+        const fileName = `${newChannelName.trim() || activeChannel?.name || 'channel'}-reference-${Date.now()}.png`;
+        const permanentUrl = await uploadImageToStorage(imageUrl, fileName);
+        
+        if (permanentUrl) {
+          setTempConfig({ ...tempConfig, referenceImageUrl: permanentUrl });
+          toast.success('Imagen de referencia generada exitosamente!');
+        } else {
+          // Fallback to data URL if upload fails
+          setTempConfig({ ...tempConfig, referenceImageUrl: imageUrl });
+          toast.success('Imagen generada (usando URL temporal)');
+        }
+      } else {
+        toast.error('No se pudo generar la imagen');
+      }
+    } catch (error) {
+      toast.error(`Error generando imagen: ${(error as Error).message}`);
+    } finally {
+      setIsGeneratingImage(false);
+      setIsUploadingImage(false);
+    }
+  };
+
+  const handleUploadReferenceImage = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      toast.error('Por favor selecciona un archivo de imagen');
+      return;
+    }
+
+    setIsUploadingImage(true);
+    try {
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+        const dataUrl = reader.result as string;
+        const fileName = `${newChannelName.trim() || activeChannel?.name || 'channel'}-reference-${Date.now()}.${file.name.split('.').pop()}`;
+        const permanentUrl = await uploadImageToStorage(dataUrl, fileName);
+        
+        if (permanentUrl) {
+          setTempConfig({ ...tempConfig, referenceImageUrl: permanentUrl });
+          toast.success('Imagen cargada exitosamente!');
+        } else {
+          setTempConfig({ ...tempConfig, referenceImageUrl: dataUrl });
+          toast.success('Imagen cargada (usando URL temporal)');
+        }
+        setIsUploadingImage(false);
+      };
+      reader.readAsDataURL(file);
+    } catch (error) {
+      toast.error(`Error cargando imagen: ${(error as Error).message}`);
+      setIsUploadingImage(false);
+    }
+  };
+
   const handleNewChannel = async () => {
-    const name = prompt("Enter new channel name:");
-    if (!name) return;
+    if (!newChannelName.trim()) {
+      toast.error('Please enter a channel name');
+      return;
+    }
 
     const newChannel: Partial<Channel> = {
-      name,
+      name: newChannelName.trim(),
       config: tempConfig,
       active: true
     };
 
-    const created = await saveChannel(newChannel);
-    if (created) {
-      toast.success(`Channel "${name}" created!`);
-      window.location.reload(); // Reload to fetch new channels
+    try {
+      const created = await saveChannel(newChannel);
+      if (created) {
+        toast.success(`Channel "${newChannelName}" created!`);
+        setShowNewChannelModal(false);
+        setNewChannelName('');
+        setSceneDescription('');
+        // Reload to fetch new channels
+        window.location.reload();
+      } else {
+        toast.error('Failed to create channel');
+      }
+    } catch (error) {
+      toast.error(`Error creating channel: ${(error as Error).message}`);
     }
   };
 
@@ -176,16 +267,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                 value={activeChannel?.id || ''}
                 onChange={(e) => {
                   const selected = channels.find(c => c.id === e.target.value);
-                  if (selected) onChannelChange(selected);
+                  if (selected) {
+                    onChannelChange(selected);
+                  }
                 }}
                 className="bg-[#1a1a1a] border border-[#333] rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors duration-200 cursor-pointer hover:border-[#555]"
+                disabled={channels.length === 0}
               >
-                {channels.map(ch => (
-                  <option key={ch.id} value={ch.id}>{ch.name}</option>
-                ))}
+                {channels.length === 0 ? (
+                  <option value="">No channels available</option>
+                ) : (
+                  channels.map(ch => (
+                    <option key={ch.id} value={ch.id}>{ch.name}</option>
+                  ))
+                )}
               </select>
               <button
-                onClick={handleNewChannel}
+                onClick={() => setShowNewChannelModal(true)}
                 className="bg-green-600 hover:bg-green-500 px-3 py-1.5 rounded-lg text-sm font-bold transition-all duration-200 hover:scale-105 active:scale-95"
               >
                 + New Channel
@@ -225,6 +323,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
               }`}
           >
             Production Settings
+          </button>
+          <button
+            onClick={() => setActiveTab('productions')}
+            className={`pb-3 px-2 border-b-2 font-semibold text-sm transition-all duration-200 ${activeTab === 'productions'
+              ? 'border-blue-500 text-white'
+              : 'border-transparent text-gray-500 hover:text-gray-300'
+              }`}
+          >
+            Productions {productions.length > 0 && `(${productions.length})`}
           </button>
         </div>
 
@@ -350,18 +457,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                           try {
                             console.log(`[ADMIN] Deleting video: ${selectedVideo.id}`);
                             await onDeleteVideo(selectedVideo.id, selectedVideo.youtube_id);
-                            console.log(`[ADMIN] Delete successful, clearing selection`);
-                            setSelectedVideo(null);
+                            console.log(`[ADMIN] Delete successful`);
 
                             // RE-FETCH videos after deletion
                             if (activeChannel) {
                               // Optimistic update: Remove from UI immediately
                               setVideos(prev => prev.filter(v => v.id !== selectedVideo.id));
+                              setSelectedVideo(null); // Clear selection after deletion
 
                               console.log(`[ADMIN] Re-fetching videos for channel: ${activeChannel.id}`);
-                              const refreshedVideos = await fetchVideosFromDB(activeChannel.id);
-                              console.log(`[ADMIN] Fetched ${refreshedVideos.length} videos`);
-                              setVideos(refreshedVideos);
+                              try {
+                                const refreshedVideos = await fetchVideosFromDB(activeChannel.id);
+                                console.log(`[ADMIN] Fetched ${refreshedVideos.length} videos`);
+                                setVideos(refreshedVideos);
+                              } catch (error) {
+                                console.error('[ADMIN] Error refreshing videos:', error);
+                                // Keep the optimistic update even if refresh fails
+                              }
                             }
                           } catch (error) {
                             console.error(`[ADMIN] Delete failed:`, error);
@@ -490,9 +602,269 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
               />
             </div>
 
+            {/* Reference Image Section */}
+            <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
+              <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+                <span className="text-purple-500">🖼️</span> Imagen de Referencia del Escenario
+              </h3>
+              <p className="text-sm text-gray-400 mb-4">
+                Esta imagen se usará como referencia para mantener coherencia visual en todas las generaciones de video. 
+                Debe mostrar el escenario completo con ambos personajes.
+              </p>
+
+              {/* Current Image Preview */}
+              {tempConfig.referenceImageUrl && (
+                <div className="mb-4">
+                  <label className="text-sm text-gray-400 block mb-2">Imagen Actual:</label>
+                  <div className="relative inline-block">
+                    <img 
+                      src={tempConfig.referenceImageUrl} 
+                      alt="Reference scene" 
+                      className="max-w-full h-auto rounded-lg border border-[#333] max-h-64"
+                    />
+                    <button
+                      onClick={() => setTempConfig({ ...tempConfig, referenceImageUrl: undefined })}
+                      className="absolute top-2 right-2 bg-red-600 hover:bg-red-700 text-white rounded-full w-8 h-8 flex items-center justify-center text-sm"
+                    >
+                      ×
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Generate Image */}
+              <div className="space-y-4">
+                <div>
+                  <label className="text-sm text-gray-400 block mb-2">
+                    Descripción del Escenario (opcional):
+                  </label>
+                  <textarea
+                    value={sceneDescription}
+                    onChange={(e) => setSceneDescription(e.target.value)}
+                    placeholder="Ej: Estudio de noticias moderno con paredes de madera, iluminación profesional, micrófonos y pantallas..."
+                    className="w-full bg-[#111] border border-[#333] p-2 rounded text-white h-24"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Si no proporcionas una descripción, se generará basándose en la configuración del canal.
+                  </p>
+                </div>
+
+                <div className="flex gap-3">
+                  <button
+                    onClick={handleGenerateReferenceImage}
+                    disabled={isGeneratingImage || isUploadingImage}
+                    className="flex-1 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 rounded text-white font-bold transition-all"
+                  >
+                    {isGeneratingImage ? 'Generando...' : '🎨 Generar Imagen con IA'}
+                  </button>
+                  
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isGeneratingImage || isUploadingImage}
+                    className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 rounded text-white font-bold transition-all"
+                  >
+                    {isUploadingImage ? 'Subiendo...' : '📤 Cargar Imagen'}
+                  </button>
+                  
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleUploadReferenceImage}
+                    className="hidden"
+                  />
+                </div>
+              </div>
+            </div>
+
+          </div>
+        )}
+
+        {/* PRODUCTIONS TAB */}
+        {activeTab === 'productions' && (
+          <div className="space-y-6">
+            <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
+              <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+                <span>📦</span>
+                <span>Incomplete Productions</span>
+              </h3>
+              <p className="text-gray-400 text-sm mb-6">
+                Resume productions that were abandoned or are still in progress.
+              </p>
+
+              {isLoadingProductions ? (
+                <div className="space-y-3">
+                  {[1, 2, 3].map(i => (
+                    <div key={i} className="bg-[#111] p-4 rounded-lg border border-[#333] animate-pulse">
+                      <div className="h-4 bg-gray-800 rounded w-3/4 mb-2"></div>
+                      <div className="h-3 bg-gray-800 rounded w-1/2"></div>
+                    </div>
+                  ))}
+                </div>
+              ) : productions.length === 0 ? (
+                <EmptyState
+                  icon="✅"
+                  title="No Incomplete Productions"
+                  description="All productions have been completed. Start a new production to create content."
+                />
+              ) : (
+                <div className="space-y-3">
+                  {productions.map((production) => (
+                    <div
+                      key={production.id}
+                      className="bg-[#111] p-4 rounded-lg border border-[#333] hover:border-blue-500 transition-colors"
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className={`px-2 py-1 rounded text-xs font-bold ${
+                              production.status === 'in_progress' 
+                                ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
+                                : 'bg-gray-500/20 text-gray-400 border border-gray-500/30'
+                            }`}>
+                              {production.status === 'in_progress' ? '🔄 In Progress' : '📝 Draft'}
+                            </span>
+                            <span className="text-gray-500 text-xs">
+                              {new Date(production.news_date).toLocaleDateString()}
+                            </span>
+                          </div>
+                          <div className="text-sm text-gray-300 mb-2">
+                            Progress: Step {production.progress_step} of 6
+                          </div>
+                          {production.viral_metadata && (
+                            <div className="text-xs text-gray-400 mb-2">
+                              Title: {production.viral_metadata.title}
+                            </div>
+                          )}
+                          {production.script && (
+                            <div className="text-xs text-gray-500">
+                              Script: {production.script.length} lines
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex gap-2">
+                          {onResumeProduction && (
+                            <button
+                              onClick={() => {
+                                onResumeProduction(production);
+                                onExit(); // Exit dashboard to show production
+                              }}
+                              className="bg-blue-600 text-white border border-blue-500 hover:bg-blue-700 px-4 py-2 rounded-lg text-sm font-bold transition-all duration-200 hover:scale-105 active:scale-95"
+                            >
+                              ▶️ Resume
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
+
+      {/* New Channel Modal */}
+      {showNewChannelModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 overflow-y-auto p-4">
+          <div className="bg-[#1a1a1a] border border-[#333] rounded-xl p-6 max-w-2xl w-full mx-4 my-8">
+            <h3 className="text-xl font-bold mb-4">Create New Channel</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm text-gray-400 block mb-1">Channel Name</label>
+                <input
+                  type="text"
+                  value={newChannelName}
+                  onChange={(e) => setNewChannelName(e.target.value)}
+                  className="w-full bg-[#111] border border-[#333] p-2 rounded text-white focus:outline-none focus:border-blue-500"
+                  placeholder="Enter channel name..."
+                  autoFocus
+                />
+              </div>
+
+              {/* Reference Image Section in Modal */}
+              <div className="border-t border-[#333] pt-4">
+                <h4 className="text-sm font-bold mb-2 text-purple-400">🖼️ Imagen de Referencia (Opcional)</h4>
+                <p className="text-xs text-gray-500 mb-3">
+                  Crea o carga una imagen del escenario con los personajes para mantener coherencia visual.
+                </p>
+
+                {/* Current Image Preview */}
+                {tempConfig.referenceImageUrl && (
+                  <div className="mb-3">
+                    <img 
+                      src={tempConfig.referenceImageUrl} 
+                      alt="Reference scene" 
+                      className="max-w-full h-auto rounded-lg border border-[#333] max-h-48"
+                    />
+                  </div>
+                )}
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1">
+                      Descripción del Escenario (opcional):
+                    </label>
+                    <textarea
+                      value={sceneDescription}
+                      onChange={(e) => setSceneDescription(e.target.value)}
+                      placeholder="Ej: Estudio moderno con paredes de madera, iluminación profesional..."
+                      className="w-full bg-[#111] border border-[#333] p-2 rounded text-white text-sm h-20"
+                    />
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleGenerateReferenceImage}
+                      disabled={isGeneratingImage || isUploadingImage}
+                      className="flex-1 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed px-3 py-2 rounded text-sm font-bold transition-all"
+                    >
+                      {isGeneratingImage ? 'Generando...' : '🎨 Generar con IA'}
+                    </button>
+                    
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={isGeneratingImage || isUploadingImage}
+                      className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed px-3 py-2 rounded text-sm font-bold transition-all"
+                    >
+                      {isUploadingImage ? 'Subiendo...' : '📤 Cargar'}
+                    </button>
+                    
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleUploadReferenceImage}
+                      className="hidden"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-3 justify-end pt-4 border-t border-[#333]">
+                <button
+                  onClick={() => {
+                    setShowNewChannelModal(false);
+                    setNewChannelName('');
+                    setSceneDescription('');
+                  }}
+                  className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleNewChannel}
+                  disabled={!newChannelName.trim()}
+                  className="px-4 py-2 bg-green-600 hover:bg-green-500 rounded text-sm font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Create Channel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

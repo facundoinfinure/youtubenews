@@ -2,11 +2,84 @@ import { GoogleGenAI, Modality } from "@google/genai";
 import { NewsItem, ScriptLine, BroadcastSegment, VideoAssets, ViralMetadata, ChannelConfig } from "../types";
 import { ContentCache } from "./ContentCache";
 import { retryWithBackoff } from "./retryUtils";
-import { getModelForTask, getCostForTask } from "./modelStrategy";
+import { getModelForTask, getCostForTask, getWavespeedModel } from "./modelStrategy";
 import { CostTracker } from "./CostTracker";
 
 const getApiKey = () => import.meta.env.VITE_GEMINI_API_KEY || window.env?.API_KEY || process.env.API_KEY || "";
+const getWavespeedApiKey = () => import.meta.env.VITE_WAVESPEED_API_KEY || window.env?.WAVESPEED_API_KEY || process.env.WAVESPEED_API_KEY || "";
 const getAiClient = () => new GoogleGenAI({ apiKey: getApiKey() });
+
+// Helper function to check if Wavespeed should be used
+const shouldUseWavespeed = () => {
+  return !!getWavespeedApiKey();
+};
+
+// Wavespeed API helper functions
+const createWavespeedTask = async (prompt: string, aspectRatio: '16:9' | '9:16'): Promise<string> => {
+  const apiKey = getWavespeedApiKey();
+  if (!apiKey) throw new Error("Wavespeed API key not configured");
+
+  const model = getWavespeedModel();
+  const wavespeedApiUrl = "https://api.wavespeed.ai/v1/tasks";
+
+  const response = await fetch(wavespeedApiUrl, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model: model,
+      prompt: prompt,
+      aspect_ratio: aspectRatio === '9:16' ? '9:16' : '16:9',
+      // Add other Wavespeed-specific parameters as needed
+    })
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Wavespeed API error: ${response.status} - ${errorText}`);
+  }
+
+  const data = await response.json();
+  return data.task_id; // Wavespeed returns a task ID
+};
+
+const pollWavespeedTask = async (taskId: string): Promise<string> => {
+  const apiKey = getWavespeedApiKey();
+  if (!apiKey) throw new Error("Wavespeed API key not configured");
+
+  const wavespeedApiUrl = `https://api.wavespeed.ai/v1/tasks/${taskId}`;
+  let retries = 0;
+  const maxRetries = 60; // 5 minutes max
+
+  while (retries < maxRetries) {
+    await new Promise(resolve => setTimeout(resolve, 5000));
+
+    const response = await fetch(wavespeedApiUrl, {
+      method: "GET",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`Wavespeed polling error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    
+    if (data.status === "completed" && data.result?.video_url) {
+      return data.result.video_url;
+    } else if (data.status === "failed") {
+      throw new Error(`Wavespeed task failed: ${data.error || "Unknown error"}`);
+    }
+
+    retries++;
+  }
+
+  throw new Error("Wavespeed video generation timed out");
+};
 
 export const fetchEconomicNews = async (targetDate: Date | undefined, config: ChannelConfig): Promise<NewsItem[]> => {
   // Use caching for same-day news
@@ -380,6 +453,10 @@ export const generateVideoSegments = async (
       : config.characters.hostB;
 
     // LIP-SYNC PROMPT: Explicitly include the text to be spoken
+    const referenceImageContext = config.referenceImageUrl 
+      ? `\nREFERENCE IMAGE: Match the exact visual style, setting, character appearance, and composition from the reference image. Maintain consistency with the reference scene.\n` 
+      : '';
+
     const prompt = `
   Cinematic news shot of ${character.name} speaking.
   Visual Description: ${character.visualPrompt}
@@ -388,24 +465,34 @@ export const generateVideoSegments = async (
   Emotion/Tone: ${config.tone}
   Setting: Professional news studio, ${config.format} format.
   Lighting: Studio lighting, high quality.
+  ${referenceImageContext}
     `.trim();
 
     return retryWithBackoff(async () => {
       try {
-        // CORRECT METHOD: Use generateVideos() for VEO, not generateContent()
-        const operation = await ai.models.generateVideos({
-          model: getModelForTask('video'),
-          prompt: prompt,
-          config: {
-            aspectRatio: config.format === '9:16' ? '9:16' : '16:9'
+        // Use Wavespeed if API key is available, otherwise fallback to VEO
+        if (shouldUseWavespeed()) {
+          console.log(`[Wavespeed] Generating video for segment ${index} using model: ${getWavespeedModel()}`);
+          const taskId = await createWavespeedTask(prompt, config.format);
+          const videoUrl = await pollWavespeedTask(taskId);
+          CostTracker.track('video', getWavespeedModel(), getCostForTask('video'));
+          return videoUrl;
+        } else {
+          // Fallback to VEO
+          const operation = await ai.models.generateVideos({
+            model: getModelForTask('video'),
+            prompt: prompt,
+            config: {
+              aspectRatio: config.format === '9:16' ? '9:16' : '16:9'
+            }
+          });
+
+          CostTracker.track('video', getModelForTask('video'), getCostForTask('video'));
+
+          // VEO returns an async operation that needs polling
+          if (operation) {
+            return await pollForVideo(operation);
           }
-        });
-
-        CostTracker.track('video', getModelForTask('video'), getCostForTask('video'));
-
-        // VEO returns an async operation that needs polling
-        if (operation) {
-          return await pollForVideo(operation);
         }
 
         return null;
@@ -430,12 +517,17 @@ export const generateBroadcastVisuals = async (
     .map(s => `${s.speaker}: ${s.text}`)
     .join('\n');
 
+  // Build prompt with reference image context if available
+  const referenceImageContext = config.referenceImageUrl 
+    ? `\nREFERENCE IMAGE: Use the provided reference image to maintain visual consistency. Match the exact setting, character appearances, lighting, and composition from the reference image.\n` 
+    : '';
+
   const prompt = `
 Create a professional ${config.format} news broadcast video.
  
 CHANNEL: ${config.channelName}
 TOPIC: ${newsContext}
- 
+${referenceImageContext}
 CHARACTERS (maintain visual consistency):
 - ${config.characters.hostA.name}: ${config.characters.hostA.visualPrompt}
 - ${config.characters.hostB.name}: ${config.characters.hostB.visualPrompt}
@@ -450,33 +542,45 @@ QUALITY: High definition, stable camera, good lighting
 
   return retryWithBackoff(async () => {
     try {
-      // CORRECT METHOD: Use generateVideos() for VEO
-      const operation = await ai.models.generateVideos({
-        model: getModelForTask('video'),
-        prompt: prompt,
-        config: {
-          aspectRatio: config.format === '9:16' ? '9:16' : '16:9'
-        }
-      });
-
-      CostTracker.track('video', getModelForTask('video'), getCostForTask('video'));
-
-      // Poll for video completion
-      if (operation) {
-        const videoUri = await pollForVideo(operation);
+      // Use Wavespeed if API key is available, otherwise fallback to VEO
+      if (shouldUseWavespeed()) {
+        console.log(`[Wavespeed] Generating broadcast video using model: ${getWavespeedModel()}`);
+        const taskId = await createWavespeedTask(prompt, config.format);
+        const videoUrl = await pollWavespeedTask(taskId);
+        CostTracker.track('video', getWavespeedModel(), getCostForTask('video'));
         return {
-          wide: videoUri,
+          wide: videoUrl,
           hostA: [],
           hostB: []
         };
+      } else {
+        // Fallback to VEO
+        const operation = await ai.models.generateVideos({
+          model: getModelForTask('video'),
+          prompt: prompt,
+          config: {
+            aspectRatio: config.format === '9:16' ? '9:16' : '16:9'
+          }
+        });
+
+        CostTracker.track('video', getModelForTask('video'), getCostForTask('video'));
+
+        // Poll for video completion
+        if (operation) {
+          const videoUri = await pollForVideo(operation);
+          return {
+            wide: videoUri,
+            hostA: [],
+            hostB: []
+          };
+        }
+
+        throw new Error('No operation returned from VEO');
       }
-
-      throw new Error('No operation returned from VEO');
-
     } catch (e) {
-      console.error("VEO3 generation failed", e);
+      console.error("Video generation failed", e);
       // Fallback to placeholder for now
-      console.warn("Using placeholder video - VEO3 generation failed");
+      console.warn("Using placeholder video - video generation failed");
       return {
         wide: "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
         hostA: [],
@@ -488,6 +592,59 @@ QUALITY: High definition, stable camera, good lighting
     baseDelay: 5000,
     onRetry: (attempt) => console.log(`🎬 Retrying video generation (${attempt}/2)...`)
   });
+};
+
+export const generateReferenceImage = async (
+  config: ChannelConfig,
+  sceneDescription?: string
+): Promise<string | null> => {
+  const ai = getAiClient();
+
+  // Build comprehensive prompt based on channel config and optional scene description
+  const defaultScene = sceneDescription || `Professional news studio setting with ${config.tone} atmosphere`;
+  
+  const prompt = `
+Create a high-quality reference image for a news broadcast studio.
+
+CHANNEL: ${config.channelName}
+TAGLINE: ${config.tagline}
+STYLE: ${config.tone}
+
+CHARACTERS TO INCLUDE:
+- ${config.characters.hostA.name}: ${config.characters.hostA.visualPrompt}
+- ${config.characters.hostB.name}: ${config.characters.hostB.visualPrompt}
+
+SCENE DESCRIPTION: ${defaultScene}
+- Both characters should be visible in the scene
+- Professional news studio setting
+- ${config.format} aspect ratio
+- Studio lighting, high quality
+- Show the complete setting including background, furniture, equipment
+- Maintain visual consistency for future video generation
+
+IMPORTANT: This image will be used as a reference for maintaining visual consistency across all video generations. Ensure both characters are clearly visible and the scene is well-composed.
+`.trim();
+
+  try {
+    const response = await ai.models.generateContent({
+      model: getModelForTask('thumbnail'),
+      contents: prompt,
+      config: {
+        responseModalities: ["IMAGE" as any],
+      }
+    });
+
+    CostTracker.track('thumbnail', getModelForTask('thumbnail'), getCostForTask('thumbnail'));
+
+    const imageBase64 = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+    if (imageBase64) {
+      return `data:image/png;base64,${imageBase64}`;
+    }
+    return null;
+  } catch (e) {
+    console.error("Reference image generation failed", e);
+    return null;
+  }
 };
 
 export const generateThumbnail = async (newsContext: string, config: ChannelConfig): Promise<string | null> => {

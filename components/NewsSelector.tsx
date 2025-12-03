@@ -11,6 +11,11 @@ interface NewsSelectorProps {
 export const NewsSelector: React.FC<NewsSelectorProps> = ({ news, onConfirmSelection, date }) => {
   const [selectedIndices, setSelectedIndices] = useState<number[]>([]);
 
+  // Reset selection when news changes
+  React.useEffect(() => {
+    setSelectedIndices([]);
+  }, [news]);
+
   const toggleSelection = (index: number) => {
     if (selectedIndices.includes(index)) {
       setSelectedIndices(selectedIndices.filter(i => i !== index));
@@ -27,6 +32,16 @@ export const NewsSelector: React.FC<NewsSelectorProps> = ({ news, onConfirmSelec
       onConfirmSelection(selectedItems);
     }
   };
+
+  if (!news || news.length === 0) {
+    return (
+      <div className="w-full bg-[#121212] rounded-xl p-6 shadow-2xl border border-[#333] text-center">
+        <div className="text-6xl mb-4">📰</div>
+        <h2 className="text-2xl font-bold text-white mb-2">No News Available</h2>
+        <p className="text-gray-400">No news stories found for {date.toLocaleDateString()}.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full bg-[#121212] rounded-xl p-6 shadow-2xl border border-[#333]">

@@ -5,5 +5,7 @@ window.env = {
   googlecloud_clientid: "",
   VITE_SUPABASE_URL: "",
   VITE_SUPABASE_ANON_KEY: "",
-  ADMIN_EMAIL: ""
+  ADMIN_EMAIL: "",
+  WAVESPEED_API_KEY: "",
+  WAVESPEED_MODEL: ""
 };

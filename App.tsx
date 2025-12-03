@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { AppState, ChannelConfig, NewsItem, BroadcastSegment, VideoAssets, ViralMetadata, UserProfile, Channel, ScriptLine, StoredVideo } from './types';
-import { signInWithGoogle, getSession, signOut, getAllChannels, saveChannel, saveVideoToDB, getNewsByDate, saveNewsToDB, markNewsAsSelected, deleteVideoFromDB, loadConfigFromDB, supabase, fetchVideosFromDB } from './services/supabaseService';
+import { signInWithGoogle, getSession, signOut, getAllChannels, saveChannel, saveVideoToDB, getNewsByDate, saveNewsToDB, markNewsAsSelected, deleteVideoFromDB, loadConfigFromDB, supabase, fetchVideosFromDB, saveProduction, getIncompleteProductions, getProductionById, updateProductionStatus, uploadAudioToStorage, getAudioFromStorage } from './services/supabaseService';
 import { fetchEconomicNews, generateScript, generateSegmentedAudio, generateBroadcastVisuals, generateViralMetadata, generateThumbnail, generateThumbnailVariants, generateViralHook, generateVideoSegments } from './services/geminiService';
 import { uploadVideoToYouTube, deleteVideoFromYouTube } from './services/youtubeService';
 import { ContentCache } from './services/ContentCache';
@@ -63,6 +63,7 @@ const App: React.FC = () => {
   const [previewScript, setPreviewScript] = useState<ScriptLine[]>([]);
   const [storedVideos, setStoredVideos] = useState<StoredVideo[]>([]); // NEW: For home page sidebar
   const [productionProgress, setProductionProgress] = useState({ current: 0, total: 0, step: '' });
+  const [currentProductionId, setCurrentProductionId] = useState<string | null>(null); // Track current production
 
   // UI State
   const getYesterday = () => {
@@ -72,6 +73,12 @@ const App: React.FC = () => {
   };
   const [selectedDate, setSelectedDate] = useState<string>(getYesterday());
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
+
+  // Helper function to parse selectedDate consistently (fixes timezone issues)
+  const parseSelectedDate = (dateString: string): Date => {
+    const [year, month, day] = dateString.split('-').map(Number);
+    return new Date(year, month - 1, day, 12, 0, 0); // Noon local time to avoid timezone issues
+  };
 
   // Fetch stored videos for home page sidebar
   useEffect(() => {
@@ -162,16 +169,26 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // Restore progress after login
+  // Restore progress after login and check for abandoned productions
   useEffect(() => {
-    if (user && state === AppState.IDLE) {
+    if (user && state === AppState.IDLE && activeChannel) {
+      // First check for abandoned productions in DB
+      const checkAbandonedProductions = async () => {
+        const incomplete = await getIncompleteProductions(activeChannel.id, user.email);
+        if (incomplete.length > 0) {
+          // Show notification about abandoned productions
+          toast.success(`Found ${incomplete.length} production(s) in progress. Check the dashboard to resume.`, {
+            duration: 5000
+          });
+        }
+      };
+      checkAbandonedProductions();
+
+      // Also restore from localStorage as fallback
       const saved = localStorage.getItem('chimpNewsProgress');
       if (saved) {
         try {
           const parsed = JSON.parse(saved);
-          // Only restore if date matches or user wants to? 
-          // For now, just restore if it's recent?
-          // Let's just restore.
           if (parsed.state === AppState.READY || parsed.state === AppState.SELECTING_NEWS) {
             setAllNews(parsed.allNews || []);
             setSelectedNews(parsed.selectedNews || []);
@@ -188,7 +205,43 @@ const App: React.FC = () => {
         }
       }
     }
-  }, [user]); // Run when user logs in
+  }, [user, activeChannel]);
+
+  // Persist state when tab becomes hidden (visibility change)
+  useEffect(() => {
+    const handleVisibilityChange = async () => {
+      if (document.hidden && state !== AppState.IDLE && state !== AppState.LOGIN && activeChannel && user) {
+        // Save current production state to DB before losing it
+        if (currentProductionId || (state !== AppState.SELECTING_NEWS && selectedNews.length > 0)) {
+          const dateObj = parseSelectedDate(selectedDate);
+          const newsIds = selectedNews.map(n => n.headline).filter(Boolean) as string[];
+          
+          const productionData = {
+            id: currentProductionId || undefined,
+            channel_id: activeChannel.id,
+            news_date: dateObj.toISOString().split('T')[0],
+            status: 'in_progress' as const,
+            selected_news_ids: newsIds,
+            progress_step: productionProgress.current,
+            user_id: user.email,
+            script: previewScript.length > 0 ? previewScript : undefined,
+            viral_metadata: viralMeta || undefined,
+            video_assets: videos.wide ? videos : undefined,
+            thumbnail_urls: thumbnailDataUrl ? [thumbnailDataUrl, thumbnailVariant].filter((url): url is string => Boolean(url)) : undefined
+          };
+
+          const saved = await saveProduction(productionData, user.email);
+          if (saved) {
+            setCurrentProductionId(saved.id);
+            console.log("💾 Production state saved before tab hidden");
+          }
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [state, currentProductionId, activeChannel, user, selectedNews, selectedDate, productionProgress, previewScript, viralMeta, videos, thumbnailDataUrl, thumbnailVariant]); // Run when user logs in
 
   // LOGIN LOGIC
   const handleLogin = async () => {
@@ -230,13 +283,13 @@ const App: React.FC = () => {
 
     try {
       // Fix timezone issue: Parse as local date, not UTC
-      const [year, month, day] = selectedDate.split('-').map(Number);
-      const dateObj = new Date(year, month - 1, day, 12, 0, 0); // Noon local time
+      const dateObj = parseSelectedDate(selectedDate);
       addLog(`📡 Checking for cached news for ${dateObj.toLocaleDateString()}...`);
 
       if (!activeChannel) {
-        addLog(`❌ No active channel selected.`);
+        addLog(`❌ No active channel selected. Please select a channel first.`);
         setState(AppState.ERROR);
+        toast.error('No active channel selected. Please select a channel first.');
         return;
       }
 
@@ -271,14 +324,52 @@ const App: React.FC = () => {
     if (!activeChannel) return;
 
     // Mark selected news in database
-    const dateObj = new Date(selectedDate);
+    const dateObj = parseSelectedDate(selectedDate);
     await markNewsAsSelected(dateObj, selection, activeChannel.id);
     addLog(`📌 Marked ${selection.length} stories as selected.`);
 
     startProduction(selection);
   };
 
-  const startProduction = async (finalNews: NewsItem[]) => {
+  // Helper function to save production state to DB
+  const saveProductionState = async (
+    productionId: string | null,
+    step: number,
+    status: 'draft' | 'in_progress' | 'completed' | 'failed',
+    updates: {
+      script?: ScriptLine[];
+      viralHook?: string;
+      viralMetadata?: ViralMetadata;
+      segments?: BroadcastSegment[];
+      videoAssets?: VideoAssets;
+      thumbnailUrls?: string[];
+    }
+  ): Promise<string | null> => {
+    if (!activeChannel || !user) return null;
+
+    const dateObj = parseSelectedDate(selectedDate);
+    const newsIds = selectedNews.map(n => n.headline).filter(Boolean) as string[]; // Using headlines as IDs for now
+
+    const productionData = {
+      id: productionId || undefined,
+      channel_id: activeChannel.id,
+      news_date: dateObj.toISOString().split('T')[0],
+      status,
+      selected_news_ids: newsIds,
+      progress_step: step,
+      user_id: user.email,
+      ...updates
+    };
+
+    const saved = await saveProduction(productionData, user.email);
+    if (saved) {
+      setCurrentProductionId(saved.id);
+      return saved.id;
+    }
+    return productionId;
+  };
+
+  const startProduction = async (finalNews: NewsItem[], resumeFromProduction?: any) => {
     setVideos({ wide: null, hostA: [], hostB: [] });
     setSegments([]);
     setViralMeta(null);
@@ -289,19 +380,60 @@ const App: React.FC = () => {
     setProductionProgress({ current: 0, total: TOTAL_STEPS, step: 'Starting production...' });
 
     try {
-      // 2. Generate Script
-      setState(AppState.GENERATING_SCRIPT);
-      addLog(`✍️ Editorial approved. Scripting with tone: ${config.tone}...`);
+      let productionId: string | null = null;
+      let genScript: ScriptLine[] = [];
+      let viralHook: string = '';
 
-      // Step 1: Generate viral hook first
-      setProductionProgress({ current: 1, total: TOTAL_STEPS, step: 'Creating viral hook...' });
-      const viralHook = await generateViralHook(finalNews, config);
-      addLog(`🎣 Viral hook: "${viralHook.substring(0, 40)}..."`);
+      // Check if resuming from existing production
+      if (resumeFromProduction) {
+        productionId = resumeFromProduction.id;
+        setCurrentProductionId(productionId);
+        
+        // Restore state from production
+        if (resumeFromProduction.script) {
+          genScript = resumeFromProduction.script;
+          setPreviewScript(genScript);
+        }
+        if (resumeFromProduction.viral_hook) {
+          viralHook = resumeFromProduction.viral_hook;
+        }
+        if (resumeFromProduction.viral_metadata) {
+          setViralMeta(resumeFromProduction.viral_metadata);
+        }
+        if (resumeFromProduction.video_assets) {
+          setVideos(resumeFromProduction.video_assets);
+        }
+        if (resumeFromProduction.thumbnail_urls && resumeFromProduction.thumbnail_urls.length > 0) {
+          setThumbnailDataUrl(resumeFromProduction.thumbnail_urls[0]);
+        }
 
-      // Step 2: Generate script
-      setProductionProgress({ current: 2, total: TOTAL_STEPS, step: 'Writing script...' });
-      const genScript = await generateScript(finalNews, config, viralHook);
-      addLog("✅ Script written.");
+        addLog("🔄 Resuming production from saved state...");
+      }
+
+      // 2. Generate Script (skip if resuming and script exists)
+      if (!genScript.length) {
+        setState(AppState.GENERATING_SCRIPT);
+        addLog(`✍️ Editorial approved. Scripting with tone: ${config.tone}...`);
+
+        // Step 1: Generate viral hook first
+        setProductionProgress({ current: 1, total: TOTAL_STEPS, step: 'Creating viral hook...' });
+        viralHook = await generateViralHook(finalNews, config);
+        addLog(`🎣 Viral hook: "${viralHook.substring(0, 40)}..."`);
+
+        // Save viral hook
+        productionId = await saveProductionState(productionId, 1, 'in_progress', { viralHook }) || productionId;
+
+        // Step 2: Generate script
+        setProductionProgress({ current: 2, total: TOTAL_STEPS, step: 'Writing script...' });
+        genScript = await generateScript(finalNews, config, viralHook);
+        addLog("✅ Script written.");
+
+        // Save script to DB
+        productionId = await saveProductionState(productionId, 2, 'in_progress', { script: genScript }) || productionId;
+      } else {
+        addLog("✅ Using saved script.");
+        setProductionProgress({ current: 2, total: TOTAL_STEPS, step: 'Using saved script...' });
+      }
 
       // PROGRESSIVE ENHANCEMENT: Show preview immediately
       setPreviewScript(genScript);
@@ -318,12 +450,71 @@ const App: React.FC = () => {
       addLog("🎙️ Sound check...");
 
 
-      const audioTask = generateSegmentedAudio(genScript, config)
-        .then(segs => {
-          setSegments(segs);
-          addLog(`✅ Audio produced (${segs.length} segments).`);
-          return segs;
-        });
+      // Check if we need to generate audio (if resuming, check if segments exist)
+      let audioSegments: BroadcastSegment[] = [];
+      if (resumeFromProduction?.segments && resumeFromProduction.segments.length > 0) {
+        // Load audio from Storage
+        addLog("🔄 Loading audio from storage...");
+        const loadedSegments = await Promise.all(
+          resumeFromProduction.segments.map(async (seg: any, idx: number) => {
+            if (seg.audioUrl && productionId) {
+              const audioBase64 = await getAudioFromStorage(seg.audioUrl);
+              if (audioBase64) {
+                return {
+                  speaker: seg.speaker,
+                  text: seg.text,
+                  audioBase64,
+                  videoUrl: seg.videoUrl
+                };
+              }
+            }
+            return null;
+          })
+        );
+        audioSegments = loadedSegments.filter(Boolean) as BroadcastSegment[];
+        
+        if (audioSegments.length === resumeFromProduction.segments.length) {
+          addLog("✅ Audio loaded from storage.");
+        } else {
+          addLog("⚠️ Some audio missing, regenerating...");
+          audioSegments = [];
+        }
+      }
+
+      if (audioSegments.length === 0) {
+        const audioTask = generateSegmentedAudio(genScript, config)
+          .then(async (segs) => {
+            setSegments(segs);
+            addLog(`✅ Audio produced (${segs.length} segments).`);
+            
+            // Upload audio to Storage and save URLs
+            if (productionId && activeChannel) {
+              addLog("💾 Uploading audio to storage...");
+              const segmentsWithUrls = await Promise.all(
+                segs.map(async (seg, idx) => {
+                  const audioUrl = await uploadAudioToStorage(seg.audioBase64, productionId, idx);
+                  return {
+                    speaker: seg.speaker,
+                    text: seg.text,
+                    audioUrl,
+                    videoUrl: seg.videoUrl
+                  };
+                })
+              );
+              
+              // Save segments metadata (without audioBase64) to production
+              await saveProductionState(productionId, 3, 'in_progress', {
+                segments: segmentsWithUrls as any
+              });
+            }
+            
+            return segs;
+          });
+        
+        audioSegments = await audioTask;
+      } else {
+        setSegments(audioSegments);
+      }
 
       // NEW: Granular Video Generation
       const videoSegmentsTask = generateVideoSegments(genScript, config);
@@ -336,15 +527,20 @@ const App: React.FC = () => {
           return vids;
         });
 
-      const metaTask = generateViralMetadata(finalNews, config, new Date(selectedDate))
+      const metaTask = generateViralMetadata(finalNews, config, parseSelectedDate(selectedDate))
         .then(async (meta) => {
           setViralMeta(meta);
           addLog("✅ SEO Metadata generated.");
+          
+          // Save viral metadata
+          if (productionId) {
+            await saveProductionState(productionId, 3, 'in_progress', { viralMetadata: meta });
+          }
+          
           return meta;
         });
 
-      const [audioSegments, videoSegments, backgroundVideos, metadata] = await Promise.all([
-        audioTask,
+      const [videoSegments, backgroundVideos, metadata] = await Promise.all([
         videoSegmentsTask,
         backgroundVideoTask,
         metaTask
@@ -364,6 +560,11 @@ const App: React.FC = () => {
       setViralMeta(metadata);
       addLog(`✅ Media ready: ${audioSegments.length} audio clips, ${videoSegments.filter(v => v).length} unique video clips.`);
 
+      // Save video assets
+      if (productionId) {
+        await saveProductionState(productionId, 4, 'in_progress', { videoAssets: backgroundVideos });
+      }
+
       // Step 5: Generate thumbnail variants (after metadata for title context)
       setProductionProgress({ current: 5, total: TOTAL_STEPS, step: 'Creating thumbnails...' });
       addLog("🎨 Creating thumbnail variants...");
@@ -372,10 +573,21 @@ const App: React.FC = () => {
       setThumbnailVariant(thumbnails.variant);
       addLog(`✅ Thumbnails ready (${thumbnails.variant ? '2 variants for A/B testing' : '1 thumbnail'})`);
 
+      // Save thumbnails
+      if (productionId) {
+        const thumbnailUrls = [thumbnails.primary, thumbnails.variant].filter(Boolean) as string[];
+        await saveProductionState(productionId, 5, 'in_progress', { thumbnailUrls });
+      }
+
       // Step 6: Complete!
       setProductionProgress({ current: 6, total: TOTAL_STEPS, step: 'Broadcast ready!' });
       setState(AppState.READY);
       addLog("🚀 Broadcast Ready!");
+
+      // Mark production as completed
+      if (productionId) {
+        await updateProductionStatus(productionId, 'completed', new Date());
+      }
 
       // Log cache stats
       const cacheStats = ContentCache.getStats();
@@ -387,19 +599,76 @@ const App: React.FC = () => {
       console.error(error);
       setState(AppState.ERROR);
       addLog("💥 Production failure: " + (error as Error).message);
+      
+      // Mark production as failed
+      if (currentProductionId) {
+        await updateProductionStatus(currentProductionId, 'failed');
+      }
+    }
+  };
+
+  // Function to resume a production
+  const resumeProduction = async (production: any) => {
+    if (!activeChannel) {
+      toast.error('No active channel selected');
+      return;
+    }
+
+    try {
+      // Load full production data
+      const fullProduction = await getProductionById(production.id);
+      if (!fullProduction) {
+        toast.error('Production not found');
+        return;
+      }
+
+      // Restore news selection (we need to fetch news items by IDs)
+      const dateObj = parseSelectedDate(fullProduction.news_date);
+      setSelectedDate(fullProduction.news_date);
+      const allNewsItems = await getNewsByDate(dateObj, activeChannel.id);
+      
+      // Match selected news by headlines (since we're using headlines as IDs for now)
+      const selected = allNewsItems.filter(n => 
+        fullProduction.selected_news_ids?.includes(n.headline)
+      );
+      
+      setSelectedNews(selected);
+      setAllNews(allNewsItems);
+
+      // Start production with resume data
+      await startProduction(selected, fullProduction);
+      
+      toast.success('Production resumed!');
+    } catch (error) {
+      console.error('Error resuming production:', error);
+      toast.error('Failed to resume production');
     }
   };
 
   const handleYouTubeUpload = async (videoBlob: Blob) => {
-    if (!user || !viralMeta) return;
+    if (!user || !viralMeta) {
+      toast.error('Missing user or metadata. Cannot upload.');
+      return;
+    }
+
+    if (!user.accessToken) {
+      toast.error('No access token available. Please sign in again.');
+      return;
+    }
+
     setUploadStatus("Starting Upload...");
 
     try {
       // Convert thumbnail data URL to Blob if available
       let thumbnailBlob: Blob | null = null;
       if (thumbnailDataUrl) {
-        const response = await fetch(thumbnailDataUrl);
-        thumbnailBlob = await response.blob();
+        try {
+          const response = await fetch(thumbnailDataUrl);
+          thumbnailBlob = await response.blob();
+        } catch (e) {
+          console.warn('Failed to convert thumbnail to blob:', e);
+          // Continue without thumbnail
+        }
       }
 
       const videoUrl = await uploadVideoToYouTube(
@@ -410,18 +679,42 @@ const App: React.FC = () => {
         (percent) => setUploadStatus(`Uploading: ${Math.round(percent)}%`)
       );
       setUploadStatus("✅ Published! " + videoUrl);
+      toast.success('Video uploaded successfully!');
+
+      // Save to database if we have an active channel
+      if (activeChannel && viralMeta) {
+        try {
+          await saveVideoToDB(
+            viralMeta,
+            activeChannel.id,
+            videoUrl.split('/').pop() || null, // Extract video ID from URL
+            0, // viral score prediction
+            thumbnailDataUrl || undefined
+          );
+        } catch (e) {
+          console.error('Failed to save video to database:', e);
+          // Don't fail the upload if DB save fails
+        }
+      }
 
       window.open(videoUrl, '_blank');
     } catch (e) {
-      setUploadStatus("❌ Upload Failed: " + (e as Error).message);
+      const errorMsg = (e as Error).message || "Unknown error";
+      setUploadStatus("❌ Upload Failed: " + errorMsg);
+      toast.error(`Upload failed: ${errorMsg}`);
     }
   };
 
   const handleDeleteVideo = async (videoId: string, youtubeId: string | null) => {
+    if (!videoId) {
+      toast.error('Invalid video ID');
+      return;
+    }
+
     console.log(`[APP] Delete requested for video: ${videoId}, YouTube ID: ${youtubeId}`);
     try {
       // Delete from YouTube if it was uploaded
-      if (youtubeId && user) {
+      if (youtubeId && user?.accessToken) {
         console.log(`[APP] Deleting from YouTube: ${youtubeId}`);
         try {
           await deleteVideoFromYouTube(youtubeId, user.accessToken);
@@ -457,6 +750,8 @@ const App: React.FC = () => {
   };
 
   const handleChannelSwitch = async (channel: Channel) => {
+    if (!channel) return;
+    
     // Reset all state when switching channels
     setActiveChannel(channel);
     setConfig(channel.config);
@@ -470,10 +765,16 @@ const App: React.FC = () => {
     setThumbnailDataUrl(null);
     setThumbnailVariant(null);
     setPreviewScript([]);
+    setUploadStatus(null);
 
     // Fetch videos for new channel
-    const vids = await fetchVideosFromDB(channel.id);
-    setStoredVideos(vids.slice(0, 4));
+    try {
+      const vids = await fetchVideosFromDB(channel.id);
+      setStoredVideos(vids.slice(0, 4));
+    } catch (error) {
+      console.error('Error fetching videos for channel:', error);
+      setStoredVideos([]);
+    }
   };
 
   const handleConfigUpdate = (newConfig: ChannelConfig) => {
@@ -535,6 +836,8 @@ const App: React.FC = () => {
           setConfig(channel.config);
         }}
         onDeleteVideo={handleDeleteVideo}
+        onResumeProduction={resumeProduction}
+        user={user}
       />
     );
   }
@@ -588,10 +891,15 @@ const App: React.FC = () => {
                   }
                 }}
                 className="bg-[#1a1a1a] border border-[#333] rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500"
+                disabled={!activeChannel && channels.length === 0}
               >
-                {channels.map(ch => (
-                  <option key={ch.id} value={ch.id}>{ch.name}</option>
-                ))}
+                {channels.length === 0 ? (
+                  <option value="">No channels available</option>
+                ) : (
+                  channels.map(ch => (
+                    <option key={ch.id} value={ch.id}>{ch.name}</option>
+                  ))
+                )}
               </select>
             </div>
           )}
@@ -650,9 +958,42 @@ const App: React.FC = () => {
               <div className="p-4 bg-[#0a0a0a] h-full overflow-y-auto">
                 <NewsSelector
                   news={allNews}
-                  date={new Date(selectedDate)}
+                  date={parseSelectedDate(selectedDate)}
                   onConfirmSelection={handleNewsSelection}
                 />
+              </div>
+
+            ) : state === AppState.ERROR ? (
+              // ERROR STATE
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0f0f0f] text-center p-8 space-y-6">
+                <div className="w-24 h-24 rounded-full flex items-center justify-center bg-red-900/50 mb-4">
+                  <span className="text-4xl">⚠️</span>
+                </div>
+                <h2 className="text-2xl font-bold text-red-400">Production Error</h2>
+                <p className="text-gray-400 max-w-md">
+                  {logs.length > 0 ? logs[logs.length - 1] : "An error occurred during production."}
+                </p>
+                <div className="flex gap-4">
+                  <button
+                    onClick={() => {
+                      setState(AppState.IDLE);
+                      setLogs([]);
+                    }}
+                    className="btn-secondary"
+                  >
+                    Go Back
+                  </button>
+                  <button
+                    onClick={() => {
+                      setState(AppState.IDLE);
+                      setLogs([]);
+                      initiateNewsSearch();
+                    }}
+                    className="btn-primary"
+                  >
+                    Retry
+                  </button>
+                </div>
               </div>
 
             ) : state === AppState.READY ? (
@@ -661,7 +1002,7 @@ const App: React.FC = () => {
                 segments={segments}
                 videos={videos}
                 news={allNews}
-                displayDate={new Date(selectedDate)}
+                displayDate={parseSelectedDate(selectedDate)}
                 onUploadToYouTube={handleYouTubeUpload}
                 config={config}
               />
@@ -717,7 +1058,7 @@ const App: React.FC = () => {
 
             <div className="bg-[#272727] rounded-xl p-4 text-sm hover:bg-[#3f3f3f] transition cursor-pointer">
               <div className="font-bold mb-2">
-                {new Number(Math.floor(Math.random() * 50000) + 1000).toLocaleString()} views • {new Date(selectedDate).toLocaleDateString()}
+                {new Number(Math.floor(Math.random() * 50000) + 1000).toLocaleString()} views • {parseSelectedDate(selectedDate).toLocaleDateString()}
               </div>
               {viralMeta ? (
                 <>

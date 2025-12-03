@@ -103,6 +103,7 @@ export interface ChannelConfig {
   logoColor2: string; // Hex
   captionsEnabled: boolean;
   defaultTags?: string[]; // Added for default tags
+  referenceImageUrl?: string; // NEW: Reference image for visual consistency
   characters: {
     hostA: CharacterProfile;
     hostB: CharacterProfile;
@@ -115,6 +116,28 @@ export interface Channel {
   name: string;
   config: ChannelConfig;
   active: boolean;
+}
+
+// Production Types
+export type ProductionStatus = 'draft' | 'in_progress' | 'completed' | 'failed';
+
+export interface Production {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  completed_at?: string;
+  channel_id: string;
+  news_date: string; // ISO date string
+  status: ProductionStatus;
+  selected_news_ids: string[];
+  script?: ScriptLine[];
+  viral_hook?: string;
+  viral_metadata?: ViralMetadata;
+  segments?: BroadcastSegment[]; // Without audioBase64, only metadata
+  video_assets?: VideoAssets;
+  thumbnail_urls?: string[];
+  progress_step: number;
+  user_id?: string;
 }
 
 // Window augmentation for AI Studio key selection & Google Identity & Runtime Env
@@ -134,6 +157,8 @@ declare global {
       VITE_SUPABASE_URL?: string;
       VITE_SUPABASE_ANON_KEY?: string;
       ADMIN_EMAIL?: string;
+      WAVESPEED_API_KEY?: string;
+      WAVESPEED_MODEL?: string;
     };
     google?: {
       accounts: {
