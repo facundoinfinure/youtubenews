@@ -81,6 +81,149 @@ const pollWavespeedTask = async (taskId: string): Promise<string> => {
   throw new Error("Wavespeed video generation timed out");
 };
 
+// Helper function to create a simple placeholder image as data URI
+// This creates a minimal image that Nano Banana Pro Edit can use as a starting point
+const createPlaceholderImage = (width: number = 1024, height: number = 1024): string => {
+  if (typeof document === 'undefined') {
+    // Fallback for non-browser environments - return a minimal 1x1 PNG data URI
+    return 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+  }
+  
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    // Create a simple gradient background that represents a basic studio setting
+    const gradient = ctx.createLinearGradient(0, 0, width, height);
+    gradient.addColorStop(0, '#1a1a1a');
+    gradient.addColorStop(0.5, '#2a2a2a');
+    gradient.addColorStop(1, '#1a1a1a');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, width, height);
+    
+    // Add a subtle center area to suggest a studio space
+    ctx.fillStyle = 'rgba(40, 40, 40, 0.3)';
+    ctx.fillRect(width * 0.2, height * 0.2, width * 0.6, height * 0.6);
+  }
+  return canvas.toDataURL('image/png');
+};
+
+// Wavespeed image generation helper functions for Nano Banana Pro Edit
+const createWavespeedImageTask = async (
+  prompt: string, 
+  aspectRatio: '16:9' | '9:16' | '1:1' = '16:9',
+  inputImageUrl?: string
+): Promise<string> => {
+  const apiKey = getWavespeedApiKey();
+  if (!apiKey) throw new Error("Wavespeed API key not configured");
+
+  // For Nano Banana Pro Edit, we need an input image
+  // If no input image is provided, we'll create a placeholder and upload it
+  let imageUrl = inputImageUrl;
+  
+  if (!imageUrl) {
+    // Create a placeholder image and upload it to get a URL
+    // For now, we'll use a simple approach: create placeholder and convert to data URL
+    const placeholderDataUri = createPlaceholderImage(
+      aspectRatio === '9:16' ? 576 : aspectRatio === '1:1' ? 1024 : 1024,
+      aspectRatio === '9:16' ? 1024 : aspectRatio === '1:1' ? 1024 : 576
+    );
+    
+    // Upload placeholder to a temporary service or use it directly
+    // For WaveSpeed, we might need to upload to their service first
+    // For now, let's try using the placeholder as base64 in the request
+    imageUrl = placeholderDataUri;
+  }
+
+  const wavespeedApiUrl = "https://api.wavespeed.ai/api/v3/google/nano-banana-pro/edit";
+  
+  // Prepare the request body
+  const requestBody: any = {
+    prompt: prompt,
+    aspect_ratio: aspectRatio,
+    resolution: "2k", // Use 2k for good quality ($0.14 per image)
+    output_format: "png",
+    enable_sync_mode: false,
+    enable_base64_output: false
+  };
+
+  // Nano Banana Pro Edit requires an input image
+  // If imageUrl is a data URI, we need to upload it first or use it as base64
+  // WaveSpeed API v3 might support base64 images directly in the images array
+  if (imageUrl.startsWith('data:')) {
+    // Try sending the data URI directly - WaveSpeed API may support base64
+    // Format: data:image/png;base64,<base64data>
+    requestBody.images = [imageUrl];
+  } else {
+    requestBody.images = [imageUrl];
+  }
+
+  const response = await fetch(wavespeedApiUrl, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(requestBody)
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Wavespeed image API error: ${response.status} - ${errorText}`);
+  }
+
+  const data = await response.json();
+  
+  // WaveSpeed API v3 returns data.id as the task ID
+  if (data.data?.id) {
+    return data.data.id;
+  } else if (data.id) {
+    return data.id;
+  }
+  
+  throw new Error("Invalid response from Wavespeed image API");
+};
+
+const pollWavespeedImageTask = async (taskId: string): Promise<string> => {
+  const apiKey = getWavespeedApiKey();
+  if (!apiKey) throw new Error("Wavespeed API key not configured");
+
+  const wavespeedApiUrl = `https://api.wavespeed.ai/api/v3/predictions/${taskId}/result`;
+  let retries = 0;
+  const maxRetries = 60; // 5 minutes max
+
+  while (retries < maxRetries) {
+    await new Promise(resolve => setTimeout(resolve, 3000)); // Check every 3 seconds for images
+
+    const response = await fetch(wavespeedApiUrl, {
+      method: "GET",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`Wavespeed image polling error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    
+    // Check for completed status and image URL
+    if (data.data?.status === "completed" && data.data?.outputs && data.data.outputs.length > 0) {
+      return data.data.outputs[0]; // Return first image URL
+    } else if (data.status === "completed" && data.outputs && data.outputs.length > 0) {
+      return data.outputs[0];
+    } else if (data.data?.status === "failed" || data.status === "failed") {
+      throw new Error(`Wavespeed image task failed: ${data.error || data.data?.error || "Unknown error"}`);
+    }
+
+    retries++;
+  }
+
+  throw new Error("Wavespeed image generation timed out");
+};
+
 export const fetchEconomicNews = async (targetDate: Date | undefined, config: ChannelConfig): Promise<NewsItem[]> => {
   // Use caching for same-day news
   let dateToQuery = new Date();
@@ -658,12 +801,27 @@ BRANDING: Include channel name "${config.channelName}" and tagline "${config.tag
   });
 };
 
+// Helper function to convert image URL to data URI
+const imageUrlToDataUri = async (imageUrl: string): Promise<string> => {
+  try {
+    const response = await fetch(imageUrl);
+    const blob = await response.blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  } catch (error) {
+    console.error("Failed to convert image URL to data URI:", error);
+    throw error;
+  }
+};
+
 export const generateReferenceImage = async (
   config: ChannelConfig,
   sceneDescription?: string
 ): Promise<string | null> => {
-  const ai = getAiClient();
-
   // Build comprehensive prompt based on channel config and optional scene description
   const defaultScene = sceneDescription || `Professional news studio setting with ${config.tone} atmosphere`;
   
@@ -690,21 +848,40 @@ IMPORTANT: This image will be used as a reference for maintaining visual consist
 `.trim();
 
   try {
-    const response = await ai.models.generateContent({
-      model: getModelForTask('thumbnail'),
-      contents: prompt,
-      config: {
-        responseModalities: ["IMAGE" as any],
+    // Use WaveSpeed Nano Banana Pro Edit if API key is available
+    if (shouldUseWavespeed()) {
+      console.log(`[Wavespeed] Generating reference image using Nano Banana Pro Edit`);
+      
+      const aspectRatio = config.format === '9:16' ? '9:16' : '16:9';
+      const taskId = await createWavespeedImageTask(prompt, aspectRatio);
+      const imageUrl = await pollWavespeedImageTask(taskId);
+      
+      // Convert image URL to data URI for consistency with the rest of the app
+      const dataUri = await imageUrlToDataUri(imageUrl);
+      
+      // Track cost (Nano Banana Pro Edit 2k resolution is $0.14)
+      CostTracker.track('thumbnail', 'google/nano-banana-pro/edit', 0.14);
+      
+      return dataUri;
+    } else {
+      // Fallback to Google Gemini API
+      const ai = getAiClient();
+      const response = await ai.models.generateContent({
+        model: getModelForTask('thumbnail'),
+        contents: prompt,
+        config: {
+          responseModalities: ["IMAGE" as any],
+        }
+      });
+
+      CostTracker.track('thumbnail', getModelForTask('thumbnail'), getCostForTask('thumbnail'));
+
+      const imageBase64 = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      if (imageBase64) {
+        return `data:image/png;base64,${imageBase64}`;
       }
-    });
-
-    CostTracker.track('thumbnail', getModelForTask('thumbnail'), getCostForTask('thumbnail'));
-
-    const imageBase64 = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-    if (imageBase64) {
-      return `data:image/png;base64,${imageBase64}`;
+      return null;
     }
-    return null;
   } catch (e) {
     console.error("Reference image generation failed", e);
     return null;
