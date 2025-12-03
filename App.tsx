@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { AppState, ChannelConfig, NewsItem, BroadcastSegment, VideoAssets, ViralMetadata, UserProfile, Channel, ScriptLine, StoredVideo } from './types';
-import { signInWithGoogle, getSession, signOut, getAllChannels, saveChannel, saveVideoToDB, getNewsByDate, saveNewsToDB, markNewsAsSelected, deleteVideoFromDB, loadConfigFromDB, supabase, fetchVideosFromDB, saveProduction, getIncompleteProductions, getProductionById, updateProductionStatus, uploadAudioToStorage, getAudioFromStorage } from './services/supabaseService';
-import { fetchEconomicNews, generateScript, generateSegmentedAudio, generateBroadcastVisuals, generateViralMetadata, generateThumbnail, generateThumbnailVariants, generateViralHook, generateVideoSegments } from './services/geminiService';
+import { signInWithGoogle, getSession, signOut, getAllChannels, saveChannel, saveVideoToDB, getNewsByDate, saveNewsToDB, markNewsAsSelected, deleteVideoFromDB, loadConfigFromDB, supabase, fetchVideosFromDB, saveProduction, getIncompleteProductions, getProductionById, updateProductionStatus, uploadAudioToStorage, getAudioFromStorage, findCachedScript, findCachedAudio, getAllProductions } from './services/supabaseService';
+import { fetchEconomicNews, generateScript, generateSegmentedAudio, generateSegmentedAudioWithCache, setFindCachedAudioFunction, generateBroadcastVisuals, generateViralMetadata, generateThumbnail, generateThumbnailVariants, generateViralHook, generateVideoSegments } from './services/geminiService';
 import { uploadVideoToYouTube, deleteVideoFromYouTube } from './services/youtubeService';
 import { ContentCache } from './services/ContentCache';
 import { NewsSelector } from './components/NewsSelector';
@@ -234,6 +234,7 @@ const App: React.FC = () => {
           if (saved) {
             setCurrentProductionId(saved.id);
             console.log("💾 Production state saved before tab hidden");
+            // Silent save - no toast to avoid interrupting user
           }
         }
       }
@@ -364,6 +365,12 @@ const App: React.FC = () => {
     const saved = await saveProduction(productionData, user.email);
     if (saved) {
       setCurrentProductionId(saved.id);
+      // Show toast notification for auto-save
+      toast.success('💾 Progress saved', { 
+        duration: 2000,
+        icon: '💾',
+        position: 'bottom-right'
+      });
       return saved.id;
     }
     return productionId;
@@ -410,26 +417,48 @@ const App: React.FC = () => {
         addLog("🔄 Resuming production from saved state...");
       }
 
-      // 2. Generate Script (skip if resuming and script exists)
+      // 2. Generate Script (skip if resuming and script exists, or if cached)
       if (!genScript.length) {
-        setState(AppState.GENERATING_SCRIPT);
-        addLog(`✍️ Editorial approved. Scripting with tone: ${config.tone}...`);
+        // Check for cached script first
+        if (activeChannel) {
+          setProductionProgress({ current: 2, total: TOTAL_STEPS, step: 'Checking for cached script...' });
+          const cachedScript = await findCachedScript(finalNews, activeChannel.id, config);
+          
+          if (cachedScript && cachedScript.length > 0) {
+            genScript = cachedScript;
+            addLog("✅ Using cached script (same news items).");
+            setProductionProgress({ current: 2, total: TOTAL_STEPS, step: 'Using cached script...' });
+            
+            // Still need to generate viral hook for consistency
+            setProductionProgress({ current: 1, total: TOTAL_STEPS, step: 'Creating viral hook...' });
+            viralHook = await generateViralHook(finalNews, config);
+            addLog(`🎣 Viral hook: "${viralHook.substring(0, 40)}..."`);
+            
+            // Save viral hook and script
+            productionId = await saveProductionState(productionId, 1, 'in_progress', { viralHook }) || productionId;
+            productionId = await saveProductionState(productionId, 2, 'in_progress', { script: genScript }) || productionId;
+          } else {
+            // No cached script found, generate new one
+            setState(AppState.GENERATING_SCRIPT);
+            addLog(`✍️ Editorial approved. Scripting with tone: ${config.tone}...`);
 
-        // Step 1: Generate viral hook first
-        setProductionProgress({ current: 1, total: TOTAL_STEPS, step: 'Creating viral hook...' });
-        viralHook = await generateViralHook(finalNews, config);
-        addLog(`🎣 Viral hook: "${viralHook.substring(0, 40)}..."`);
+            // Step 1: Generate viral hook first
+            setProductionProgress({ current: 1, total: TOTAL_STEPS, step: 'Creating viral hook...' });
+            viralHook = await generateViralHook(finalNews, config);
+            addLog(`🎣 Viral hook: "${viralHook.substring(0, 40)}..."`);
 
-        // Save viral hook
-        productionId = await saveProductionState(productionId, 1, 'in_progress', { viralHook }) || productionId;
+            // Save viral hook
+            productionId = await saveProductionState(productionId, 1, 'in_progress', { viralHook }) || productionId;
 
-        // Step 2: Generate script
-        setProductionProgress({ current: 2, total: TOTAL_STEPS, step: 'Writing script...' });
-        genScript = await generateScript(finalNews, config, viralHook);
-        addLog("✅ Script written.");
+            // Step 2: Generate script
+            setProductionProgress({ current: 2, total: TOTAL_STEPS, step: 'Writing script...' });
+            genScript = await generateScript(finalNews, config, viralHook);
+            addLog("✅ Script written.");
 
-        // Save script to DB
-        productionId = await saveProductionState(productionId, 2, 'in_progress', { script: genScript }) || productionId;
+            // Save script to DB
+            productionId = await saveProductionState(productionId, 2, 'in_progress', { script: genScript }) || productionId;
+          }
+        }
       } else {
         addLog("✅ Using saved script.");
         setProductionProgress({ current: 2, total: TOTAL_STEPS, step: 'Using saved script...' });
@@ -482,16 +511,32 @@ const App: React.FC = () => {
       }
 
       if (audioSegments.length === 0) {
-        const audioTask = generateSegmentedAudio(genScript, config)
-          .then(async (segs) => {
+        // Generate audio with cache support
+        addLog("🎙️ Generating audio segments (checking cache first)...");
+        const audioTask = generateSegmentedAudioWithCache(genScript, config, activeChannel?.id || '')
+          .then(async (segs: BroadcastSegment[]) => {
             setSegments(segs);
-            addLog(`✅ Audio produced (${segs.length} segments).`);
+            const cachedCount = segs.filter((s: BroadcastSegment) => (s as any).fromCache).length;
+            if (cachedCount > 0) {
+              addLog(`✅ Audio produced: ${segs.length} segments (${cachedCount} from cache, ${segs.length - cachedCount} new).`);
+            } else {
+              addLog(`✅ Audio produced (${segs.length} segments).`);
+            }
             
             // Upload audio to Storage and save URLs
             if (productionId && activeChannel) {
               addLog("💾 Uploading audio to storage...");
               const segmentsWithUrls = await Promise.all(
-                segs.map(async (seg, idx) => {
+                segs.map(async (seg: BroadcastSegment, idx: number) => {
+                  // Only upload if not from cache (already in storage)
+                  if ((seg as any).fromCache && (seg as any).audioUrl) {
+                    return {
+                      speaker: seg.speaker,
+                      text: seg.text,
+                      audioUrl: (seg as any).audioUrl,
+                      videoUrl: seg.videoUrl
+                    };
+                  }
                   const audioUrl = await uploadAudioToStorage(seg.audioBase64, productionId, idx);
                   return {
                     speaker: seg.speaker,

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { ChannelConfig, CharacterProfile, StoredVideo, Channel, UserProfile, Production } from '../types';
-import { fetchVideosFromDB, saveConfigToDB, getAllChannels, saveChannel, uploadImageToStorage, getIncompleteProductions } from '../services/supabaseService';
+import { fetchVideosFromDB, saveConfigToDB, getAllChannels, saveChannel, uploadImageToStorage, getIncompleteProductions, getAllProductions } from '../services/supabaseService';
 import { generateReferenceImage } from '../services/geminiService';
 import { CostTracker } from '../services/CostTracker';
 import { ContentCache } from '../services/ContentCache';
@@ -120,6 +120,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
   const [isLoadingVideos, setIsLoadingVideos] = useState(false);
   const [productions, setProductions] = useState<Production[]>([]);
   const [isLoadingProductions, setIsLoadingProductions] = useState(false);
+  const [productionFilter, setProductionFilter] = useState<'all' | 'incomplete' | 'completed' | 'failed'>('incomplete');
   const [showNewChannelModal, setShowNewChannelModal] = useState(false);
   const [newChannelName, setNewChannelName] = useState('');
   const [sceneDescription, setSceneDescription] = useState('');
@@ -141,11 +142,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
     }
     if (activeTab === 'productions' && activeChannel && user) {
       setIsLoadingProductions(true);
-      getIncompleteProductions(activeChannel.id, user.email)
-        .then(setProductions)
-        .finally(() => setIsLoadingProductions(false));
+      if (productionFilter === 'incomplete') {
+        getIncompleteProductions(activeChannel.id, user.email)
+          .then(setProductions)
+          .finally(() => setIsLoadingProductions(false));
+      } else {
+        getAllProductions(activeChannel.id, user.email, 100)
+          .then(allProds => {
+            // Filter by status
+            if (productionFilter === 'all') {
+              setProductions(allProds);
+            } else {
+              setProductions(allProds.filter(p => p.status === productionFilter));
+            }
+          })
+          .finally(() => setIsLoadingProductions(false));
+      }
     }
-  }, [activeTab, activeChannel, user]);
+  }, [activeTab, activeChannel, user, productionFilter]);
 
   const handleSave = async () => {
     if (!activeChannel) return;
@@ -684,12 +698,60 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
         {activeTab === 'productions' && (
           <div className="space-y-6">
             <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
-              <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
-                <span>📦</span>
-                <span>Incomplete Productions</span>
-              </h3>
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-xl font-bold flex items-center gap-2">
+                  <span>📦</span>
+                  <span>Productions History</span>
+                </h3>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setProductionFilter('all')}
+                    className={`px-3 py-1 rounded text-sm font-semibold transition-all ${
+                      productionFilter === 'all'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-[#222] text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    All
+                  </button>
+                  <button
+                    onClick={() => setProductionFilter('incomplete')}
+                    className={`px-3 py-1 rounded text-sm font-semibold transition-all ${
+                      productionFilter === 'incomplete'
+                        ? 'bg-yellow-600 text-white'
+                        : 'bg-[#222] text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    In Progress
+                  </button>
+                  <button
+                    onClick={() => setProductionFilter('completed')}
+                    className={`px-3 py-1 rounded text-sm font-semibold transition-all ${
+                      productionFilter === 'completed'
+                        ? 'bg-green-600 text-white'
+                        : 'bg-[#222] text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    Completed
+                  </button>
+                  <button
+                    onClick={() => setProductionFilter('failed')}
+                    className={`px-3 py-1 rounded text-sm font-semibold transition-all ${
+                      productionFilter === 'failed'
+                        ? 'bg-red-600 text-white'
+                        : 'bg-[#222] text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    Failed
+                  </button>
+                </div>
+              </div>
               <p className="text-gray-400 text-sm mb-6">
-                Resume productions that were abandoned or are still in progress.
+                {productionFilter === 'incomplete' 
+                  ? 'Resume productions that were abandoned or are still in progress.'
+                  : productionFilter === 'all'
+                  ? 'View all productions across all statuses.'
+                  : `View ${productionFilter} productions.`}
               </p>
 
               {isLoadingProductions ? (
@@ -703,9 +765,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                 </div>
               ) : productions.length === 0 ? (
                 <EmptyState
-                  icon="✅"
-                  title="No Incomplete Productions"
-                  description="All productions have been completed. Start a new production to create content."
+                  icon="📭"
+                  title={`No ${productionFilter === 'all' ? '' : productionFilter === 'incomplete' ? 'Incomplete' : productionFilter} Productions`}
+                  description={productionFilter === 'incomplete' 
+                    ? "All productions have been completed. Start a new production to create content."
+                    : `No ${productionFilter} productions found.`}
                 />
               ) : (
                 <div className="space-y-3">
@@ -720,13 +784,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                             <span className={`px-2 py-1 rounded text-xs font-bold ${
                               production.status === 'in_progress' 
                                 ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
+                                : production.status === 'completed'
+                                ? 'bg-green-500/20 text-green-400 border border-green-500/30'
+                                : production.status === 'failed'
+                                ? 'bg-red-500/20 text-red-400 border border-red-500/30'
                                 : 'bg-gray-500/20 text-gray-400 border border-gray-500/30'
                             }`}>
-                              {production.status === 'in_progress' ? '🔄 In Progress' : '📝 Draft'}
+                              {production.status === 'in_progress' ? '🔄 In Progress' 
+                                : production.status === 'completed' ? '✅ Completed'
+                                : production.status === 'failed' ? '❌ Failed'
+                                : '📝 Draft'}
                             </span>
                             <span className="text-gray-500 text-xs">
                               {new Date(production.news_date).toLocaleDateString()}
                             </span>
+                            {production.completed_at && (
+                              <span className="text-gray-500 text-xs">
+                                • {new Date(production.completed_at).toLocaleDateString()}
+                              </span>
+                            )}
                           </div>
                           <div className="text-sm text-gray-300 mb-2">
                             Progress: Step {production.progress_step} of 6
@@ -743,7 +819,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                           )}
                         </div>
                         <div className="flex gap-2">
-                          {onResumeProduction && (
+                          {onResumeProduction && (production.status === 'in_progress' || production.status === 'draft') && (
                             <button
                               onClick={() => {
                                 onResumeProduction(production);
@@ -753,6 +829,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                             >
                               ▶️ Resume
                             </button>
+                          )}
+                          {production.status === 'completed' && (
+                            <span className="text-green-400 text-xs flex items-center gap-1">
+                              ✓ Completed
+                            </span>
+                          )}
+                          {production.status === 'failed' && (
+                            <span className="text-red-400 text-xs flex items-center gap-1">
+                              ✗ Failed
+                            </span>
                           )}
                         </div>
                       </div>

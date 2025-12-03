@@ -579,3 +579,171 @@ export const updateProductionStatus = async (
 
   return true;
 };
+
+// Cache functions for scripts and audio
+export const findCachedScript = async (
+  newsItems: NewsItem[],
+  channelId: string,
+  config: ChannelConfig
+): Promise<ScriptLine[] | null> => {
+  if (!supabase) return null;
+
+  try {
+    // Create a hash of selected news headlines for matching
+    const newsHash = newsItems
+      .map(n => n.headline)
+      .sort()
+      .join('|');
+    
+    // Search for completed productions with the same news items
+    const { data, error } = await supabase
+      .from('productions')
+      .select('script, selected_news_ids')
+      .eq('channel_id', channelId)
+      .eq('status', 'completed')
+      .not('script', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(10);
+
+    if (error) {
+      console.error("Error searching for cached script:", error);
+      return null;
+    }
+
+    if (!data || data.length === 0) return null;
+
+    // Find a production with matching news items
+    for (const production of data) {
+      if (production.selected_news_ids && Array.isArray(production.selected_news_ids)) {
+        const productionNewsHash = production.selected_news_ids
+          .sort()
+          .join('|');
+        
+        if (productionNewsHash === newsHash && production.script) {
+          console.log("✅ Found cached script for same news items");
+          return production.script as ScriptLine[];
+        }
+      }
+    }
+
+    return null;
+  } catch (e) {
+    console.error("Error in findCachedScript:", e);
+    return null;
+  }
+};
+
+export const findCachedAudio = async (
+  text: string,
+  voiceName: string,
+  channelId: string
+): Promise<string | null> => {
+  if (!supabase) return null;
+
+  try {
+    // Search for segments with matching text and voice
+    const { data, error } = await supabase
+      .from('productions')
+      .select('segments')
+      .eq('channel_id', channelId)
+      .not('segments', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    if (error) {
+      console.error("Error searching for cached audio:", error);
+      return null;
+    }
+
+    if (!data || data.length === 0) return null;
+
+    // Search through segments for matching text
+    for (const production of data) {
+      if (production.segments && Array.isArray(production.segments)) {
+        for (const segment of production.segments) {
+          if (segment.text === text && segment.audioUrl) {
+            // Found matching audio, try to load it
+            const audioBase64 = await getAudioFromStorage(segment.audioUrl);
+            if (audioBase64) {
+              console.log("✅ Found cached audio for text:", text.substring(0, 30));
+              return audioBase64;
+            }
+          }
+        }
+      }
+    }
+
+    return null;
+  } catch (e) {
+    console.error("Error in findCachedAudio:", e);
+    return null;
+  }
+};
+
+// Helper function to create a hash from news headlines
+const createNewsHash = (newsItems: NewsItem[]): string => {
+  const headlines = newsItems.map(n => n.headline).sort().join('|');
+  // Simple hash function
+  let hash = 0;
+  for (let i = 0; i < headlines.length; i++) {
+    const char = headlines.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  return Math.abs(hash).toString();
+};
+
+// Find existing script for the same news items
+export const findCachedScript = async (
+  newsItems: NewsItem[],
+  channelId: string,
+  config: ChannelConfig
+): Promise<ScriptLine[] | null> => {
+  if (!supabase || newsItems.length === 0) return null;
+
+  try {
+    // Create hash from news headlines
+    const newsHash = createNewsHash(newsItems);
+    
+    // Search for completed productions with the same news (by comparing selected_news_ids)
+    const newsHeadlines = newsItems.map(n => n.headline).sort();
+    
+    // Get recent completed productions for this channel
+    const { data, error } = await supabase
+      .from('productions')
+      .select('*')
+      .eq('channel_id', channelId)
+      .eq('status', 'completed')
+      .not('script', 'is', null)
+      .order('updated_at', { ascending: false })
+      .limit(50);
+
+    if (error) {
+      console.error("Error searching for cached script:", error);
+      return null;
+    }
+
+    if (!data || data.length === 0) return null;
+
+    // Find a production with matching news
+    for (const prod of data) {
+      if (prod.selected_news_ids && Array.isArray(prod.selected_news_ids)) {
+        const prodHeadlines = [...prod.selected_news_ids].sort();
+        // Check if the news items match (same headlines)
+        if (prodHeadlines.length === newsHeadlines.length &&
+            prodHeadlines.every((h, i) => h === newsHeadlines[i])) {
+          // Found a match! Return the script
+          if (prod.script && Array.isArray(prod.script) && prod.script.length > 0) {
+            console.log("✅ Found cached script for these news items");
+            return prod.script as ScriptLine[];
+          }
+        }
+      }
+    }
+
+    return null;
+  } catch (error) {
+    console.error("Error in findCachedScript:", error);
+    return null;
+  }
+};

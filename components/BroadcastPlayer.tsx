@@ -44,9 +44,9 @@ export const BroadcastPlayer: React.FC<BroadcastPlayerProps> = ({
     const videoHostARefs = useRef<(HTMLVideoElement | null)[]>([]);
     const videoHostBRefs = useRef<(HTMLVideoElement | null)[]>([]);
 
-    // Constants
-    const INTRO_DURATION = 4000;
-    const OUTRO_DURATION = 4000;
+    // Constants - Improved: Longer intro/outro for better branding (5-7 seconds)
+    const INTRO_DURATION = 6000; // 6 seconds for better branding impact
+    const OUTRO_DURATION = 6000; // 6 seconds for better branding impact
 
     const isShorts = config.format === '9:16';
 

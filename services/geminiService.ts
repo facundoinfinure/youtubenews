@@ -357,10 +357,25 @@ Return JSON: { title, description, tags }
   );
 };
 
+// Helper function to import findCachedAudio dynamically to avoid circular dependency
+let findCachedAudioFn: ((text: string, voiceName: string, channelId: string) => Promise<string | null>) | null = null;
+
+export const setFindCachedAudioFunction = (fn: (text: string, voiceName: string, channelId: string) => Promise<string | null>) => {
+  findCachedAudioFn = fn;
+};
+
 export const generateSegmentedAudio = async (script: ScriptLine[], config: ChannelConfig): Promise<BroadcastSegment[]> => {
+  return generateSegmentedAudioWithCache(script, config, '');
+};
+
+export const generateSegmentedAudioWithCache = async (
+  script: ScriptLine[], 
+  config: ChannelConfig,
+  channelId: string = ''
+): Promise<BroadcastSegment[]> => {
   const ai = getAiClient();
 
-  // PARALLEL PROCESSING - much faster
+  // PARALLEL PROCESSING with cache support - much faster
   const audioPromises = script.map(async (line) => {
     let character = config.characters.hostA; // Default
     if (line.speaker === config.characters.hostA.name) {
@@ -369,6 +384,22 @@ export const generateSegmentedAudio = async (script: ScriptLine[], config: Chann
       character = config.characters.hostB;
     }
 
+    // Check cache first if function is available
+    if (findCachedAudioFn && channelId) {
+      const cachedAudio = await findCachedAudioFn(line.text, character.voiceName, channelId);
+      if (cachedAudio) {
+        console.log(`✅ Cache hit for audio: "${line.text.substring(0, 30)}..."`);
+        return {
+          speaker: line.speaker,
+          text: line.text,
+          audioBase64: cachedAudio,
+          fromCache: true,
+          audioUrl: undefined // Will be set later if needed
+        } as any;
+      }
+    }
+
+    // Generate new audio if not in cache
     return retryWithBackoff(async () => {
       const response = await ai.models.generateContent({
         model: getModelForTask('audio'),
@@ -397,7 +428,8 @@ export const generateSegmentedAudio = async (script: ScriptLine[], config: Chann
       return {
         speaker: line.speaker,
         text: line.text,
-        audioBase64: base64Audio
+        audioBase64: base64Audio,
+        fromCache: false
       };
     }, {
       maxRetries: 2,
@@ -431,20 +463,28 @@ export const generateVideoSegments = async (
 ): Promise<(string | null)[]> => {
   const ai = getAiClient();
 
-  // Smart Mode: Only generate unique videos for key moments to save cost/time
-  // Key moments: First line (Hook), Last line (CTA), and maybe one in the middle
-  // For now, let's try to generate for more segments if they are long enough
+  // IMPROVED: Generate videos for ALL segments (minimum 80%) to avoid repetition
+  // Create multiple variations per character to ensure visual variety
+  // Strategy: Generate for at least 80% of segments, with variations for each character
+
+  // Track character variations to ensure variety
+  const characterVariationCount: Record<string, number> = {
+    [config.characters.hostA.name]: 0,
+    [config.characters.hostB.name]: 0
+  };
 
   const videoPromises = script.map(async (line, index) => {
-    // Strategy:
-    // 1. Always generate for the first segment (Hook)
-    // 2. Always generate for the last segment (CTA)
-    // 3. For others, only if they are long enough (> 50 chars) to warrant a video change
-    //    AND we haven't generated one recently (simple spacing)
-
-    const isKeyMoment = index === 0 || index === script.length - 1;
-    const isLongEnough = line.text.length > 50;
-    const shouldGenerate = isKeyMoment || (isLongEnough && index % 2 === 0);
+    // Strategy: Generate for at least 80% of segments
+    // Always generate for first and last, then generate for 80% of remaining
+    const totalSegments = script.length;
+    const minSegmentsToGenerate = Math.max(2, Math.ceil(totalSegments * 0.8));
+    
+    // Calculate which segments to generate - ensure we get at least 80%
+    // Always generate first and last, then fill to reach 80%
+    const shouldGenerate = index === 0 || 
+                          index === script.length - 1 || 
+                          index < minSegmentsToGenerate ||
+                          (index < totalSegments && (index % 2 === 0 || Math.random() < 0.5));
 
     if (!shouldGenerate) return null;
 
@@ -452,20 +492,41 @@ export const generateVideoSegments = async (
       ? config.characters.hostA
       : config.characters.hostB;
 
+    // Track variation number for this character to create variety
+    characterVariationCount[character.name] = (characterVariationCount[character.name] || 0) + 1;
+    const variationNumber = characterVariationCount[character.name] % 5; // Cycle through 5 variations
+
+    // Create variation in camera angle and action based on variation number
+    const cameraAngles = ['front-facing', 'slight 3/4 angle left', 'slight 3/4 angle right', 'front with slight lean', 'front with hand gesture'];
+    const actions = [
+      'Speaking naturally to camera with confident expression',
+      'Speaking to camera with subtle hand gestures emphasizing key points',
+      'Speaking to camera with slight head movements for emphasis',
+      'Speaking to camera with engaged, animated expression',
+      'Speaking to camera with professional, authoritative presence'
+    ];
+    const cameraAngle = cameraAngles[variationNumber];
+    const action = actions[variationNumber];
+
     // LIP-SYNC PROMPT: Explicitly include the text to be spoken
     const referenceImageContext = config.referenceImageUrl 
       ? `\nREFERENCE IMAGE: Match the exact visual style, setting, character appearance, and composition from the reference image. Maintain consistency with the reference scene.\n` 
       : '';
 
+    // IMPROVED PROMPT: More specific with duration, actions, and lip-sync
     const prompt = `
-  Cinematic news shot of ${character.name} speaking.
+  Professional news broadcast video segment of ${character.name} speaking.
   Visual Description: ${character.visualPrompt}
-  Action: Speaking naturally to camera.
-  Dialogue Context (for lip-sync): "${line.text}"
+  Camera Angle: ${cameraAngle}
+  Action: ${action}
+  Dialogue for Lip-Sync: "${line.text}"
+  Duration: 5-10 seconds of continuous speaking
   Emotion/Tone: ${config.tone}
-  Setting: Professional news studio, ${config.format} format.
-  Lighting: Studio lighting, high quality.
+  Setting: Professional news studio with consistent lighting, ${config.format} format.
+  Lighting: Studio lighting, high quality, consistent with reference.
+  Expression: Natural, engaging, appropriate for news content.
   ${referenceImageContext}
+  IMPORTANT: The character must be speaking the exact dialogue provided for proper lip-sync. Maintain visual consistency with previous shots of this character.
     `.trim();
 
     return retryWithBackoff(async () => {
@@ -523,9 +584,11 @@ export const generateBroadcastVisuals = async (
     : '';
 
   const prompt = `
-Create a professional ${config.format} news broadcast video.
- 
+Create a professional ${config.format} news broadcast video with branding.
+
 CHANNEL: ${config.channelName}
+TAGLINE: ${config.tagline}
+BRANDING COLORS: ${config.logoColor1} and ${config.logoColor2}
 TOPIC: ${newsContext}
 ${referenceImageContext}
 CHARACTERS (maintain visual consistency):
@@ -538,6 +601,7 @@ ${scriptText}
 STYLE: ${config.tone}, professional news studio setting
 DURATION: 60 seconds
 QUALITY: High definition, stable camera, good lighting
+BRANDING: Include channel name "${config.channelName}" and tagline "${config.tagline}" visually in the scene. Use brand colors ${config.logoColor1} and ${config.logoColor2} in graphics, logos, or on-screen elements.
   `.trim();
 
   return retryWithBackoff(async () => {
