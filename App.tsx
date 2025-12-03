@@ -188,9 +188,8 @@ const App: React.FC = () => {
   // Load Progress
   useEffect(() => {
     const saved = localStorage.getItem('chimpNewsProgress');
-    if (saved && state === AppState.LOGIN) { // Only load if we are at start (but after login check? No, state is LOGIN initially)
-      // We need to wait for user to be logged in.
-    }
+    // This effect only runs once on mount, so we check state directly
+    // We need to wait for user to be logged in before restoring.
   }, []);
 
   // Restore progress after login and check for abandoned productions
@@ -225,7 +224,7 @@ const App: React.FC = () => {
             setViralMeta(parsed.viralMeta || null);
             setSelectedDate(parsed.selectedDate || getYesterday());
             setLogs(parsed.logs || []);
-            setState(parsed.state);
+            setState(parsed.state as AppState);
             addLog("🔄 Restored previous session.");
           }
         } catch (e) {
@@ -239,10 +238,8 @@ const App: React.FC = () => {
   useEffect(() => {
     if (state === AppState.ADMIN_DASHBOARD) {
       wasInAdminRef.current = true;
-    } else if (state !== AppState.ADMIN_DASHBOARD && wasInAdminRef.current) {
-      // Only clear the flag if we explicitly exit admin (not just state change)
-      // This will be cleared when user clicks exit button
     }
+    // Note: wasInAdminRef flag is cleared when user explicitly exits admin dashboard
   }, [state]);
 
   // Persist state when tab becomes hidden (visibility change)
@@ -313,7 +310,10 @@ const App: React.FC = () => {
               wasInAdminRef.current = true;
               console.log("🔄 Restored ADMIN_DASHBOARD state when tab became visible");
               // Don't clear wasInAdmin flag here - only clear when user explicitly exits
-            } else if (state === AppState.IDLE && parsed.state && parsed.state !== AppState.IDLE && parsed.state !== AppState.LOGIN) {
+            } else if (state === AppState.IDLE && parsed.state && 
+                       parsed.state !== AppState.IDLE && 
+                       parsed.state !== AppState.LOGIN &&
+                       parsed.state !== AppState.ADMIN_DASHBOARD) {
               // Only restore other states if we're currently at IDLE
               setAllNews(parsed.allNews || []);
               setSelectedNews(parsed.selectedNews || []);
@@ -322,7 +322,7 @@ const App: React.FC = () => {
               setViralMeta(parsed.viralMeta || null);
               setSelectedDate(parsed.selectedDate || getYesterday());
               setLogs(parsed.logs || []);
-              setState(parsed.state);
+              setState(parsed.state as AppState);
               console.log("🔄 Restored state when tab became visible");
             }
           } catch (e) {
