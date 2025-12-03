@@ -168,20 +168,66 @@ const App: React.FC = () => {
     };
   }, []);
 
-  // Save Progress to LocalStorage
+  // Save Progress to LocalStorage (optimized to avoid quota exceeded)
   useEffect(() => {
     if (state === AppState.READY || state === AppState.SELECTING_NEWS || state === AppState.PREVIEW || state === AppState.GENERATING_MEDIA || state === AppState.ADMIN_DASHBOARD) {
-      const progress = {
-        state,
-        allNews,
-        selectedNews,
-        segments,
-        videos,
-        viralMeta,
-        selectedDate,
-        logs
-      };
-      localStorage.setItem('chimpNewsProgress', JSON.stringify(progress));
+      try {
+        // Optimize data before saving: remove large video blobs, limit logs
+        const optimizedVideos = {
+          wide: videos.wide ? (typeof videos.wide === 'string' ? videos.wide : 'url') : null,
+          hostA: videos.hostA.map(v => typeof v === 'string' ? v : 'url'),
+          hostB: videos.hostB.map(v => typeof v === 'string' ? v : 'url')
+        };
+        
+        // Limit logs to last 50 entries to save space
+        const limitedLogs = logs.slice(-50);
+        
+        const progress = {
+          state,
+          allNews: allNews.slice(0, 20), // Limit to 20 news items
+          selectedNews: selectedNews.slice(0, 15), // Limit to 15 selected
+          segments: segments.slice(0, 20), // Limit segments
+          videos: optimizedVideos,
+          viralMeta,
+          selectedDate,
+          logs: limitedLogs
+        };
+        
+        const progressString = JSON.stringify(progress);
+        
+        // Check if data is too large (localStorage limit is ~5-10MB)
+        if (progressString.length > 4 * 1024 * 1024) { // 4MB threshold
+          console.warn('⚠️ Progress data too large, saving minimal state only');
+          const minimalProgress = {
+            state,
+            selectedDate,
+            selectedNews: selectedNews.slice(0, 5).map(n => ({ id: n.id, headline: n.headline }))
+          };
+          localStorage.setItem('chimpNewsProgress', JSON.stringify(minimalProgress));
+        } else {
+          localStorage.setItem('chimpNewsProgress', progressString);
+        }
+      } catch (e: any) {
+        // Handle QuotaExceededError gracefully
+        if (e.name === 'QuotaExceededError' || e.message?.includes('quota')) {
+          console.warn('⚠️ localStorage quota exceeded, clearing old data and saving minimal state');
+          try {
+            // Clear old cache data
+            localStorage.removeItem('chimpnews_cache');
+            // Save minimal state only
+            const minimalProgress = {
+              state,
+              selectedDate,
+              selectedNews: selectedNews.slice(0, 5).map(n => ({ id: n.id, headline: n.headline }))
+            };
+            localStorage.setItem('chimpNewsProgress', JSON.stringify(minimalProgress));
+          } catch (clearError) {
+            console.error('Failed to save even minimal progress:', clearError);
+          }
+        } else {
+          console.error('Error saving progress to localStorage:', e);
+        }
+      }
     }
   }, [state, allNews, selectedNews, segments, videos, viralMeta, selectedDate, logs]);
 
@@ -249,19 +295,23 @@ const App: React.FC = () => {
         // Save ADMIN_DASHBOARD state to localStorage
         if (state === AppState.ADMIN_DASHBOARD) {
           wasInAdminRef.current = true;
-          const progress = {
-            state,
-            allNews,
-            selectedNews,
-            segments,
-            videos,
-            viralMeta,
-            selectedDate,
-            logs
-          };
-          localStorage.setItem('chimpNewsProgress', JSON.stringify(progress));
-          localStorage.setItem('wasInAdmin', 'true');
-          console.log("💾 Saved ADMIN_DASHBOARD state before tab hidden");
+          try {
+            // Save minimal state for admin dashboard
+            const progress = {
+              state,
+              selectedDate,
+              // Don't save large data for admin dashboard
+            };
+            localStorage.setItem('chimpNewsProgress', JSON.stringify(progress));
+            localStorage.setItem('wasInAdmin', 'true');
+            console.log("💾 Saved ADMIN_DASHBOARD state before tab hidden");
+          } catch (e: any) {
+            if (e.name === 'QuotaExceededError' || e.message?.includes('quota')) {
+              console.warn('⚠️ localStorage quota exceeded, skipping save');
+            } else {
+              console.error('Error saving admin state:', e);
+            }
+          }
           return; // Don't save production state for admin dashboard
         }
         // Save current production state to DB before losing it (only if not IDLE or LOGIN)

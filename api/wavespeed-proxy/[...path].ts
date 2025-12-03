@@ -54,6 +54,7 @@ export default async function handler(
 
   try {
     // Extraer el path del query parameter
+    // Con api/wavespeed-proxy/[...path].ts, el path será ['v1', 'tasks'] para /api/wavespeed-proxy/v1/tasks
     const path = req.query.path as string | string[];
     const wavespeedPath = Array.isArray(path) ? path.join('/') : path || '';
 
