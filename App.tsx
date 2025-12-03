@@ -239,13 +239,13 @@ const App: React.FC = () => {
     if (state === AppState.ADMIN_DASHBOARD) {
       wasInAdminRef.current = true;
     }
-    // Note: wasInAdminRef flag is cleared when user explicitly exits admin dashboard
+    // Note: wasInAdminRef flag is cleared when user explicitly exits admin dashboard via onExit callback
   }, [state]);
 
   // Persist state when tab becomes hidden (visibility change)
   useEffect(() => {
     const handleVisibilityChange = async () => {
-      if (document.hidden && state !== AppState.IDLE && state !== AppState.LOGIN && activeChannel && user) {
+      if (document.hidden && activeChannel && user) {
         // Save ADMIN_DASHBOARD state to localStorage
         if (state === AppState.ADMIN_DASHBOARD) {
           wasInAdminRef.current = true;
@@ -264,8 +264,9 @@ const App: React.FC = () => {
           console.log("💾 Saved ADMIN_DASHBOARD state before tab hidden");
           return; // Don't save production state for admin dashboard
         }
-        // Save current production state to DB before losing it
-        if (currentProductionId || (state !== AppState.SELECTING_NEWS && selectedNews.length > 0)) {
+        // Save current production state to DB before losing it (only if not IDLE or LOGIN)
+        if (state !== AppState.IDLE && state !== AppState.LOGIN && 
+            (currentProductionId || (state !== AppState.SELECTING_NEWS && selectedNews.length > 0))) {
           const dateObj = parseSelectedDate(selectedDate);
           // Use actual news item IDs (UUIDs) if available, otherwise fall back to empty array
           const newsIds = selectedNews
@@ -1191,6 +1192,7 @@ const App: React.FC = () => {
 
   // --------------------------------------------------------------------------------
   // MAIN APP
+  // At this point, state cannot be LOGIN or ADMIN_DASHBOARD (handled by early returns above)
   // --------------------------------------------------------------------------------
   return (
     <div className="min-h-screen bg-[#0f0f0f] text-white flex flex-col font-sans">
