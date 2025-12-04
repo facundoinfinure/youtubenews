@@ -261,15 +261,28 @@ export const fetchNewsWithSerpAPI = async (
       ];
       
       // Use a broad query to get diverse results
-      const query = `${config.country} news economy politics today`;
+      const query = `${config.country} news economy politics`;
       
-      console.log(`[SerpAPI] 📰 Fetching news for ${config.country} (${countryConfig.gl}/${countryConfig.hl})`);
+      // Format date for SerpAPI filter (MM/DD/YYYY format required)
+      const month = String(dateToQuery.getMonth() + 1).padStart(2, '0');
+      const day = String(dateToQuery.getDate()).padStart(2, '0');
+      const year = dateToQuery.getFullYear();
+      const dateStr = `${month}/${day}/${year}`;
+      
+      // Use tbs parameter to filter by date range (same day or last 24h)
+      // cdr:1 = custom date range, cd_min/cd_max = date bounds
+      const tbs = `cdr:1,cd_min:${dateStr},cd_max:${dateStr}`;
+      
+      console.log(`[SerpAPI] 📰 Fetching news for ${config.country} on ${dateStr} (${countryConfig.gl}/${countryConfig.hl})`);
+      console.log(`[SerpAPI] 📅 Date filter: ${tbs}`);
       
       const data = await serpApiRequest({
         q: query,
         gl: countryConfig.gl,
         hl: countryConfig.hl,
-        num: '20'  // Request more to filter
+        num: '50',  // Request more news
+        tbs: tbs,   // Date filter
+        tbm: 'nws'  // News search type
       });
       
       // Track cost (~$0.01 per search)
@@ -330,11 +343,11 @@ export const fetchNewsWithSerpAPI = async (
       const viralScoreResults = await calculateViralScoresBatch(itemsForScoring);
       
       // Process and enhance news items with calculated scores
-      // Filter by publication date to ensure only recent news is included
-      const targetDateStr = dateToQuery.toISOString().split('T')[0];
+      // NO DATE FILTERING - let user choose from ALL available news
+      // SerpAPI returns news based on relevance, not strict publication date
       const processedNews: NewsItem[] = uniqueNews
         .map((item, index) => {
-          // Parse publication date
+          // Parse publication date for reference (but don't filter by it)
           const publicationDate = parsePublicationDate(item.date, dateToQuery);
           const scoreResult = viralScoreResults[index] || { score: 50, reasoning: 'Score calculation unavailable' };
           
@@ -349,31 +362,6 @@ export const fetchNewsWithSerpAPI = async (
             imageUrl: item.imageUrl || undefined,
             publicationDate: publicationDate || undefined
           };
-        })
-        .filter((item) => {
-          // Only filter out news items that are too old (more than 7 days from target date)
-          // This allows news from the target date and recent dates to be included
-          if (!item.publicationDate) {
-            // If we can't parse the date, include it (backward compatibility)
-            return true;
-          }
-          
-          const pubDate = typeof item.publicationDate === 'string' 
-            ? new Date(item.publicationDate) 
-            : item.publicationDate;
-          const targetDate = new Date(targetDateStr);
-          
-          // Calculate days difference
-          const daysDiff = Math.floor((targetDate.getTime() - pubDate.getTime()) / (1000 * 60 * 60 * 24));
-          
-          // Include if publication date is within 7 days of target date (before or after)
-          // This allows for news from the target date and recent surrounding dates
-          const isRecent = Math.abs(daysDiff) <= 7;
-          
-          if (!isRecent) {
-            console.log(`⏭️ Filtering out "${item.headline}" - publication date: ${pubDate.toISOString().split('T')[0]}, target: ${targetDateStr} (${daysDiff} days difference)`);
-          }
-          return isRecent;
         });
       
       // Sort by viral score (for display purposes, but don't limit quantity)

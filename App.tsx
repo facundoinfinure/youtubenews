@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { AppState, ChannelConfig, NewsItem, BroadcastSegment, VideoAssets, ViralMetadata, UserProfile, Channel, ScriptLine, StoredVideo, ScriptWithScenes, NarrativeType } from './types';
-import { signInWithGoogle, getSession, signOut, getAllChannels, saveChannel, saveVideoToDB, getNewsByDate, saveNewsToDB, markNewsAsSelected, deleteVideoFromDB, loadConfigFromDB, supabase, fetchVideosFromDB, saveProduction, getIncompleteProductions, getProductionById, updateProductionStatus, uploadAudioToStorage, uploadImageToStorage, getAudioFromStorage, findCachedScript, findCachedAudio, getAllProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction, verifyStorageBucket, getCompletedProductionsWithVideoInfo, ProductionWithVideoInfo, getUsedNewsIdsForDate, saveCheckpoint, getLastCheckpoint, markStepFailed, saveCachedAudio } from './services/supabaseService';
+import { signInWithGoogle, getSession, signOut, getAllChannels, saveChannel, saveVideoToDB, getNewsByDate, saveNewsToDB, markNewsAsSelected, deleteVideoFromDB, supabase, fetchVideosFromDB, saveProduction, getIncompleteProductions, getProductionById, updateProductionStatus, uploadAudioToStorage, uploadImageToStorage, getAudioFromStorage, findCachedScript, findCachedAudio, getAllProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction, verifyStorageBucket, getCompletedProductionsWithVideoInfo, ProductionWithVideoInfo, getUsedNewsIdsForDate, saveCheckpoint, getLastCheckpoint, markStepFailed, saveCachedAudio } from './services/supabaseService';
 import { fetchEconomicNews, generateScript, generateScriptWithScenes, convertScenesToScriptLines, generateSegmentedAudio, generateSegmentedAudioWithCache, setFindCachedAudioFunction, generateBroadcastVisuals, generateViralMetadata, generateThumbnail, generateThumbnailVariants, generateViralHook, generateVideoSegmentsWithInfiniteTalk, composeVideoWithShotstack, isCompositionAvailable, getCompositionStatus } from './services/geminiService';
 import { uploadVideoToYouTube, deleteVideoFromYouTube } from './services/youtubeService';
 import { ContentCache } from './services/ContentCache';
@@ -148,24 +148,15 @@ const App: React.FC = () => {
 
   const addLog = (msg: string) => setLogs(prev => [...prev, msg]);
 
-  // Load Config from DB on mount & Check Auth
+  // Load Channels from DB on mount (channels table is the single source of truth)
   useEffect(() => {
-    const initConfig = async () => {
-      const savedConfig = await loadConfigFromDB();
-      if (savedConfig) {
-        setConfig(savedConfig);
-        console.log("Configuration loaded from Supabase");
-      }
-    };
-    initConfig();
-
-    // Load channels
     const loadChannels = async () => {
       const allChannels = await getAllChannels();
       setChannels(allChannels);
       if (allChannels.length > 0) {
         setActiveChannel(allChannels[0]);
         setConfig(allChannels[0].config);
+        console.log("Configuration loaded from channels table", allChannels[0].config);
       }
     };
     loadChannels();
