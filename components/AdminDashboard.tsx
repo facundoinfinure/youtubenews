@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { ChannelConfig, CharacterProfile, StoredVideo, Channel, UserProfile, Production } from '../types';
 import { fetchVideosFromDB, saveConfigToDB, getAllChannels, saveChannel, uploadImageToStorage, getIncompleteProductions, getAllProductions, getPublishedProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction } from '../services/supabaseService';
-import { generateReferenceImage, generateSeedImage } from '../services/geminiService';
+import { generateSeedImage } from '../services/geminiService';
 import { CostTracker } from '../services/CostTracker';
 import { ContentCache } from '../services/ContentCache';
 import { VideoListSkeleton, AnalyticsCardSkeleton, EmptyState } from './LoadingStates';
@@ -158,10 +158,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
   const [productionFilter, setProductionFilter] = useState<'all' | 'incomplete' | 'completed' | 'failed' | 'published'>('incomplete');
   const [showNewChannelModal, setShowNewChannelModal] = useState(false);
   const [newChannelName, setNewChannelName] = useState('');
-  const [sceneDescription, setSceneDescription] = useState('');
-  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
-  const [isUploadingImage, setIsUploadingImage] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   // Seed image generation states
   const [generatingSeedImage, setGeneratingSeedImage] = useState<'hostASolo' | 'hostBSolo' | 'twoShot' | null>(null);
   const [uploadingSeedImage, setUploadingSeedImage] = useState<'hostASolo' | 'hostBSolo' | 'twoShot' | null>(null);
@@ -268,67 +264,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
     toast.success('Configuration saved & synced to database!');
   };
 
-  const handleGenerateReferenceImage = async () => {
-    setIsGeneratingImage(true);
-    try {
-      const imageUrl = await generateReferenceImage(tempConfig, sceneDescription);
-      if (imageUrl) {
-        // Upload to storage and get permanent URL
-        setIsUploadingImage(true);
-        const fileName = `${newChannelName.trim() || activeChannel?.name || 'channel'}-reference-${Date.now()}.png`;
-        const permanentUrl = await uploadImageToStorage(imageUrl, fileName);
-        
-        if (permanentUrl) {
-          setTempConfig({ ...tempConfig, referenceImageUrl: permanentUrl });
-          toast.success('Imagen de referencia generada exitosamente!');
-        } else {
-          // Fallback to data URL if upload fails
-          setTempConfig({ ...tempConfig, referenceImageUrl: imageUrl });
-          toast.success('Imagen generada (usando URL temporal)');
-        }
-      } else {
-        toast.error('No se pudo generar la imagen');
-      }
-    } catch (error) {
-      toast.error(`Error generando imagen: ${(error as Error).message}`);
-    } finally {
-      setIsGeneratingImage(false);
-      setIsUploadingImage(false);
-    }
-  };
-
-  const handleUploadReferenceImage = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    if (!file.type.startsWith('image/')) {
-      toast.error('Por favor selecciona un archivo de imagen');
-      return;
-    }
-
-    setIsUploadingImage(true);
-    try {
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        const dataUrl = reader.result as string;
-        const fileName = `${newChannelName.trim() || activeChannel?.name || 'channel'}-reference-${Date.now()}.${file.name.split('.').pop()}`;
-        const permanentUrl = await uploadImageToStorage(dataUrl, fileName);
-        
-        if (permanentUrl) {
-          setTempConfig({ ...tempConfig, referenceImageUrl: permanentUrl });
-          toast.success('Imagen cargada exitosamente!');
-        } else {
-          setTempConfig({ ...tempConfig, referenceImageUrl: dataUrl });
-          toast.success('Imagen cargada (usando URL temporal)');
-        }
-        setIsUploadingImage(false);
-      };
-      reader.readAsDataURL(file);
-    } catch (error) {
-      toast.error(`Error cargando imagen: ${(error as Error).message}`);
-      setIsUploadingImage(false);
-    }
-  };
 
   const handleNewChannel = async () => {
     if (!newChannelName.trim()) {
@@ -348,7 +283,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
         toast.success(`Channel "${newChannelName}" created!`);
         setShowNewChannelModal(false);
         setNewChannelName('');
-        setSceneDescription('');
         // Reload to fetch new channels
         window.location.reload();
       } else {
@@ -728,81 +662,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                 profile={tempConfig.characters.hostB}
                 onChange={(p) => setTempConfig({ ...tempConfig, characters: { ...tempConfig.characters, hostB: p } })}
               />
-            </div>
-
-            {/* Reference Image Section */}
-            <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
-              <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
-                <span className="text-purple-500">🖼️</span> Imagen de Referencia del Escenario
-              </h3>
-              <p className="text-sm text-gray-400 mb-4">
-                Esta imagen se usará como referencia para mantener coherencia visual en todas las generaciones de video. 
-                Debe mostrar el escenario completo con ambos personajes.
-              </p>
-
-              {/* Current Image Preview */}
-              {tempConfig.referenceImageUrl && (
-                <div className="mb-4">
-                  <label className="text-sm text-gray-400 block mb-2">Imagen Actual:</label>
-                  <div className="relative inline-block">
-                    <img 
-                      src={tempConfig.referenceImageUrl} 
-                      alt="Reference scene" 
-                      className="max-w-full h-auto rounded-lg border border-[#333] max-h-64"
-                    />
-                    <button
-                      onClick={() => setTempConfig({ ...tempConfig, referenceImageUrl: undefined })}
-                      className="absolute top-2 right-2 bg-red-600 hover:bg-red-700 text-white rounded-full w-8 h-8 flex items-center justify-center text-sm"
-                    >
-                      ×
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Generate Image */}
-              <div className="space-y-4">
-                <div>
-                  <label className="text-sm text-gray-400 block mb-2">
-                    Descripción del Escenario (opcional):
-                  </label>
-                  <textarea
-                    value={sceneDescription}
-                    onChange={(e) => setSceneDescription(e.target.value)}
-                    placeholder="Ej: Estudio de noticias moderno con paredes de madera, iluminación profesional, micrófonos y pantallas..."
-                    className="w-full bg-[#111] border border-[#333] p-2 rounded text-white h-24"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">
-                    Si no proporcionas una descripción, se generará basándose en la configuración del canal.
-                  </p>
-                </div>
-
-                <div className="flex gap-3">
-                  <button
-                    onClick={handleGenerateReferenceImage}
-                    disabled={isGeneratingImage || isUploadingImage}
-                    className="flex-1 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 rounded text-white font-bold transition-all"
-                  >
-                    {isGeneratingImage ? 'Generando...' : '🎨 Generar Imagen con IA'}
-                  </button>
-                  
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={isGeneratingImage || isUploadingImage}
-                    className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 rounded text-white font-bold transition-all"
-                  >
-                    {isUploadingImage ? 'Subiendo...' : '📤 Cargar Imagen'}
-                  </button>
-                  
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    onChange={handleUploadReferenceImage}
-                    className="hidden"
-                  />
-                </div>
-              </div>
             </div>
 
             {/* Narrative Engine Settings (v2.0) */}
@@ -1677,71 +1536,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                 />
               </div>
 
-              {/* Reference Image Section in Modal */}
-              <div className="border-t border-[#333] pt-4">
-                <h4 className="text-sm font-bold mb-2 text-purple-400">🖼️ Imagen de Referencia (Opcional)</h4>
-                <p className="text-xs text-gray-500 mb-3">
-                  Crea o carga una imagen del escenario con los personajes para mantener coherencia visual.
-                </p>
-
-                {/* Current Image Preview */}
-                {tempConfig.referenceImageUrl && (
-                  <div className="mb-3">
-                    <img 
-                      src={tempConfig.referenceImageUrl} 
-                      alt="Reference scene" 
-                      className="max-w-full h-auto rounded-lg border border-[#333] max-h-48"
-                    />
-                  </div>
-                )}
-
-                <div className="space-y-3">
-                  <div>
-                    <label className="text-xs text-gray-400 block mb-1">
-                      Descripción del Escenario (opcional):
-                    </label>
-                    <textarea
-                      value={sceneDescription}
-                      onChange={(e) => setSceneDescription(e.target.value)}
-                      placeholder="Ej: Estudio moderno con paredes de madera, iluminación profesional..."
-                      className="w-full bg-[#111] border border-[#333] p-2 rounded text-white text-sm h-20"
-                    />
-                  </div>
-
-                  <div className="flex gap-2">
-                    <button
-                      onClick={handleGenerateReferenceImage}
-                      disabled={isGeneratingImage || isUploadingImage}
-                      className="flex-1 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed px-3 py-2 rounded text-sm font-bold transition-all"
-                    >
-                      {isGeneratingImage ? 'Generando...' : '🎨 Generar con IA'}
-                    </button>
-                    
-                    <button
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={isGeneratingImage || isUploadingImage}
-                      className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed px-3 py-2 rounded text-sm font-bold transition-all"
-                    >
-                      {isUploadingImage ? 'Subiendo...' : '📤 Cargar'}
-                    </button>
-                    
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept="image/*"
-                      onChange={handleUploadReferenceImage}
-                      className="hidden"
-                    />
-                  </div>
-                </div>
-              </div>
-
               <div className="flex gap-3 justify-end pt-4 border-t border-[#333]">
                 <button
                   onClick={() => {
                     setShowNewChannelModal(false);
                     setNewChannelName('');
-                    setSceneDescription('');
                   }}
                   className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm"
                 >
