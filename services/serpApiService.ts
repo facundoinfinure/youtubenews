@@ -316,47 +316,53 @@ export const fetchNewsWithSerpAPI = async (
       }));
       
       // Calculate viral scores in batch (parallel processing)
-      const viralScores = await calculateViralScoresBatch(itemsForScoring);
+      const viralScoreResults = await calculateViralScoresBatch(itemsForScoring);
       
       // Process and enhance news items with calculated scores
-      // Filter by publication date to ensure only news from the target date is included
+      // Filter by publication date to ensure only recent news is included
       const targetDateStr = dateToQuery.toISOString().split('T')[0];
       const processedNews: NewsItem[] = uniqueNews
         .map((item, index) => {
           // Parse publication date
           const publicationDate = parsePublicationDate(item.date, dateToQuery);
+          const scoreResult = viralScoreResults[index] || { score: 50, reasoning: 'Score calculation unavailable' };
           
           return {
             headline: item.headline,
             source: item.source,
             url: item.url,
             summary: item.summary,
-            viralScore: viralScores[index] || 50, // Fallback to 50 if score calculation failed
+            viralScore: scoreResult.score,
+            viralScoreReasoning: scoreResult.reasoning,
             imageKeyword: extractImageKeyword(item.headline),
             imageUrl: item.imageUrl || undefined,
             publicationDate: publicationDate || undefined
           };
         })
         .filter((item) => {
-          // Only include news items that have a publication date matching the target date
+          // Only filter out news items that are too old (more than 7 days from target date)
+          // This allows news from the target date and recent dates to be included
           if (!item.publicationDate) {
             // If we can't parse the date, include it (backward compatibility)
-            // But log a warning
-            console.warn(`⚠️ News item "${item.headline}" has no parseable publication date, including anyway`);
             return true;
           }
           
           const pubDate = typeof item.publicationDate === 'string' 
             ? new Date(item.publicationDate) 
             : item.publicationDate;
-          const pubDateStr = pubDate.toISOString().split('T')[0];
+          const targetDate = new Date(targetDateStr);
           
-          // Include if publication date matches target date
-          const matches = pubDateStr === targetDateStr;
-          if (!matches) {
-            console.log(`⏭️ Filtering out "${item.headline}" - publication date: ${pubDateStr}, target: ${targetDateStr}`);
+          // Calculate days difference
+          const daysDiff = Math.floor((targetDate.getTime() - pubDate.getTime()) / (1000 * 60 * 60 * 24));
+          
+          // Include if publication date is within 7 days of target date (before or after)
+          // This allows for news from the target date and recent surrounding dates
+          const isRecent = Math.abs(daysDiff) <= 7;
+          
+          if (!isRecent) {
+            console.log(`⏭️ Filtering out "${item.headline}" - publication date: ${pubDate.toISOString().split('T')[0]}, target: ${targetDateStr} (${daysDiff} days difference)`);
           }
-          return matches;
+          return isRecent;
         });
       
       // Sort by viral score and take top 15
@@ -365,8 +371,9 @@ export const fetchNewsWithSerpAPI = async (
         .slice(0, 15);
       
       // Log score distribution
+      const scores = sortedNews.map(n => n.viralScore);
       const scoreRange = sortedNews.length > 0 
-        ? `${Math.min(...viralScores)}-${Math.max(...viralScores)}`
+        ? `${Math.min(...scores)}-${Math.max(...scores)}`
         : 'N/A';
       console.log(`[SerpAPI] 📊 Viral score range: ${scoreRange}`);
       

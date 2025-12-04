@@ -365,6 +365,7 @@ export const saveNewsToDB = async (newsDate: Date, news: NewsItem[], channelId: 
       url: item.url,
       summary: item.summary,
       viral_score: item.viralScore,
+      viral_score_reasoning: item.viralScoreReasoning || null,
       image_keyword: item.imageKeyword,
       image_url: item.imageUrl || null,
       selected: false
@@ -393,15 +394,14 @@ export const getNewsByDate = async (newsDate: Date, channelId: string): Promise<
 
   const dateStr = newsDate.toISOString().split('T')[0];
 
-  // First, get all news items for this news_date and channel
-  // We'll filter by publication_date on the client side to ensure accuracy
+  // Get all news items for this channel (we'll filter by date on the client side)
+  // This allows us to include recent news from surrounding dates (within 7 days)
   const { data, error } = await supabase
     .from('news_items')
     .select('*')
-    .eq('news_date', dateStr) // Filter by news_date first (for backward compatibility)
     .eq('channel_id', channelId)
     .order('viral_score', { ascending: false })
-    .limit(100); // Explicit limit to ensure we get all news (Supabase default is 1000, but being explicit)
+    .limit(200); // Increased limit to account for wider date range
 
   if (error) {
     console.error("Error fetching news:", error);
@@ -413,20 +413,27 @@ export const getNewsByDate = async (newsDate: Date, channelId: string): Promise<
     return [];
   }
 
-  // Filter by publication_date to ensure we only get news published on the selected date
-  // This ensures that news articles match the date the user selected, not just when they were saved
+  // Filter by publication_date to include recent news (within 7 days of target date)
+  // This allows news from the target date and recent surrounding dates
   // For backward compatibility: if publication_date is null, use news_date
+  const targetDate = new Date(dateStr);
   const filteredData = data.filter((row: any) => {
+    let pubDate: Date;
     if (row.publication_date) {
-      // If publication_date exists, it must match the target date
-      return row.publication_date === dateStr;
+      pubDate = new Date(row.publication_date);
     } else {
       // If no publication_date (old records), use news_date
-      return row.news_date === dateStr;
+      pubDate = new Date(row.news_date);
     }
+    
+    // Calculate days difference
+    const daysDiff = Math.floor((targetDate.getTime() - pubDate.getTime()) / (1000 * 60 * 60 * 24));
+    
+    // Include if publication date is within 7 days of target date (before or after)
+    return Math.abs(daysDiff) <= 7;
   });
 
-  console.log(`📰 Retrieved ${filteredData.length} news items from database for publication date ${dateStr} (filtered from ${data.length} total)`);
+  console.log(`📰 Retrieved ${filteredData.length} news items from database for date ${dateStr} (filtered from ${data.length} total)`);
   
   return filteredData.map((row: any) => ({
     id: row.id, // Include UUID from database
@@ -435,6 +442,7 @@ export const getNewsByDate = async (newsDate: Date, channelId: string): Promise<
     url: row.url,
     summary: row.summary,
     viralScore: row.viral_score,
+    viralScoreReasoning: row.viral_score_reasoning || undefined,
     imageKeyword: row.image_keyword,
     imageUrl: row.image_url,
     publicationDate: row.publication_date || row.news_date // Include publication date

@@ -6,6 +6,7 @@ export interface NewsItem {
   url: string;
   summary: string;
   viralScore: number;
+  viralScoreReasoning?: string; // Explanation of why this score was assigned
   imageKeyword: string;
   imageUrl?: string; // Real image URL from Google News
   publicationDate?: Date | string; // Actual publication date of the news article

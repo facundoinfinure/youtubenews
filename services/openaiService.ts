@@ -472,7 +472,7 @@ export const calculateViralScoreWithGPT = async (
   summary: string,
   source: string,
   date?: string
-): Promise<number> => {
+): Promise<{ score: number; reasoning: string }> => {
   const prompt = `You are an expert at predicting viral content performance on social media and YouTube.
 
 Analyze this news story and calculate a viral score from 0-100:
@@ -522,14 +522,22 @@ Be strict: Average news = 40-60, Breaking/controversial = 70-85, Highly viral = 
     const analysis = JSON.parse(content);
     
     const score = Math.round(analysis.viral_score || 50);
-    console.log(`[Viral Score] 📊 "${headline.substring(0, 50)}..." = ${score} (${analysis.reasoning?.substring(0, 50) || 'analyzed'})`);
+    const reasoning = analysis.reasoning || 'No explanation provided';
+    console.log(`[Viral Score] 📊 "${headline.substring(0, 50)}..." = ${score} (${reasoning.substring(0, 50)})`);
     
     // Ensure score is between 0-100
-    return Math.max(0, Math.min(100, score));
+    return {
+      score: Math.max(0, Math.min(100, score)),
+      reasoning: reasoning
+    };
   } catch (error: any) {
     console.error(`[Viral Score] ❌ GPT analysis failed:`, error.message);
     // Fallback to basic calculation
-    return calculateBasicViralScore(headline, summary, source, date);
+    const fallbackScore = calculateBasicViralScore(headline, summary, source, date);
+    return {
+      score: fallbackScore,
+      reasoning: 'Score calculated using basic algorithm (GPT analysis unavailable)'
+    };
   }
 };
 
@@ -539,19 +547,19 @@ Be strict: Average news = 40-60, Breaking/controversial = 70-85, Highly viral = 
  */
 export const calculateViralScoresBatch = async (
   newsItems: Array<{ headline: string; summary: string; source: string; date?: string }>
-): Promise<number[]> => {
+): Promise<Array<{ score: number; reasoning: string }>> => {
   console.log(`[Viral Score] 🔥 Analyzing ${newsItems.length} news items with GPT-4o...`);
   
   // Process in parallel (up to 10 at a time to avoid rate limits)
   const batchSize = 10;
-  const scores: number[] = [];
+  const results: Array<{ score: number; reasoning: string }> = [];
   
   for (let i = 0; i < newsItems.length; i += batchSize) {
     const batch = newsItems.slice(i, i + batchSize);
-    const batchScores = await Promise.all(
+    const batchResults = await Promise.all(
       batch.map(item => calculateViralScoreWithGPT(item.headline, item.summary, item.source, item.date))
     );
-    scores.push(...batchScores);
+    results.push(...batchResults);
     
     // Small delay between batches to avoid rate limits
     if (i + batchSize < newsItems.length) {
@@ -559,8 +567,9 @@ export const calculateViralScoresBatch = async (
     }
   }
   
-  console.log(`[Viral Score] ✅ Analyzed ${scores.length} items. Range: ${Math.min(...scores)}-${Math.max(...scores)}`);
-  return scores;
+  const scores = results.map(r => r.score);
+  console.log(`[Viral Score] ✅ Analyzed ${results.length} items. Range: ${Math.min(...scores)}-${Math.max(...scores)}`);
+  return results;
 };
 
 /**
