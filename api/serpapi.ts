@@ -5,9 +5,12 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
  * 
  * Búsqueda de noticias usando Google News via SerpAPI
  * 
- * Uso:
+ * Uso con query:
  * - GET /api/serpapi?q=bitcoin&gl=us&hl=en
  * - GET /api/serpapi?q=economia+argentina&gl=ar&hl=es
+ * 
+ * Uso con topic_token (para noticias por tópico como Business, Technology, etc.):
+ * - GET /api/serpapi?engine=google_news&topic_token=CAAq...&gl=us&hl=en
  */
 
 const SERPAPI_BASE_URL = 'https://serpapi.com/search.json';
@@ -57,31 +60,53 @@ export default async function handler(
     
     // Parámetros requeridos
     searchParams.set('api_key', SERPAPI_API_KEY);
-    searchParams.set('engine', 'google_news');
     
-    // Query de búsqueda
+    // Engine (default: google_news)
+    const engine = (req.query.engine as string) || 'google_news';
+    searchParams.set('engine', engine);
+    
+    // Obtener query y topic_token
     const query = req.query.q as string;
-    if (!query) {
-      return res.status(400).json({ error: 'Missing required parameter: q (search query)' });
+    const topicToken = req.query.topic_token as string;
+    
+    // Debe tener al menos q o topic_token
+    if (!query && !topicToken) {
+      return res.status(400).json({ 
+        error: 'Missing required parameter: q (search query) or topic_token',
+        message: 'Provide either q for search or topic_token for topic-based news'
+      });
     }
-    searchParams.set('q', query);
+    
+    // Si hay query, usarla
+    if (query) {
+      searchParams.set('q', query);
+    }
+    
+    // Si hay topic_token, usarlo (para noticias por tópico)
+    if (topicToken) {
+      searchParams.set('topic_token', topicToken);
+    }
     
     // Parámetros opcionales
     if (req.query.gl) searchParams.set('gl', req.query.gl as string); // Country (us, ar, mx, etc.)
     if (req.query.hl) searchParams.set('hl', req.query.hl as string); // Language (en, es, etc.)
     if (req.query.num) searchParams.set('num', req.query.num as string); // Number of results
     
-    // Filtro de tiempo (tbs parameter)
-    // qdr:d = past day, qdr:w = past week, qdr:m = past month
-    if (req.query.tbs) {
-      searchParams.set('tbs', req.query.tbs as string);
-    } else {
-      // Por defecto, noticias del último día
-      searchParams.set('tbs', 'qdr:d');
+    // Filtro de tiempo (tbs parameter) - solo para búsquedas con q, no para topic_token
+    if (query) {
+      if (req.query.tbs) {
+        searchParams.set('tbs', req.query.tbs as string);
+      } else {
+        // Por defecto, noticias del último día (solo para búsquedas)
+        searchParams.set('tbs', 'qdr:d');
+      }
     }
 
     const fullUrl = `${SERPAPI_BASE_URL}?${searchParams.toString()}`;
-    console.log(`[${requestId}] Searching: q="${query}", gl=${req.query.gl || 'us'}, hl=${req.query.hl || 'en'}`);
+    const logMsg = topicToken 
+      ? `topic_token=${topicToken.substring(0, 20)}...` 
+      : `q="${query}"`;
+    console.log(`[${requestId}] Searching: ${logMsg}, gl=${req.query.gl || 'us'}, hl=${req.query.hl || 'en'}`);
 
     const fetchStartTime = Date.now();
     const response = await fetch(fullUrl);

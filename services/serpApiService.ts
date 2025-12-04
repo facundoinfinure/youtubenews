@@ -43,14 +43,8 @@ const COUNTRY_CONFIG: Record<string, { gl: string; hl: string }> = {
   'Perú': { gl: 'pe', hl: 'es' },
 };
 
-// Topic tokens for Google News topics (Business focus for economic/political news)
-// These tokens are specific to language/region combinations
-const TOPIC_TOKENS: Record<string, string> = {
-  // Business topic tokens by language
-  'en': 'CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx6TVdZU0FtVnVHZ0pWVXlnQVAB', // Business (US/en)
-  'es': 'CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx6TVdZU0FtVnpHZ0pGVXlnQVAB', // Negocios (ES/es)
-  'pt': 'CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx6TVdZU0FuQjBHZ0pDVWlnQVAB', // Negócios (BR/pt)
-};
+// Default topic token (Business US/en) - used if channel doesn't have one configured
+const DEFAULT_TOPIC_TOKEN = 'CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx6TVdZU0FtVnVHZ0pWVXlnQVAB';
 
 /**
  * Make a request to SerpAPI via proxy
@@ -200,14 +194,14 @@ export const fetchNewsWithSerpAPI = async (
   targetDate: Date | undefined,
   config: ChannelConfig
 ): Promise<NewsItem[]> => {
-  // Get country config
+  // Get country config for language/region
   const countryConfig = COUNTRY_CONFIG[config.country] || { gl: 'us', hl: 'en' };
   
-  // Get topic token for the language (Business topic)
-  const topicToken = TOPIC_TOKENS[countryConfig.hl] || TOPIC_TOKENS['en'];
+  // Use channel's topic token, or fall back to default (Business US/en)
+  const topicToken = config.topicToken || DEFAULT_TOPIC_TOKEN;
   
-  // Cache key based on country (not date, since we fetch latest and filter in DB)
-  const cacheKey = `serpapi_topic_news_${config.country}_${new Date().toISOString().split('T')[0]}_v2`;
+  // Cache key based on channel name (each channel has its own topic)
+  const cacheKey = `serpapi_topic_news_${config.channelName}_${new Date().toISOString().split('T')[0]}_v3`;
 
   return ContentCache.getOrGenerate(
     cacheKey,

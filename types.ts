@@ -132,6 +132,7 @@ export interface ChannelConfig {
   captionsEnabled: boolean;
   defaultTags?: string[]; // Added for default tags
   referenceImageUrl?: string; // NEW: Reference image for visual consistency
+  topicToken?: string; // Google News topic token for news fetching (e.g., Business, Argentina, etc.)
   characters: {
     hostA: CharacterProfile;
     hostB: CharacterProfile;
