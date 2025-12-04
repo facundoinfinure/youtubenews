@@ -1052,6 +1052,39 @@ export const generateThumbnail = async (newsContext: string, config: ChannelConf
   return null;
 };
 
+// Generate seed image for Narrative Engine hosts
+export const generateSeedImage = async (prompt: string, aspectRatio: '1:1' | '16:9' = '1:1'): Promise<string | null> => {
+  // Try WaveSpeed first
+  if (isWavespeedConfigured()) {
+    try {
+      console.log(`🎨 [SeedImage] Generating seed image using WaveSpeed...`);
+      const taskId = await createWavespeedImageTask(prompt, aspectRatio);
+      const imageUrl = await pollWavespeedImageTask(taskId);
+      const dataUri = await imageUrlToDataUri(imageUrl);
+      CostTracker.track('seed_image', 'wavespeed/nano-banana-pro', 0.14);
+      console.log(`✅ [SeedImage] Generated via WaveSpeed`);
+      return dataUri;
+    } catch (wavespeedError) {
+      console.error(`⚠️ [SeedImage] WaveSpeed failed:`, (wavespeedError as Error).message);
+    }
+  }
+
+  // Fallback to DALL-E
+  try {
+    console.log(`🎨 [SeedImage] Generating seed image using DALL-E 3...`);
+    const size = aspectRatio === '16:9' ? '1792x1024' : '1024x1024';
+    const dalleImage = await generateImageWithDALLE(prompt, size as '1024x1024' | '1792x1024');
+    if (dalleImage) {
+      console.log(`✅ [SeedImage] Generated via DALL-E 3`);
+      return dalleImage;
+    }
+  } catch (dalleError) {
+    console.error(`❌ [SeedImage] DALL-E 3 failed:`, (dalleError as Error).message);
+  }
+
+  return null;
+};
+
 export const generateThumbnailVariants = async (
   newsContext: string,
   config: ChannelConfig,

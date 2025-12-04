@@ -11,24 +11,12 @@ interface NewsSelectorProps {
 
 export const NewsSelector: React.FC<NewsSelectorProps> = ({ news, onConfirmSelection, date, usedNewsIds = new Set() }) => {
   const [selectedIndices, setSelectedIndices] = useState<number[]>([]);
-  const [minViralScore, setMinViralScore] = useState<number>(0);
-  const [maxViralScore, setMaxViralScore] = useState<number>(100);
   const [hoveredScoreIndex, setHoveredScoreIndex] = useState<number | null>(null);
 
   // Reset selection when news changes
   React.useEffect(() => {
     setSelectedIndices([]);
   }, [news]);
-
-  // Calculate min/max viral scores from available news
-  const viralScores = news.map(n => n.viralScore);
-  const actualMin = Math.min(...viralScores, 0);
-  const actualMax = Math.max(...viralScores, 100);
-
-  // Filter news by viral score range
-  const filteredNews = news.filter(item => 
-    item.viralScore >= minViralScore && item.viralScore <= maxViralScore
-  );
 
   const toggleSelection = (index: number) => {
     const item = news[index];
@@ -48,17 +36,10 @@ export const NewsSelector: React.FC<NewsSelectorProps> = ({ news, onConfirmSelec
 
   const handleConfirm = () => {
     if (selectedIndices.length >= 2 && selectedIndices.length <= 5) {
-      // Map filtered indices back to original news array indices
-      const selectedItems = selectedIndices.map(i => filteredNews[i]);
+      const selectedItems = selectedIndices.map(i => news[i]);
       onConfirmSelection(selectedItems);
     }
   };
-
-  // Update selected indices when filtered news changes
-  React.useEffect(() => {
-    // Reset selection when filter changes significantly
-    setSelectedIndices([]);
-  }, [minViralScore, maxViralScore]);
 
   if (!news || news.length === 0) {
     return (
@@ -66,63 +47,6 @@ export const NewsSelector: React.FC<NewsSelectorProps> = ({ news, onConfirmSelec
         <div className="text-6xl mb-4">📰</div>
         <h2 className="text-2xl font-bold text-white mb-2">No News Available</h2>
         <p className="text-gray-400">No news stories found for {date.toLocaleDateString()}.</p>
-      </div>
-    );
-  }
-
-  if (filteredNews.length === 0) {
-    return (
-      <div className="w-full bg-[#121212] rounded-xl p-6 shadow-2xl border border-[#333]">
-        <div className="flex justify-between items-end mb-6">
-          <div>
-            <h2 className="text-2xl font-bold text-white mb-2">Editorial Meeting</h2>
-            <p className="text-gray-400 text-sm">
-              Wire reports for <span className="text-white font-mono">{date.toLocaleDateString()}</span>.
-            </p>
-          </div>
-        </div>
-        <div className="bg-yellow-500/10 border border-yellow-500/50 rounded-lg p-4 mb-4">
-          <p className="text-yellow-400 text-sm">
-            ⚠️ No news found with viral score between {minViralScore} and {maxViralScore}.
-            Adjust the filter below to see more news.
-          </p>
-        </div>
-        {/* Filter controls - shown even when no results */}
-        <div className="bg-[#1a1a1a] rounded-lg p-4 border border-[#333] mb-4">
-          <div className="flex items-center gap-4">
-            <label className="text-sm text-gray-400 whitespace-nowrap">Viral Score Filter:</label>
-            <div className="flex-1 flex items-center gap-3">
-              <input
-                type="range"
-                min={actualMin}
-                max={actualMax}
-                value={minViralScore}
-                onChange={(e) => setMinViralScore(Number(e.target.value))}
-                className="flex-1"
-              />
-              <div className="text-sm text-white font-mono w-20 text-center">
-                {minViralScore} - {maxViralScore}
-              </div>
-              <input
-                type="range"
-                min={actualMin}
-                max={actualMax}
-                value={maxViralScore}
-                onChange={(e) => setMaxViralScore(Number(e.target.value))}
-                className="flex-1"
-              />
-            </div>
-            <button
-              onClick={() => {
-                setMinViralScore(actualMin);
-                setMaxViralScore(actualMax);
-              }}
-              className="text-xs text-blue-400 hover:text-blue-300 px-3 py-1 border border-blue-400/50 rounded"
-            >
-              Reset
-            </button>
-          </div>
-        </div>
       </div>
     );
   }
@@ -150,48 +74,13 @@ export const NewsSelector: React.FC<NewsSelectorProps> = ({ news, onConfirmSelec
         </div>
       </div>
 
-      {/* Viral Score Filter */}
-      <div className="bg-[#1a1a1a] rounded-lg p-4 border border-[#333] mb-4">
-        <div className="flex items-center gap-4">
-          <label className="text-sm text-gray-400 whitespace-nowrap">Viral Score Filter:</label>
-          <div className="flex-1 flex items-center gap-3">
-            <input
-              type="range"
-              min={actualMin}
-              max={actualMax}
-              value={minViralScore}
-              onChange={(e) => setMinViralScore(Number(e.target.value))}
-              className="flex-1"
-            />
-            <div className="text-sm text-white font-mono w-20 text-center">
-              {minViralScore} - {maxViralScore}
-            </div>
-            <input
-              type="range"
-              min={actualMin}
-              max={actualMax}
-              value={maxViralScore}
-              onChange={(e) => setMaxViralScore(Number(e.target.value))}
-              className="flex-1"
-            />
-          </div>
-          <button
-            onClick={() => {
-              setMinViralScore(actualMin);
-              setMaxViralScore(actualMax);
-            }}
-            className="text-xs text-blue-400 hover:text-blue-300 px-3 py-1 border border-blue-400/50 rounded"
-          >
-            Reset
-          </button>
-        </div>
-        <p className="text-xs text-gray-500 mt-2">
-          Showing {filteredNews.length} of {news.length} news items
-        </p>
-      </div>
+      {/* News count indicator */}
+      <p className="text-xs text-gray-500 mb-4">
+        Showing {news.length} news items
+      </p>
 
       <div className="space-y-3 mb-8 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
-        {filteredNews.map((item, idx) => {
+        {news.map((item, idx) => {
           const isSelected = selectedIndices.includes(idx);
           const isUsed = item.id ? usedNewsIds.has(item.id) : false;
           const isDisabled = isUsed || (!isSelected && selectedIndices.length >= 5);

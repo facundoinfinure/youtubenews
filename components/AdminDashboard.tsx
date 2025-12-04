@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { ChannelConfig, CharacterProfile, StoredVideo, Channel, UserProfile, Production } from '../types';
 import { fetchVideosFromDB, saveConfigToDB, getAllChannels, saveChannel, uploadImageToStorage, getIncompleteProductions, getAllProductions, getPublishedProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction } from '../services/supabaseService';
-import { generateReferenceImage } from '../services/geminiService';
+import { generateReferenceImage, generateSeedImage } from '../services/geminiService';
 import { CostTracker } from '../services/CostTracker';
 import { ContentCache } from '../services/ContentCache';
 import { VideoListSkeleton, AnalyticsCardSkeleton, EmptyState } from './LoadingStates';
@@ -53,7 +53,7 @@ const CharacterEditor: React.FC<{
       </div>
 
       <div>
-        <label className="text-xs text-gray-500 block mb-1">Outfit (v2.0)</label>
+        <label className="text-xs text-gray-500 block mb-1">Outfit</label>
         <input
           type="text" 
           value={profile.outfit || ''}
@@ -64,59 +64,42 @@ const CharacterEditor: React.FC<{
       </div>
 
       <div>
-        <label className="text-xs text-gray-500 block mb-1">Personality (v2.0)</label>
+        <label className="text-xs text-gray-500 block mb-1">Personality & Behavior</label>
         <textarea
           value={profile.personality || ''}
-          placeholder="e.g., sarcastic, dry humor, tired-finance-bro energy, skeptical"
+          placeholder="e.g., sarcastic, dry humor, skeptical, leans conservative, loves free markets"
           onChange={(e) => onChange({ ...profile, personality: e.target.value })}
-          className="w-full bg-[#111] border border-[#333] rounded px-2 py-1 text-sm text-white h-16"
+          className="w-full bg-[#111] border border-[#333] rounded px-2 py-1 text-sm text-white h-20"
         />
+        <p className="text-xs text-gray-600 mt-1">Describe how this host acts, speaks, and their political/ideological stance</p>
       </div>
 
       <div>
-        <label className="text-xs text-gray-500 block mb-1">Bio / Politics (legacy)</label>
-        <textarea
-          value={profile.bio}
-          onChange={(e) => onChange({ ...profile, bio: e.target.value })}
-          className="w-full bg-[#111] border border-[#333] rounded px-2 py-1 text-sm text-white h-16"
-        />
-      </div>
-
-      <div>
-        <label className="text-xs text-gray-500 block mb-1">Visual Prompt (Veo)</label>
+        <label className="text-xs text-gray-500 block mb-1">Visual Appearance</label>
         <textarea
           value={profile.visualPrompt}
+          placeholder="e.g., Male chimpanzee news anchor wearing a suit and red tie, confident posture"
           onChange={(e) => onChange({ ...profile, visualPrompt: e.target.value })}
           className="w-full bg-[#111] border border-[#333] rounded px-2 py-1 text-sm text-white h-20"
         />
+        <p className="text-xs text-gray-600 mt-1">Physical description used for video generation</p>
       </div>
 
       <div>
-        <label className="text-xs text-gray-500 block mb-1">Voice ID</label>
+        <label className="text-xs text-gray-500 block mb-1">Voice</label>
         <select
           value={profile.voiceName}
           onChange={(e) => onChange({ ...profile, voiceName: e.target.value })}
           className="w-full bg-[#111] border border-[#333] rounded px-2 py-1 text-sm text-white"
         >
-          <optgroup label="OpenAI TTS Voices (Recommended for v2.0)">
-            <option value="echo">echo (Male, Warm) ⭐ Recommended for hostA</option>
-            <option value="shimmer">shimmer (Female, Expressive) ⭐ Recommended for hostB</option>
-            <option value="alloy">alloy (Neutral)</option>
-            <option value="fable">fable (British)</option>
-            <option value="onyx">onyx (Deep Male)</option>
-            <option value="nova">nova (Warm Female)</option>
-          </optgroup>
-          <optgroup label="Legacy Voice IDs">
-            <option value="Kore">Kore (Male, Warm)</option>
-            <option value="Puck">Puck (Male, Deep)</option>
-            <option value="Charon">Charon (Male, Deep)</option>
-            <option value="Orus">Orus (Male, British)</option>
-            <option value="Leda">Leda (Female, Expressive)</option>
-            <option value="Aoede">Aoede (Female, Warm)</option>
-            <option value="Zephyr">Zephyr (Female, Warm)</option>
-            <option value="Hera">Hera (Female, Neutral)</option>
-          </optgroup>
+          <option value="echo">echo - Male, Warm ⭐</option>
+          <option value="onyx">onyx - Male, Deep</option>
+          <option value="fable">fable - Male, British</option>
+          <option value="alloy">alloy - Neutral</option>
+          <option value="shimmer">shimmer - Female, Expressive ⭐</option>
+          <option value="nova">nova - Female, Warm</option>
         </select>
+        <p className="text-xs text-gray-600 mt-1">OpenAI TTS voice for this host</p>
       </div>
     </div>
   );
@@ -179,6 +162,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Seed image generation states
+  const [generatingSeedImage, setGeneratingSeedImage] = useState<'hostASolo' | 'hostBSolo' | 'twoShot' | null>(null);
+  const [uploadingSeedImage, setUploadingSeedImage] = useState<'hostASolo' | 'hostBSolo' | 'twoShot' | null>(null);
+  const seedImageInputRef = useRef<HTMLInputElement>(null);
   const [storageUsage, setStorageUsage] = useState<{
     totalFiles: number;
     totalSize: number;
@@ -838,59 +825,335 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                   />
                 </div>
 
-                <div className="grid grid-cols-1 gap-4">
-                  <div>
-                    <label className="text-sm text-gray-400 block mb-1">Seed Image Prompt: Host A Solo</label>
-                    <textarea
-                      value={tempConfig.seedImages?.hostASolo || ''}
-                      onChange={(e) => setTempConfig({ 
-                        ...tempConfig, 
-                        seedImages: { 
-                          ...tempConfig.seedImages, 
-                          hostASolo: e.target.value 
-                        } 
-                      })}
-                      className="w-full bg-[#111] border border-[#333] p-2 rounded text-white h-20"
-                      placeholder="Ultra-detailed 3D render of a male chimpanzee podcaster wearing a dark hoodie..."
-                    />
+                <div className="grid grid-cols-1 gap-6">
+                  {/* Host A Solo */}
+                  <div className="border border-[#333] rounded-lg p-4">
+                    <label className="text-sm text-gray-400 block mb-1">Seed Image: Host A Solo</label>
+                    <div className="flex gap-4">
+                      <div className="flex-1">
+                        <textarea
+                          value={tempConfig.seedImages?.hostASolo || ''}
+                          onChange={(e) => setTempConfig({ 
+                            ...tempConfig, 
+                            seedImages: { 
+                              ...tempConfig.seedImages, 
+                              hostASolo: e.target.value 
+                            } 
+                          })}
+                          className="w-full bg-[#111] border border-[#333] p-2 rounded text-white h-20"
+                          placeholder="Ultra-detailed 3D render of a male chimpanzee podcaster wearing a dark hoodie..."
+                        />
+                        <div className="flex gap-2 mt-2">
+                          <button
+                            onClick={async () => {
+                              const prompt = tempConfig.seedImages?.hostASolo;
+                              if (!prompt) {
+                                toast.error('Please enter a prompt first');
+                                return;
+                              }
+                              setGeneratingSeedImage('hostASolo');
+                              try {
+                                const imageDataUrl = await generateSeedImage(prompt);
+                                if (imageDataUrl) {
+                                  // Upload to storage
+                                  const fileName = `seed-hostA-${activeChannel?.id || 'default'}-${Date.now()}.png`;
+                                  const uploadedUrl = await uploadImageToStorage(imageDataUrl, fileName);
+                                  if (uploadedUrl) {
+                                    setTempConfig({
+                                      ...tempConfig,
+                                      seedImages: {
+                                        ...tempConfig.seedImages,
+                                        hostASoloUrl: uploadedUrl
+                                      }
+                                    });
+                                    toast.success('Host A image generated!');
+                                  }
+                                } else {
+                                  toast.error('Failed to generate image');
+                                }
+                              } catch (error) {
+                                toast.error('Error generating image');
+                              } finally {
+                                setGeneratingSeedImage(null);
+                              }
+                            }}
+                            disabled={generatingSeedImage !== null}
+                            className="flex-1 bg-purple-600 hover:bg-purple-500 disabled:bg-gray-600 text-white text-sm py-2 px-3 rounded flex items-center justify-center gap-2"
+                          >
+                            {generatingSeedImage === 'hostASolo' ? (
+                              <>
+                                <span className="animate-spin">⏳</span> Generating...
+                              </>
+                            ) : (
+                              <>
+                                🎨 Generate
+                              </>
+                            )}
+                          </button>
+                          <button
+                            onClick={() => {
+                              setUploadingSeedImage('hostASolo');
+                              seedImageInputRef.current?.click();
+                            }}
+                            disabled={uploadingSeedImage !== null}
+                            className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600 text-white text-sm py-2 px-3 rounded flex items-center justify-center gap-2"
+                          >
+                            📤 Upload
+                          </button>
+                        </div>
+                      </div>
+                      {tempConfig.seedImages?.hostASoloUrl && (
+                        <div className="w-32 h-32 rounded-lg overflow-hidden border border-[#333] flex-shrink-0 relative group">
+                          <img src={tempConfig.seedImages.hostASoloUrl} alt="Host A" className="w-full h-full object-cover" />
+                          <button
+                            onClick={() => setTempConfig({
+                              ...tempConfig,
+                              seedImages: { ...tempConfig.seedImages, hostASoloUrl: undefined }
+                            })}
+                            className="absolute top-1 right-1 bg-red-600 text-white rounded-full w-6 h-6 text-xs opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
 
-                  <div>
-                    <label className="text-sm text-gray-400 block mb-1">Seed Image Prompt: Host B Solo</label>
-                    <textarea
-                      value={tempConfig.seedImages?.hostBSolo || ''}
-                      onChange={(e) => setTempConfig({ 
-                        ...tempConfig, 
-                        seedImages: { 
-                          ...tempConfig.seedImages, 
-                          hostBSolo: e.target.value 
-                        } 
-                      })}
-                      className="w-full bg-[#111] border border-[#333] p-2 rounded text-white h-20"
-                      placeholder="Ultra-detailed 3D render of a female chimpanzee podcaster wearing a teal blazer..."
-                    />
+                  {/* Host B Solo */}
+                  <div className="border border-[#333] rounded-lg p-4">
+                    <label className="text-sm text-gray-400 block mb-1">Seed Image: Host B Solo</label>
+                    <div className="flex gap-4">
+                      <div className="flex-1">
+                        <textarea
+                          value={tempConfig.seedImages?.hostBSolo || ''}
+                          onChange={(e) => setTempConfig({ 
+                            ...tempConfig, 
+                            seedImages: { 
+                              ...tempConfig.seedImages, 
+                              hostBSolo: e.target.value 
+                            } 
+                          })}
+                          className="w-full bg-[#111] border border-[#333] p-2 rounded text-white h-20"
+                          placeholder="Ultra-detailed 3D render of a female chimpanzee podcaster wearing a teal blazer..."
+                        />
+                        <div className="flex gap-2 mt-2">
+                          <button
+                            onClick={async () => {
+                              const prompt = tempConfig.seedImages?.hostBSolo;
+                              if (!prompt) {
+                                toast.error('Please enter a prompt first');
+                                return;
+                              }
+                              setGeneratingSeedImage('hostBSolo');
+                              try {
+                                const imageDataUrl = await generateSeedImage(prompt);
+                                if (imageDataUrl) {
+                                  const fileName = `seed-hostB-${activeChannel?.id || 'default'}-${Date.now()}.png`;
+                                  const uploadedUrl = await uploadImageToStorage(imageDataUrl, fileName);
+                                  if (uploadedUrl) {
+                                    setTempConfig({
+                                      ...tempConfig,
+                                      seedImages: {
+                                        ...tempConfig.seedImages,
+                                        hostBSoloUrl: uploadedUrl
+                                      }
+                                    });
+                                    toast.success('Host B image generated!');
+                                  }
+                                } else {
+                                  toast.error('Failed to generate image');
+                                }
+                              } catch (error) {
+                                toast.error('Error generating image');
+                              } finally {
+                                setGeneratingSeedImage(null);
+                              }
+                            }}
+                            disabled={generatingSeedImage !== null}
+                            className="flex-1 bg-purple-600 hover:bg-purple-500 disabled:bg-gray-600 text-white text-sm py-2 px-3 rounded flex items-center justify-center gap-2"
+                          >
+                            {generatingSeedImage === 'hostBSolo' ? (
+                              <>
+                                <span className="animate-spin">⏳</span> Generating...
+                              </>
+                            ) : (
+                              <>
+                                🎨 Generate
+                              </>
+                            )}
+                          </button>
+                          <button
+                            onClick={() => {
+                              setUploadingSeedImage('hostBSolo');
+                              seedImageInputRef.current?.click();
+                            }}
+                            disabled={uploadingSeedImage !== null}
+                            className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600 text-white text-sm py-2 px-3 rounded flex items-center justify-center gap-2"
+                          >
+                            📤 Upload
+                          </button>
+                        </div>
+                      </div>
+                      {tempConfig.seedImages?.hostBSoloUrl && (
+                        <div className="w-32 h-32 rounded-lg overflow-hidden border border-[#333] flex-shrink-0 relative group">
+                          <img src={tempConfig.seedImages.hostBSoloUrl} alt="Host B" className="w-full h-full object-cover" />
+                          <button
+                            onClick={() => setTempConfig({
+                              ...tempConfig,
+                              seedImages: { ...tempConfig.seedImages, hostBSoloUrl: undefined }
+                            })}
+                            className="absolute top-1 right-1 bg-red-600 text-white rounded-full w-6 h-6 text-xs opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
 
-                  <div>
-                    <label className="text-sm text-gray-400 block mb-1">Seed Image Prompt: Two-Shot (Both Hosts)</label>
-                    <textarea
-                      value={tempConfig.seedImages?.twoShot || ''}
-                      onChange={(e) => setTempConfig({ 
-                        ...tempConfig, 
-                        seedImages: { 
-                          ...tempConfig.seedImages, 
-                          twoShot: e.target.value 
-                        } 
-                      })}
-                      className="w-full bg-[#111] border border-[#333] p-2 rounded text-white h-20"
-                      placeholder="Ultra-detailed 3D render of hostA and hostB at a sleek podcast desk..."
-                    />
+                  {/* Two-Shot */}
+                  <div className="border border-[#333] rounded-lg p-4">
+                    <label className="text-sm text-gray-400 block mb-1">Seed Image: Two-Shot (Both Hosts)</label>
+                    <div className="flex gap-4">
+                      <div className="flex-1">
+                        <textarea
+                          value={tempConfig.seedImages?.twoShot || ''}
+                          onChange={(e) => setTempConfig({ 
+                            ...tempConfig, 
+                            seedImages: { 
+                              ...tempConfig.seedImages, 
+                              twoShot: e.target.value 
+                            } 
+                          })}
+                          className="w-full bg-[#111] border border-[#333] p-2 rounded text-white h-20"
+                          placeholder="Ultra-detailed 3D render of hostA and hostB at a sleek podcast desk..."
+                        />
+                        <div className="flex gap-2 mt-2">
+                          <button
+                            onClick={async () => {
+                              const prompt = tempConfig.seedImages?.twoShot;
+                              if (!prompt) {
+                                toast.error('Please enter a prompt first');
+                                return;
+                              }
+                              setGeneratingSeedImage('twoShot');
+                              try {
+                                const imageDataUrl = await generateSeedImage(prompt, '16:9');
+                                if (imageDataUrl) {
+                                  const fileName = `seed-twoshot-${activeChannel?.id || 'default'}-${Date.now()}.png`;
+                                  const uploadedUrl = await uploadImageToStorage(imageDataUrl, fileName);
+                                  if (uploadedUrl) {
+                                    setTempConfig({
+                                      ...tempConfig,
+                                      seedImages: {
+                                        ...tempConfig.seedImages,
+                                        twoShotUrl: uploadedUrl
+                                      }
+                                    });
+                                    toast.success('Two-shot image generated!');
+                                  }
+                                } else {
+                                  toast.error('Failed to generate image');
+                                }
+                              } catch (error) {
+                                toast.error('Error generating image');
+                              } finally {
+                                setGeneratingSeedImage(null);
+                              }
+                            }}
+                            disabled={generatingSeedImage !== null}
+                            className="flex-1 bg-purple-600 hover:bg-purple-500 disabled:bg-gray-600 text-white text-sm py-2 px-3 rounded flex items-center justify-center gap-2"
+                          >
+                            {generatingSeedImage === 'twoShot' ? (
+                              <>
+                                <span className="animate-spin">⏳</span> Generating...
+                              </>
+                            ) : (
+                              <>
+                                🎨 Generate
+                              </>
+                            )}
+                          </button>
+                          <button
+                            onClick={() => {
+                              setUploadingSeedImage('twoShot');
+                              seedImageInputRef.current?.click();
+                            }}
+                            disabled={uploadingSeedImage !== null}
+                            className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600 text-white text-sm py-2 px-3 rounded flex items-center justify-center gap-2"
+                          >
+                            📤 Upload
+                          </button>
+                        </div>
+                      </div>
+                      {tempConfig.seedImages?.twoShotUrl && (
+                        <div className="w-40 h-24 rounded-lg overflow-hidden border border-[#333] flex-shrink-0 relative group">
+                          <img src={tempConfig.seedImages.twoShotUrl} alt="Two-Shot" className="w-full h-full object-cover" />
+                          <button
+                            onClick={() => setTempConfig({
+                              ...tempConfig,
+                              seedImages: { ...tempConfig.seedImages, twoShotUrl: undefined }
+                            })}
+                            className="absolute top-1 right-1 bg-red-600 text-white rounded-full w-6 h-6 text-xs opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
 
+                {/* Hidden file input for uploads */}
+                <input
+                  ref={seedImageInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file || !uploadingSeedImage) return;
+                    
+                    try {
+                      // Convert file to data URL
+                      const reader = new FileReader();
+                      reader.onload = async () => {
+                        const dataUrl = reader.result as string;
+                        const fileName = `seed-${uploadingSeedImage}-${activeChannel?.id || 'default'}-${Date.now()}.png`;
+                        const uploadedUrl = await uploadImageToStorage(dataUrl, fileName);
+                        
+                        if (uploadedUrl) {
+                          const urlKey = uploadingSeedImage === 'hostASolo' ? 'hostASoloUrl' 
+                            : uploadingSeedImage === 'hostBSolo' ? 'hostBSoloUrl' 
+                            : 'twoShotUrl';
+                          
+                          setTempConfig({
+                            ...tempConfig,
+                            seedImages: {
+                              ...tempConfig.seedImages,
+                              [urlKey]: uploadedUrl
+                            }
+                          });
+                          toast.success('Image uploaded!');
+                        } else {
+                          toast.error('Failed to upload image');
+                        }
+                        setUploadingSeedImage(null);
+                      };
+                      reader.readAsDataURL(file);
+                    } catch (error) {
+                      toast.error('Error uploading image');
+                      setUploadingSeedImage(null);
+                    }
+                    
+                    // Reset input
+                    e.target.value = '';
+                  }}
+                />
+
                 <p className="text-xs text-gray-500 mt-2">
-                  💡 These prompts are used by the Scene Builder to maintain visual consistency across all video segments.
-                  Leave blank to use the default prompts from the specification.
+                  💡 Generate or upload reference images for each host. These images help maintain visual consistency across all video segments.
+                  The prompts are still used for scene-specific variations.
                 </p>
               </div>
             </div>
