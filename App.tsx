@@ -1213,9 +1213,9 @@ const App: React.FC = () => {
         setState(AppState.IDLE);
         addLog("🛑 Production aborted successfully.");
         
-        // Mark production as paused (not failed)
+        // Mark production as draft (resumable, not failed)
         if (currentProductionId) {
-          await updateProductionStatus(currentProductionId, 'paused');
+          await updateProductionStatus(currentProductionId, 'draft');
         }
         return;
       }
