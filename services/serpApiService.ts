@@ -43,6 +43,15 @@ const COUNTRY_CONFIG: Record<string, { gl: string; hl: string }> = {
   'Perú': { gl: 'pe', hl: 'es' },
 };
 
+// Topic tokens for Google News topics (Business focus for economic/political news)
+// These tokens are specific to language/region combinations
+const TOPIC_TOKENS: Record<string, string> = {
+  // Business topic tokens by language
+  'en': 'CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx6TVdZU0FtVnVHZ0pWVXlnQVAB', // Business (US/en)
+  'es': 'CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx6TVdZU0FtVnpHZ0pGVXlnQVAB', // Negocios (ES/es)
+  'pt': 'CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx6TVdZU0FuQjBHZ0pDVWlnQVAB', // Negócios (BR/pt)
+};
+
 /**
  * Make a request to SerpAPI via proxy
  */
@@ -51,7 +60,8 @@ const serpApiRequest = async (params: Record<string, string>): Promise<any> => {
   const queryString = new URLSearchParams(params).toString();
   const url = `${proxyUrl}/api/serpapi?${queryString}`;
   
-  console.log(`[SerpAPI] 🔍 Searching: ${params.q}`);
+  const logMsg = params.topic_token ? `Topic: Business` : `Query: ${params.q}`;
+  console.log(`[SerpAPI] 🔍 ${logMsg}`);
   
   const response = await fetch(url);
   
@@ -162,171 +172,130 @@ const extractImageKeyword = (headline: string): string => {
 };
 
 /**
- * Parse publication date from SerpAPI date string
- * Formats can be: "2 hours ago", "1 day ago", "April 3, 2025", "2025-04-03", etc.
+ * Parse publication date from SerpAPI iso_date field
+ * iso_date format: "2024-11-20T07:48:00Z" (ISO 8601)
  * Returns a Date object or null if parsing fails
  */
-const parsePublicationDate = (dateStr: string | undefined, targetDate: Date): Date | null => {
-  if (!dateStr) return null;
+const parseIsoDate = (isoDate: string | undefined): Date | null => {
+  if (!isoDate) return null;
   
   try {
-    // Try to parse as relative time (e.g., "2 hours ago", "1 day ago")
-    const relativeMatch = dateStr.match(/(\d+)\s*(hour|hours|day|days|minute|minutes|week|weeks)\s*ago/i);
-    if (relativeMatch) {
-      const amount = parseInt(relativeMatch[1]);
-      const unit = relativeMatch[2].toLowerCase();
-      const now = new Date();
-      const parsed = new Date(now);
-      
-      if (unit.includes('hour') || unit.includes('minute')) {
-        // For hours/minutes, use the target date as reference
-        parsed.setTime(targetDate.getTime());
-        if (unit.includes('hour')) {
-          parsed.setHours(parsed.getHours() - amount);
-        } else {
-          parsed.setMinutes(parsed.getMinutes() - amount);
-        }
-        return parsed;
-      } else if (unit.includes('day')) {
-        parsed.setDate(parsed.getDate() - amount);
-        return parsed;
-      } else if (unit.includes('week')) {
-        parsed.setDate(parsed.getDate() - (amount * 7));
-        return parsed;
-      }
-    }
-    
-    // Try to parse as absolute date (e.g., "April 3, 2025", "2025-04-03")
-    const parsed = new Date(dateStr);
+    const parsed = new Date(isoDate);
     if (!isNaN(parsed.getTime())) {
       return parsed;
     }
-    
-    // Try common date formats
-    const formats = [
-      /(\w+)\s+(\d+),\s+(\d+)/, // "April 3, 2025"
-      /(\d{4})-(\d{2})-(\d{2})/, // "2025-04-03"
-      /(\d{2})\/(\d{2})\/(\d{4})/, // "04/03/2025"
-    ];
-    
-    for (const format of formats) {
-      const match = dateStr.match(format);
-      if (match) {
-        const parsed = new Date(dateStr);
-        if (!isNaN(parsed.getTime())) {
-          return parsed;
-        }
-      }
-    }
-    
     return null;
   } catch (e) {
-    console.warn(`⚠️ Could not parse date: "${dateStr}"`, e);
+    console.warn(`⚠️ Could not parse iso_date: "${isoDate}"`, e);
     return null;
   }
 };
 
 /**
- * Fetch economic/political news for a specific date and country
+ * Fetch news from Google News using topic_token (Business topic)
+ * This fetches the latest business news with REAL publication dates (iso_date)
+ * News is saved to DB with real dates, then filtered by user-selected date in DB
  */
 export const fetchNewsWithSerpAPI = async (
   targetDate: Date | undefined,
   config: ChannelConfig
 ): Promise<NewsItem[]> => {
-  // Determine date to query
-  let dateToQuery = new Date();
-  if (targetDate) {
-    dateToQuery = new Date(targetDate);
-  } else {
-    dateToQuery.setDate(dateToQuery.getDate() - 1);
-  }
-
-  const cacheKey = `serpapi_news_${dateToQuery.toISOString().split('T')[0]}_${config.country}_v1`;
+  // Get country config
+  const countryConfig = COUNTRY_CONFIG[config.country] || { gl: 'us', hl: 'en' };
+  
+  // Get topic token for the language (Business topic)
+  const topicToken = TOPIC_TOKENS[countryConfig.hl] || TOPIC_TOKENS['en'];
+  
+  // Cache key based on country (not date, since we fetch latest and filter in DB)
+  const cacheKey = `serpapi_topic_news_${config.country}_${new Date().toISOString().split('T')[0]}_v2`;
 
   return ContentCache.getOrGenerate(
     cacheKey,
     async () => {
-      // Get country config
-      const countryConfig = COUNTRY_CONFIG[config.country] || { gl: 'us', hl: 'en' };
+      console.log(`[SerpAPI] 📰 Fetching Business news for ${config.country} (${countryConfig.gl}/${countryConfig.hl})`);
+      console.log(`[SerpAPI] 🏷️ Using topic_token: ${topicToken.substring(0, 20)}...`);
       
-      // Build search query based on channel focus
-      // Try to capture economic and political news
-      const searchTerms = [
-        'economy',
-        'markets',
-        'inflation',
-        'stocks',
-        'politics',
-        'breaking news'
-      ];
-      
-      // Use a broad query to get diverse results
-      const query = `${config.country} news economy politics`;
-      
-      // Format date for SerpAPI filter (MM/DD/YYYY format required)
-      const month = String(dateToQuery.getMonth() + 1).padStart(2, '0');
-      const day = String(dateToQuery.getDate()).padStart(2, '0');
-      const year = dateToQuery.getFullYear();
-      const dateStr = `${month}/${day}/${year}`;
-      
-      // Use tbs parameter to filter by date range (same day or last 24h)
-      // cdr:1 = custom date range, cd_min/cd_max = date bounds
-      const tbs = `cdr:1,cd_min:${dateStr},cd_max:${dateStr}`;
-      
-      console.log(`[SerpAPI] 📰 Fetching news for ${config.country} on ${dateStr} (${countryConfig.gl}/${countryConfig.hl})`);
-      console.log(`[SerpAPI] 📅 Date filter: ${tbs}`);
-      
+      // Use Google News API with topic_token for Business news
       const data = await serpApiRequest({
-        q: query,
+        engine: 'google_news',
+        topic_token: topicToken,
         gl: countryConfig.gl,
         hl: countryConfig.hl,
-        num: '50',  // Request more news
-        tbs: tbs,   // Date filter
-        tbm: 'nws'  // News search type
       });
       
       // Track cost (~$0.01 per search)
       CostTracker.track('news', 'serpapi', 0.01);
       
-      // Combine news_results and top_stories
+      // Collect all news items from different sections
       const allNews: any[] = [];
       
-      // Process news_results
+      // Helper to process a news item
+      const processNewsItem = (item: any) => {
+        if (!item.title || !item.link) return null;
+        
+        // Use iso_date for accurate publication date
+        const isoDate = item.iso_date;
+        const publicationDate = parseIsoDate(isoDate);
+        
+        return {
+          headline: item.title,
+          source: item.source?.name || 'Unknown',
+          url: item.link,
+          summary: item.snippet || item.title,
+          imageUrl: item.thumbnail || item.thumbnail_small,
+          isoDate: isoDate,
+          publicationDate: publicationDate
+        };
+      };
+      
+      // Process news_results (main results)
       if (data.news_results && Array.isArray(data.news_results)) {
         data.news_results.forEach((item: any) => {
-          allNews.push({
-            headline: item.title,
-            source: item.source?.name || item.source || 'Unknown',
-            url: item.link || '#',
-            summary: item.snippet || item.title,
-            imageUrl: item.thumbnail,
-            date: item.date
-          });
+          // Check if this is a grouped story (has highlight and stories)
+          if (item.highlight) {
+            const processed = processNewsItem(item.highlight);
+            if (processed) allNews.push(processed);
+          }
+          
+          // Process stories within grouped items
+          if (item.stories && Array.isArray(item.stories)) {
+            item.stories.forEach((story: any) => {
+              const processed = processNewsItem(story);
+              if (processed) allNews.push(processed);
+            });
+          }
+          
+          // Process regular news item (not grouped)
+          if (!item.highlight && !item.stories) {
+            const processed = processNewsItem(item);
+            if (processed) allNews.push(processed);
+          }
         });
       }
       
-      // Process top_stories
-      if (data.top_stories && Array.isArray(data.top_stories)) {
-        data.top_stories.forEach((item: any) => {
-          allNews.push({
-            headline: item.title,
-            source: item.source?.name || item.source || 'Unknown',
-            url: item.link || '#',
-            summary: item.title, // Top stories usually don't have snippets
-            imageUrl: item.thumbnail,
-            date: item.date
-          });
-        });
-      }
+      console.log(`[SerpAPI] 📥 Received ${allNews.length} news items from Google News`);
       
-      // Deduplicate by headline
+      // Deduplicate by URL (more reliable than headline)
       const seen = new Set<string>();
       const uniqueNews = allNews.filter(item => {
-        const key = item.headline.toLowerCase().substring(0, 50);
-        if (seen.has(key)) return false;
-        seen.add(key);
+        // Create key from URL (remove query params for deduplication)
+        const urlKey = item.url.split('?')[0].toLowerCase();
+        if (seen.has(urlKey)) return false;
+        seen.add(urlKey);
         return true;
       });
+      
+      console.log(`[SerpAPI] 🔄 ${uniqueNews.length} unique news items after deduplication`);
+      
+      // Log date distribution
+      const dateCounts: Record<string, number> = {};
+      uniqueNews.forEach(item => {
+        if (item.publicationDate) {
+          const dateStr = item.publicationDate.toISOString().split('T')[0];
+          dateCounts[dateStr] = (dateCounts[dateStr] || 0) + 1;
+        }
+      });
+      console.log(`[SerpAPI] 📅 News by date:`, dateCounts);
       
       // Process news items and calculate viral scores in batch
       console.log(`[SerpAPI] 🔥 Calculating viral scores for ${uniqueNews.length} news items...`);
@@ -336,19 +305,15 @@ export const fetchNewsWithSerpAPI = async (
         headline: item.headline,
         summary: item.summary,
         source: item.source,
-        date: item.date
+        date: item.isoDate
       }));
       
       // Calculate viral scores in batch (parallel processing)
       const viralScoreResults = await calculateViralScoresBatch(itemsForScoring);
       
       // Process and enhance news items with calculated scores
-      // NO DATE FILTERING - let user choose from ALL available news
-      // SerpAPI returns news based on relevance, not strict publication date
       const processedNews: NewsItem[] = uniqueNews
         .map((item, index) => {
-          // Parse publication date for reference (but don't filter by it)
-          const publicationDate = parsePublicationDate(item.date, dateToQuery);
           const scoreResult = viralScoreResults[index] || { score: 50, reasoning: 'Score calculation unavailable' };
           
           return {
@@ -360,14 +325,12 @@ export const fetchNewsWithSerpAPI = async (
             viralScoreReasoning: scoreResult.reasoning,
             imageKeyword: extractImageKeyword(item.headline),
             imageUrl: item.imageUrl || undefined,
-            publicationDate: publicationDate || undefined
+            publicationDate: item.publicationDate || undefined
           };
         });
       
-      // Sort by viral score (for display purposes, but don't limit quantity)
-      // User will choose which news to use, so we save ALL news that pass the date filter
-      const sortedNews = processedNews
-        .sort((a, b) => b.viralScore - a.viralScore);
+      // Sort by viral score
+      const sortedNews = processedNews.sort((a, b) => b.viralScore - a.viralScore);
       
       // Log score distribution
       const scores = sortedNews.map(n => n.viralScore);
@@ -376,11 +339,11 @@ export const fetchNewsWithSerpAPI = async (
         : 'N/A';
       console.log(`[SerpAPI] 📊 Viral score range: ${scoreRange}`);
       
-      console.log(`[SerpAPI] ✅ Processed ${sortedNews.length} news items (all news saved, user will choose)`);
+      console.log(`[SerpAPI] ✅ Processed ${sortedNews.length} news items with REAL publication dates`);
       
-      // Validate we have enough news
+      // Validate we have news
       if (sortedNews.length === 0) {
-        throw new Error('No news found for the specified date and country');
+        throw new Error('No news found from Google News Business topic');
       }
       
       return sortedNews;

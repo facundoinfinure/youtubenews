@@ -324,27 +324,31 @@ export const saveChannelIntroOutro = async (
 export const saveNewsToDB = async (newsDate: Date, news: NewsItem[], channelId: string) => {
   if (!supabase) return;
 
-  const dateStr = newsDate.toISOString().split('T')[0]; // YYYY-MM-DD
+  const fetchDateStr = newsDate.toISOString().split('T')[0]; // YYYY-MM-DD (when we fetched)
 
-  console.log(`💾 Saving ${news.length} news items to database for date ${dateStr}, channel ${channelId}`);
+  console.log(`💾 Saving ${news.length} news items to database for channel ${channelId}`);
 
-  // Delete existing news for this date and channel to avoid duplicates
-  const { error: deleteError } = await supabase
-    .from('news_items')
-    .delete()
-    .eq('news_date', dateStr)
-    .eq('channel_id', channelId);
-  
-  if (deleteError) {
-    console.error("Error deleting existing news:", deleteError);
-  }
-
-  // Insert new news items
-  // publication_date = selected date (SerpAPI already filters by this date)
+  // Prepare news records with REAL publication dates from iso_date
   const newsRecords = news.map(item => {
+    // Use the REAL publication date from the news item (parsed from iso_date)
+    // If not available, fall back to the fetch date
+    let publicationDateStr = fetchDateStr;
+    if (item.publicationDate) {
+      try {
+        const pubDate = typeof item.publicationDate === 'string' 
+          ? new Date(item.publicationDate) 
+          : item.publicationDate;
+        if (!isNaN(pubDate.getTime())) {
+          publicationDateStr = pubDate.toISOString().split('T')[0];
+        }
+      } catch (e) {
+        console.warn(`⚠️ Could not parse publication date for "${item.headline}", using fetch date`);
+      }
+    }
+    
     return {
-      news_date: dateStr,
-      publication_date: dateStr, // Always use selected date since SerpAPI filtered by it
+      news_date: fetchDateStr, // When we fetched the news
+      publication_date: publicationDateStr, // REAL publication date from iso_date
       channel_id: channelId,
       headline: item.headline,
       source: item.source,
@@ -358,21 +362,45 @@ export const saveNewsToDB = async (newsDate: Date, news: NewsItem[], channelId: 
     };
   });
 
-  // Insert in batches if needed (Supabase has a limit, but 15 items should be fine)
-  const { data, error } = await supabase
-    .from('news_items')
-    .insert(newsRecords)
-    .select(); // Return inserted data to verify
+  // Log date distribution
+  const dateCounts: Record<string, number> = {};
+  newsRecords.forEach(record => {
+    dateCounts[record.publication_date] = (dateCounts[record.publication_date] || 0) + 1;
+  });
+  console.log(`📅 News by publication_date:`, dateCounts);
 
-  if (error) {
-    console.error("❌ Error saving news to database:", error);
-    console.error("Error details:", JSON.stringify(error, null, 2));
-  } else {
-    console.log(`✅ Successfully saved ${data?.length || news.length} news items to database`);
-    if (data && data.length !== news.length) {
-      console.warn(`⚠️ Warning: Tried to save ${news.length} items but only ${data.length} were saved`);
+  // Use upsert to avoid duplicates (by URL)
+  // This allows accumulating news over time without duplicating
+  let insertedCount = 0;
+  let skippedCount = 0;
+
+  for (const record of newsRecords) {
+    // Check if this URL already exists for this channel
+    const { data: existing } = await supabase
+      .from('news_items')
+      .select('id')
+      .eq('channel_id', channelId)
+      .eq('url', record.url)
+      .limit(1);
+
+    if (existing && existing.length > 0) {
+      skippedCount++;
+      continue; // Skip duplicate
+    }
+
+    // Insert new record
+    const { error } = await supabase
+      .from('news_items')
+      .insert(record);
+
+    if (error) {
+      console.error(`❌ Error inserting news: ${record.headline.substring(0, 50)}...`, error.message);
+    } else {
+      insertedCount++;
     }
   }
+
+  console.log(`✅ Saved ${insertedCount} new items, skipped ${skippedCount} duplicates`);
 };
 
 export const getNewsByDate = async (newsDate: Date, channelId: string): Promise<NewsItem[]> => {
@@ -380,8 +408,8 @@ export const getNewsByDate = async (newsDate: Date, channelId: string): Promise<
 
   const dateStr = newsDate.toISOString().split('T')[0];
 
-  // Get all news items for this channel and the selected publication date
-  // Filter by publication_date (the date the user selected, which SerpAPI filtered by)
+  // Get all news items for this channel where the REAL publication date matches
+  // publication_date comes from iso_date field in Google News API response
   const { data, error } = await supabase
     .from('news_items')
     .select('*')
