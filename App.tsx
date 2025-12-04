@@ -79,6 +79,8 @@ const App: React.FC = () => {
   const [state, setState] = useState<AppState>(AppState.LOGIN);
   // Track if we're in admin dashboard to restore it when tab becomes visible
   const wasInAdminRef = useRef<boolean>(false);
+  // Abort controller for cancelling production
+  const abortProductionRef = useRef<boolean>(false);
 
   // Data State
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -628,6 +630,16 @@ const App: React.FC = () => {
   };
 
   const startProduction = async (finalNews: NewsItem[], resumeFromProduction?: any) => {
+    // Reset abort flag at start of production
+    abortProductionRef.current = false;
+    
+    // Helper function to check if production was aborted
+    const checkAbort = () => {
+      if (abortProductionRef.current) {
+        throw new Error('PRODUCTION_ABORTED');
+      }
+    };
+    
     if (!activeChannel) {
       setState(AppState.ERROR);
       addLog("❌ No active channel selected. Please select a channel first.");
@@ -779,6 +791,9 @@ const App: React.FC = () => {
         setProductionProgress({ current: 2, total: TOTAL_STEPS, step: 'Using saved script...' });
       }
 
+      // Check if aborted
+      checkAbort();
+
       // Save checkpoint after script generation
       if (productionId) {
         await saveCheckpoint(productionId, {
@@ -810,6 +825,9 @@ const App: React.FC = () => {
 
       // Small delay to let user see preview
       await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Check if aborted before starting media generation
+      checkAbort();
 
       // 3. Generate Media (Parallel)
       setState(AppState.GENERATING_MEDIA);
@@ -977,6 +995,9 @@ const App: React.FC = () => {
 
       // Wait for metadata
       const metadata = await metaTask;
+      
+      // Check if aborted before video generation (most expensive step)
+      checkAbort();
 
       // INFINITETALK VIDEO GENERATION
       // Now that audio is uploaded and has URLs, generate lip-sync videos
@@ -1184,9 +1205,24 @@ const App: React.FC = () => {
       }
 
     } catch (error) {
+      const errorMessage = (error as Error).message;
+      
+      // Check if this was an intentional abort
+      if (errorMessage === 'PRODUCTION_ABORTED') {
+        console.log('🛑 Production was aborted by user');
+        setState(AppState.IDLE);
+        addLog("🛑 Production aborted successfully.");
+        
+        // Mark production as paused (not failed)
+        if (currentProductionId) {
+          await updateProductionStatus(currentProductionId, 'paused');
+        }
+        return;
+      }
+      
       console.error(error);
       setState(AppState.ERROR);
-      addLog("💥 Production failure: " + (error as Error).message);
+      addLog("💥 Production failure: " + errorMessage);
       
       // Mark production as failed
       if (currentProductionId) {
@@ -1845,25 +1881,30 @@ const App: React.FC = () => {
                   {logs[logs.length - 1] || "Initializing..."}
                 </div>
 
-                {/* Pause Button */}
+                {/* Pause/Abort Button */}
                 {(state === AppState.GENERATING_MEDIA || state === AppState.GENERATING_SCRIPT) && currentProductionId && (
                   <button
                     onClick={async () => {
                       if (currentProductionId) {
+                        // Set abort flag to stop ongoing operations
+                        abortProductionRef.current = true;
+                        addLog("🛑 Aborting production... (waiting for current operations to complete)");
+                        
                         // Save final checkpoint before pausing
                         await saveCheckpoint(currentProductionId, {
                           step: 'paused',
                           completed: [],
-                          data: { pausedAt: new Date().toISOString() }
+                          data: { pausedAt: new Date().toISOString(), aborted: true }
                         });
-                        addLog("⏸️ Production paused. You can resume from the dashboard.");
+                        
+                        addLog("⏸️ Production aborted. You can resume from the dashboard.");
                         setState(AppState.IDLE);
-                        toast.success('Production paused. Resume from dashboard when ready.');
+                        toast.success('Production aborted. Resume from dashboard when ready.');
                       }
                     }}
-                    className="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 text-white rounded-lg font-bold text-sm transition-colors"
+                    className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg font-bold text-sm transition-colors"
                   >
-                    ⏸️ Pause
+                    🛑 Abort
                   </button>
                 )}
               </div>
