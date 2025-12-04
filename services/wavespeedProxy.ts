@@ -315,54 +315,52 @@ export const pollWavespeedTask = async (taskId: string): Promise<string> => {
 
 /**
  * Create a Wavespeed image generation task
- * Tries generation model first, falls back to edit model if input image provided
+ * Uses FLUX-dev for text-to-image generation (fast and reliable)
+ * Falls back to nano-banana-pro/edit if an input image is provided
  */
 export const createWavespeedImageTask = async (
   prompt: string,
   aspectRatio: '16:9' | '9:16' | '1:1' = '16:9',
   inputImageUrl?: string
 ): Promise<string> => {
-  // For thumbnails, prefer generation over editing
-  // Try generation model first (nano-banana-pro) if no input image
-  if (!inputImageUrl) {
-    try {
-      return await createWavespeedImageGenerationTask(prompt, aspectRatio);
-    } catch (error) {
-      console.warn(`[Wavespeed] Generation model failed, trying edit model with placeholder:`, (error as Error).message);
-      // Fall through to edit model with placeholder
-    }
+  // If we have an input image, use nano-banana-pro/edit
+  if (inputImageUrl) {
+    return await createNanoBananaEditTask(prompt, aspectRatio, inputImageUrl);
   }
   
-  // Use edit model (requires input image)
-  const endpoint = 'api/v3/google/nano-banana-pro/edit';
+  // For text-to-image without input, use FLUX-dev (fast and reliable)
+  return await createFluxImageTask(prompt, aspectRatio);
+};
+
+/**
+ * Create a FLUX-dev text-to-image task
+ * FLUX-dev is fast (~2 seconds) and produces high-quality images
+ */
+const createFluxImageTask = async (
+  prompt: string,
+  aspectRatio: '16:9' | '9:16' | '1:1' = '16:9'
+): Promise<string> => {
+  const endpoint = 'api/v3/black-forest-labs/flux-dev';
   
-  const requestBody: any = {
+  // Map aspect ratio to size
+  const sizeMap: Record<string, string> = {
+    '16:9': '1280*720',
+    '9:16': '720*1280',
+    '1:1': '1024*1024'
+  };
+  
+  const requestBody = {
     prompt: prompt,
-    aspect_ratio: aspectRatio,
-    resolution: "1K",  // 1K for smaller file size (YouTube allows max 2MB for thumbnails)
-    output_format: "png",
-    enable_sync_mode: false,
-    enable_base64_output: false
+    size: sizeMap[aspectRatio] || '1280*720',
+    num_inference_steps: 28,
+    guidance_scale: 3.5,
+    seed: -1,
+    enable_safety_checker: false
   };
 
-  // Nano Banana Pro Edit requires image_urls (not images) as array of URLs
-  // If we have a data URI, we need to convert it or use a placeholder URL
-  if (inputImageUrl) {
-    // Check if it's a data URI - edit model might not accept data URIs directly
-    if (inputImageUrl.startsWith('data:')) {
-      console.warn(`[Wavespeed] Data URI provided, but edit model may require actual URLs. Attempting anyway...`);
-      // Some APIs accept data URIs, some don't - try it
-      requestBody.image_urls = [inputImageUrl];
-    } else {
-      requestBody.image_urls = [inputImageUrl];
-    }
-  } else {
-    // Edit model requires an input image - create a minimal placeholder
-    throw new Error('Edit model requires an input image. Use generation model for thumbnails without input.');
-  }
-
-  console.log(`[Wavespeed] Creating image edit task with endpoint: ${endpoint}`);
-  console.log(`[Wavespeed] Request body keys:`, Object.keys(requestBody));
+  console.log(`[Wavespeed FLUX] 🎨 Creating text-to-image task`);
+  console.log(`[Wavespeed FLUX] 📝 Prompt: ${prompt.substring(0, 100)}...`);
+  console.log(`[Wavespeed FLUX] 📐 Size: ${sizeMap[aspectRatio]}`);
 
   const response = await wavespeedRequest(endpoint, {
     method: 'POST',
@@ -371,86 +369,66 @@ export const createWavespeedImageTask = async (
 
   if (!response.ok) {
     const errorText = await response.text();
-    let errorDetails = errorText;
-    try {
-      const errorJson = JSON.parse(errorText);
-      errorDetails = JSON.stringify(errorJson, null, 2);
-    } catch {
-      // Not JSON, use as-is
-    }
-    console.error(`[Wavespeed] ❌ API error (${response.status}):`, errorDetails);
-    console.error(`[Wavespeed] Request body was:`, JSON.stringify(requestBody, null, 2));
-    throw new Error(`Wavespeed image API error: ${response.status} - ${errorText.substring(0, 200)}`);
+    console.error(`[Wavespeed FLUX] ❌ API error (${response.status}):`, errorText);
+    throw new Error(`FLUX API error: ${response.status} - ${errorText.substring(0, 200)}`);
   }
 
   const data = await response.json();
-  console.log(`[Wavespeed] ✅ Task creation response:`, JSON.stringify(data, null, 2));
-  
-  // WaveSpeed API v3 returns data.id as the task ID
   const taskId = data.data?.id || data.id;
   
   if (!taskId) {
-    throw new Error(`Wavespeed API did not return a task ID. Response: ${JSON.stringify(data)}`);
+    throw new Error(`FLUX API did not return a task ID. Response: ${JSON.stringify(data)}`);
   }
   
+  console.log(`[Wavespeed FLUX] ✅ Task created: ${taskId}`);
   return taskId;
 };
 
 /**
- * Create a Wavespeed image generation task (not editing)
- * Uses nano-banana-pro generation model
+ * Create a Nano Banana Pro Edit task (image editing)
+ * Requires an input image to edit
+ * See: https://wavespeed.ai/es/models/google/nano-banana-pro/edit
  */
-const createWavespeedImageGenerationTask = async (
+const createNanoBananaEditTask = async (
   prompt: string,
-  aspectRatio: '16:9' | '9:16' | '1:1' = '16:9'
+  aspectRatio: '16:9' | '9:16' | '1:1' = '16:9',
+  inputImageUrl: string
 ): Promise<string> => {
-  // Try generation endpoint - this may vary by WaveSpeed API version
-  // Common endpoints: api/v3/google/nano-banana-pro or api/v3/google/nano-banana-pro/generate
-  const endpoints = [
-    'api/v3/google/nano-banana-pro',
-    'api/v3/google/nano-banana-pro/generate'
-  ];
+  const endpoint = 'api/v3/google/nano-banana-pro/edit';
   
+  // Nano Banana Pro Edit uses 'images' field (array of URLs or base64)
   const requestBody: any = {
     prompt: prompt,
+    images: [inputImageUrl], // Correct field name per WaveSpeed docs
     aspect_ratio: aspectRatio,
-    resolution: "1K",
-    output_format: "png",
-    num_images: 1
+    resolution: "1k",  // 1k, 2k, or 4k (lowercase)
+    output_format: "png"
   };
 
-  let lastError: Error | null = null;
-  
-  for (const endpoint of endpoints) {
-    try {
-      console.log(`[Wavespeed] Trying generation endpoint: ${endpoint}`);
-      
-      const response = await wavespeedRequest(endpoint, {
-        method: 'POST',
-        body: requestBody
-      });
+  console.log(`[Wavespeed NanoBanana] 🎨 Creating edit task`);
+  console.log(`[Wavespeed NanoBanana] 📝 Prompt: ${prompt.substring(0, 100)}...`);
+  console.log(`[Wavespeed NanoBanana] 🖼️ Input image: ${inputImageUrl.substring(0, 60)}...`);
 
-      if (response.ok) {
-        const data = await response.json();
-        const taskId = data.data?.id || data.id;
-        
-        if (taskId) {
-          console.log(`[Wavespeed] ✅ Generation task created: ${taskId}`);
-          return taskId;
-        }
-      } else {
-        const errorText = await response.text();
-        lastError = new Error(`Endpoint ${endpoint} returned ${response.status}: ${errorText}`);
-        console.warn(`[Wavespeed] Endpoint ${endpoint} failed:`, errorText);
-      }
-    } catch (error: any) {
-      lastError = error;
-      console.warn(`[Wavespeed] Endpoint ${endpoint} error:`, error.message);
-      // Try next endpoint
-    }
+  const response = await wavespeedRequest(endpoint, {
+    method: 'POST',
+    body: requestBody
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error(`[Wavespeed NanoBanana] ❌ API error (${response.status}):`, errorText);
+    throw new Error(`NanoBanana Edit API error: ${response.status} - ${errorText.substring(0, 200)}`);
+  }
+
+  const data = await response.json();
+  const taskId = data.data?.id || data.id;
+  
+  if (!taskId) {
+    throw new Error(`NanoBanana Edit API did not return a task ID. Response: ${JSON.stringify(data)}`);
   }
   
-  throw lastError || new Error('All generation endpoints failed');
+  console.log(`[Wavespeed NanoBanana] ✅ Task created: ${taskId}`);
+  return taskId;
 };
 
 /**

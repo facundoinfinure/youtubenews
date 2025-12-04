@@ -141,8 +141,8 @@ interface InfiniteTalkVideoOptions {
   channelId: string;
   productionId?: string;
   segmentIndex: number;
-  audioUrl: string;           // URL to the audio file
-  referenceImageUrl: string;  // URL to the reference image with both hosts
+  audioUrl: string;           // URL to the audio file (primary, or hostA for "both" scenes)
+  referenceImageUrl: string;  // URL to the reference image
   speaker: string;            // Who is speaking: hostA name, hostB name, or "Both"
   dialogueText: string;       // The dialogue text for caching
   hostAName: string;          // Name of host A (left in image)
@@ -150,6 +150,10 @@ interface InfiniteTalkVideoOptions {
   hostAVisualPrompt: string;  // Visual description of host A
   hostBVisualPrompt: string;  // Visual description of host B
   resolution?: '480p' | '720p';
+  // For "both" scenes - separate audio URLs
+  hostA_audioUrl?: string;    // Audio URL for Host A (left side)
+  hostB_audioUrl?: string;    // Audio URL for Host B (right side)
+  order?: 'left_first' | 'right_first' | 'meanwhile';  // Who speaks first
   // Scene metadata from v2.0 Narrative Engine
   sceneMetadata?: {
     video_mode: VideoMode;
@@ -161,7 +165,11 @@ interface InfiniteTalkVideoOptions {
 
 /**
  * Generate a lip-sync video using WaveSpeed InfiniteTalk
- * Uses the MULTI model for two-character scenes
+ * 
+ * MODEL SELECTION:
+ * - InfiniteTalk Single: For scenes with ONE host (hostA or hostB alone)
+ * - InfiniteTalk Multi: For scenes with BOTH hosts in frame
+ * 
  * IMPORTANT: Uses strict prompts to maintain character consistency
  */
 const generateInfiniteTalkVideo = async (
@@ -180,30 +188,44 @@ const generateInfiniteTalkVideo = async (
     hostAVisualPrompt,
     hostBVisualPrompt,
     resolution = '720p',
+    hostA_audioUrl,  // Separate audio for Host A (for "both" scenes)
+    hostB_audioUrl,  // Separate audio for Host B (for "both" scenes)
+    order: providedOrder,  // Who speaks first
     sceneMetadata
   } = options;
 
-  // Determine video type based on scene metadata or speaker name
+  // Determine video type and model based on scene metadata or speaker
   let videoType: VideoType = 'segment';
   let effectiveVideoMode: VideoMode | null = null;
+  let useMultiModel: boolean = false;
   
   if (sceneMetadata?.video_mode) {
     effectiveVideoMode = sceneMetadata.video_mode;
     videoType = effectiveVideoMode === 'hostA' ? 'host_a' 
       : effectiveVideoMode === 'hostB' ? 'host_b' 
       : 'both_hosts';
+    // Use Multi model only for 'both' mode (two characters in frame)
+    useMultiModel = effectiveVideoMode === 'both';
   } else {
     // Fallback to speaker-based detection
     if (speaker === hostAName) {
       videoType = 'host_a';
       effectiveVideoMode = 'hostA';
+      useMultiModel = false;
     } else if (speaker === hostBName) {
       videoType = 'host_b';
       effectiveVideoMode = 'hostB';
+      useMultiModel = false;
     } else if (speaker === 'Both' || speaker.includes('Both')) {
       videoType = 'both_hosts';
       effectiveVideoMode = 'both';
+      useMultiModel = true;
     }
+  }
+  
+  // Override with explicit model from scene metadata if provided
+  if (sceneMetadata?.model) {
+    useMultiModel = sceneMetadata.model === 'infinite_talk_multi';
   }
 
   // Check cache first
@@ -213,69 +235,118 @@ const generateInfiniteTalkVideo = async (
     return { url: cachedVideo.video_url, fromCache: true };
   }
 
-  // Generate new video with InfiniteTalk Multi
-  const silentAudioUrl = getSilentAudioUrl();
-  
-  // Determine which audio goes to which side based on video_mode
-  // Host A = left, Host B = right (based on typical two-person shot)
-  let leftAudio = silentAudioUrl;
-  let rightAudio = silentAudioUrl;
-  let order: 'left_first' | 'right_first' | 'meanwhile' = 'meanwhile';
-
-  if (effectiveVideoMode === 'hostA') {
-    leftAudio = audioUrl;
-    order = 'left_first';
-  } else if (effectiveVideoMode === 'hostB') {
-    rightAudio = audioUrl;
-    order = 'right_first';
-  } else {
-    // Both speaking - use same audio for simplicity (they speak in unison)
-    leftAudio = audioUrl;
-    rightAudio = audioUrl;
-    order = 'meanwhile';
-  }
-
   // Get shot type from scene metadata or default to medium
   const shotType = sceneMetadata?.shot || 'medium';
   const shotDescription = shotType === 'closeup' ? 'Close-up shot, tight framing' 
     : shotType === 'wide' ? 'Wide shot, showing full studio' 
     : 'Medium shot, standard framing';
 
-  // Use scene prompt if available, otherwise build character-specific prompt
-  // CRITICAL: Be very specific about the characters to avoid generating humans
-  const characterPrompt = sceneMetadata?.scenePrompt || `
+  try {
+    let taskId: string;
+    let modelName: string;
+    
+    if (useMultiModel) {
+      // ===== INFINITETALK MULTI (Two characters in frame) =====
+      modelName = 'InfiniteTalk Multi';
+      const silentAudioUrl = getSilentAudioUrl();
+      
+      // For "both" scenes, use the SEPARATE audios if provided
+      // Host A = left, Host B = right
+      let leftAudio: string;
+      let rightAudio: string;
+      let order: 'left_first' | 'right_first' | 'meanwhile';
+      
+      if (hostA_audioUrl && hostB_audioUrl) {
+        // ✅ NEW: Both hosts have separate audio - use them!
+        leftAudio = hostA_audioUrl;
+        rightAudio = hostB_audioUrl;
+        order = providedOrder || 'left_first';
+        console.log(`🎙️ [${modelName}] Using SEPARATE audios for both hosts!`);
+      } else {
+        // Fallback: Only one audio provided, determine which side based on speaker
+        const isHostASpeaking = speaker === hostAName;
+        const isHostBSpeaking = speaker === hostBName;
+
+        if (isHostASpeaking) {
+          leftAudio = audioUrl;
+          rightAudio = silentAudioUrl;
+          order = 'left_first';
+        } else if (isHostBSpeaking) {
+          leftAudio = silentAudioUrl;
+          rightAudio = audioUrl;
+          order = 'right_first';
+        } else {
+          // Unknown speaker - default to left
+          leftAudio = audioUrl;
+          rightAudio = silentAudioUrl;
+          order = 'left_first';
+          console.warn(`⚠️ [${modelName}] Segment ${segmentIndex}: Unknown speaker '${speaker}', defaulting to left`);
+        }
+      }
+
+      const characterPrompt = sceneMetadata?.scenePrompt || `
 STRICT CHARACTER REQUIREMENTS - DO NOT DEVIATE:
 - LEFT CHARACTER: ${hostAName} - ${hostAVisualPrompt}
 - RIGHT CHARACTER: ${hostBName} - ${hostBVisualPrompt}
 
 SCENE: Professional podcast news studio with two animated characters.
 SHOT: ${shotDescription}
-SPEAKING: ${effectiveVideoMode === 'hostA' ? hostAName : effectiveVideoMode === 'hostB' ? hostBName : 'Both hosts'} is currently speaking with lip-sync animation.
+SPEAKING: ${effectiveVideoMode === 'hostA' ? hostAName : effectiveVideoMode === 'hostB' ? hostBName : 'Both hosts alternating'} with lip-sync animation.
 STYLE: Maintain exact character appearances from the reference image.
 
 CRITICAL: These are NOT human beings. They are animated/CGI characters as described above. 
 Keep character consistency with the reference image at all times.
 `.trim();
 
-  try {
-    console.log(`🎬 [InfiniteTalk Multi] Generating video for segment ${segmentIndex} (${speaker})`);
-    console.log(`📝 [InfiniteTalk Multi] Character prompt: ${hostAName} (${hostAVisualPrompt.substring(0, 50)}...) & ${hostBName}`);
-    
-    const taskId = await createInfiniteTalkMultiTask({
-      leftAudioUrl: leftAudio,
-      rightAudioUrl: rightAudio,
-      imageUrl: referenceImageUrl,
-      order,
-      resolution,
-      prompt: characterPrompt
-    });
+      console.log(`🎬 [${modelName}] Generating video for segment ${segmentIndex} (${speaker})`);
+      console.log(`📝 [${modelName}] Left: ${hostAName}, Right: ${hostBName}`);
+      console.log(`🎙️ [${modelName}] Order: ${order}, Left audio: ${leftAudio !== silentAudioUrl ? 'ACTIVE' : 'silent'}, Right audio: ${rightAudio !== silentAudioUrl ? 'ACTIVE' : 'silent'}`);
+      
+      taskId = await createInfiniteTalkMultiTask({
+        leftAudioUrl: leftAudio,
+        rightAudioUrl: rightAudio,
+        imageUrl: referenceImageUrl,
+        order,
+        resolution,
+        prompt: characterPrompt
+      });
+      
+    } else {
+      // ===== INFINITETALK SINGLE (One character in frame) =====
+      modelName = 'InfiniteTalk Single';
+      
+      const speakingHost = effectiveVideoMode === 'hostA' ? hostAName : hostBName;
+      const visualPrompt = effectiveVideoMode === 'hostA' ? hostAVisualPrompt : hostBVisualPrompt;
+      
+      const characterPrompt = sceneMetadata?.scenePrompt || `
+CHARACTER: ${speakingHost} - ${visualPrompt}
+SCENE: Professional podcast news studio.
+SHOT: ${shotDescription}
+ACTION: ${speakingHost} is speaking with natural lip-sync animation.
+STYLE: Maintain exact character appearance from the reference image.
+
+CRITICAL: This is NOT a human being. This is an animated/CGI character as described above.
+`.trim();
+
+      console.log(`🎬 [${modelName}] Generating video for segment ${segmentIndex} (${speaker})`);
+      console.log(`📝 [${modelName}] Character: ${speakingHost}`);
+      console.log(`🖼️ [${modelName}] Image: ${referenceImageUrl.substring(0, 60)}...`);
+      
+      taskId = await createInfiniteTalkSingleTask(
+        audioUrl,
+        referenceImageUrl,
+        resolution,
+        characterPrompt
+      );
+    }
 
     const videoUrl = await pollInfiniteTalkTask(taskId);
 
     if (videoUrl) {
-      // Track cost
-      const cost = resolution === '720p' ? INFINITETALK_COST_720P : INFINITETALK_COST_480P;
-      CostTracker.track('video', 'infinitetalk-multi', cost);
+      // Track cost (Multi is slightly more expensive)
+      const baseCost = resolution === '720p' ? INFINITETALK_COST_720P : INFINITETALK_COST_480P;
+      const cost = useMultiModel ? baseCost * 1.2 : baseCost; // Multi is ~20% more
+      CostTracker.track('video', useMultiModel ? 'infinitetalk-multi' : 'infinitetalk-single', cost);
 
       // Save to cache
       await saveGeneratedVideo({
@@ -295,11 +366,12 @@ Keep character consistency with the reference image at all times.
         expires_at: null
       });
 
-      console.log(`✅ [InfiniteTalk Multi] Video generated and cached for segment ${segmentIndex}`);
+      console.log(`✅ [${modelName}] Video generated and cached for segment ${segmentIndex}`);
       return { url: videoUrl, fromCache: false };
     }
   } catch (error) {
-    console.error(`❌ [InfiniteTalk Multi] Failed for segment ${segmentIndex}:`, (error as Error).message);
+    const modelName = useMultiModel ? 'InfiniteTalk Multi' : 'InfiniteTalk Single';
+    console.error(`❌ [${modelName}] Failed for segment ${segmentIndex}:`, (error as Error).message);
   }
 
   return { url: null, fromCache: false };
@@ -447,108 +519,89 @@ export const setFindCachedAudioFunction = (fn: (text: string, voiceName: string,
 };
 
 /**
- * Split "Both" dialogue lines into separate lines for each host
- * This ensures each host speaks their own part instead of speaking in unison
+ * Extended BroadcastSegment with additional fields for "both" scenes
+ * This contains audio URLs for both hosts when video_mode is "both"
  */
-const splitBothDialogues = (script: ScriptLine[], config: ChannelConfig): ScriptLine[] => {
-  const result: ScriptLine[] = [];
-  
-  for (const line of script) {
-    if (line.speaker === 'Both' || line.speaker.toLowerCase().includes('both')) {
-      // Split the text into two parts
-      const text = line.text.trim();
-      const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
-      
-      if (sentences.length >= 2) {
-        // If there are 2+ sentences, split between hosts
-        const midpoint = Math.ceil(sentences.length / 2);
-        const hostAText = sentences.slice(0, midpoint).join(' ').trim();
-        const hostBText = sentences.slice(midpoint).join(' ').trim();
-        
-        if (hostAText) {
-          result.push({ speaker: config.characters.hostA.name, text: hostAText });
-        }
-        if (hostBText) {
-          result.push({ speaker: config.characters.hostB.name, text: hostBText });
-        }
-      } else {
-        // Single sentence - split by comma or just alternate words
-        const commaIndex = text.indexOf(',');
-        if (commaIndex > text.length * 0.3 && commaIndex < text.length * 0.7) {
-          // Split at comma if it's roughly in the middle
-          result.push({ speaker: config.characters.hostA.name, text: text.substring(0, commaIndex + 1).trim() });
-          result.push({ speaker: config.characters.hostB.name, text: text.substring(commaIndex + 1).trim() });
-        } else {
-          // Give the whole line to hostA (better than unison for lip-sync)
-          result.push({ speaker: config.characters.hostA.name, text: text });
-        }
-      }
-      
-      console.log(`🔀 [Script] Split "Both" dialogue into separate host lines`);
-    } else {
-      result.push(line);
+export interface ExtendedBroadcastSegment extends BroadcastSegment {
+  // For "both" scenes - separate audio for each host
+  hostA_audioBase64?: string;
+  hostB_audioBase64?: string;
+  hostA_audioUrl?: string;
+  hostB_audioUrl?: string;
+  hostA_text?: string;
+  hostB_text?: string;
+  // Audio order
+  order?: 'left_first' | 'right_first' | 'meanwhile';
+  // Scene metadata
+  video_mode?: VideoMode;
+  model?: 'infinite_talk' | 'infinite_talk_multi';
+  shot?: ShotType;
+  sceneIndex?: number;
+  // Cache flags
+  fromCache?: boolean;
+  audioUrl?: string;
+}
+
+/**
+ * Generate a single audio file for a text using TTS
+ */
+const generateSingleAudio = async (
+  text: string,
+  voiceName: string,
+  channelId: string,
+  label: string
+): Promise<{ audioBase64: string; fromCache: boolean; audioUrl?: string }> => {
+  // Check cache first
+  if (findCachedAudioFn && channelId) {
+    const cachedAudio = await findCachedAudioFn(text, voiceName, channelId);
+    if (cachedAudio) {
+      console.log(`✅ Cache hit for audio (${label}): "${text.substring(0, 30)}..."`);
+      return { audioBase64: cachedAudio, fromCache: true, audioUrl: cachedAudio };
     }
   }
-  
-  return result;
+
+  // Generate new audio
+  const audioBase64 = await generateTTSAudio(text, voiceName);
+  console.log(`✅ [Audio] Generated (${label}): "${text.substring(0, 30)}..."`);
+  return { audioBase64, fromCache: false };
 };
 
 export const generateSegmentedAudio = async (script: ScriptLine[], config: ChannelConfig): Promise<BroadcastSegment[]> => {
   return generateSegmentedAudioWithCache(script, config, '');
 };
 
+/**
+ * Generate audio segments from script lines (legacy format)
+ * For new v2.0 format with scenes, use generateAudioFromScenes instead
+ */
 export const generateSegmentedAudioWithCache = async (
   script: ScriptLine[], 
   config: ChannelConfig,
   channelId: string = ''
 ): Promise<BroadcastSegment[]> => {
-  // DEBUG: Log the config voices being used
   console.log(`🔍 [Audio DEBUG] Config received for audio generation:`);
   console.log(`🔍 [Audio DEBUG] Host A (${config.characters.hostA.name}): voiceName = "${config.characters.hostA.voiceName}"`);
   console.log(`🔍 [Audio DEBUG] Host B (${config.characters.hostB.name}): voiceName = "${config.characters.hostB.voiceName}"`);
   
-  // Split "Both" dialogues into separate lines for each host
-  const processedScript = splitBothDialogues(script, config);
-  
-  // Use OpenAI TTS for audio generation (no more Gemini quota issues!)
-  console.log(`🎙️ [Audio] Generating ${processedScript.length} audio segments using OpenAI TTS...`);
+  console.log(`🎙️ [Audio] Generating ${script.length} audio segments using OpenAI TTS...`);
 
-  // PARALLEL PROCESSING with cache support
-  const audioPromises = processedScript.map(async (line) => {
-    let character = config.characters.hostA; // Default
+  const audioPromises = script.map(async (line) => {
+    let character = config.characters.hostA;
     if (line.speaker === config.characters.hostA.name) {
       character = config.characters.hostA;
     } else if (line.speaker === config.characters.hostB.name) {
       character = config.characters.hostB;
     }
 
-    // Check cache first if function is available
-    if (findCachedAudioFn && channelId) {
-      const cachedAudio = await findCachedAudioFn(line.text, character.voiceName, channelId);
-      if (cachedAudio) {
-        console.log(`✅ Cache hit for audio: "${line.text.substring(0, 30)}..."`);
-        return {
-          speaker: line.speaker,
-          text: line.text,
-          audioBase64: cachedAudio,
-          fromCache: true,
-          audioUrl: undefined
-        } as any;
-      }
-    }
-
-    // Generate new audio using OpenAI TTS
     try {
-      const audioBase64 = await generateTTSAudio(line.text, character.voiceName);
-      
-      console.log(`✅ [Audio] Generated audio for "${line.text.substring(0, 30)}..."`);
-      
+      const result = await generateSingleAudio(line.text, character.voiceName, channelId, line.speaker);
       return {
         speaker: line.speaker,
         text: line.text,
-        audioBase64: audioBase64,
-        fromCache: false
-      };
+        audioBase64: result.audioBase64,
+        fromCache: result.fromCache,
+        audioUrl: result.audioUrl
+      } as any;
     } catch (error) {
       console.error(`❌ [Audio] Failed for "${line.text.substring(0, 30)}...":`, (error as Error).message);
       throw error;
@@ -558,6 +611,99 @@ export const generateSegmentedAudioWithCache = async (
   const results = await Promise.all(audioPromises);
   console.log(`✅ [Audio] Successfully generated ${results.length} audio segments via OpenAI TTS`);
   return results;
+};
+
+/**
+ * Generate audio from v2.0 ScriptWithScenes format
+ * For "both" scenes, generates SEPARATE audio for each host
+ * Returns ExtendedBroadcastSegment[] with all audio data
+ */
+export const generateAudioFromScenes = async (
+  scriptWithScenes: ScriptWithScenes,
+  config: ChannelConfig,
+  channelId: string = ''
+): Promise<ExtendedBroadcastSegment[]> => {
+  console.log(`🎙️ [Audio v2.0] Generating audio from ${Object.keys(scriptWithScenes.scenes).length} scenes...`);
+  console.log(`🎙️ [Audio v2.0] Narrative: ${scriptWithScenes.narrative_used}`);
+  
+  const hostA = config.characters.hostA;
+  const hostB = config.characters.hostB;
+  
+  const segments: ExtendedBroadcastSegment[] = [];
+  const sceneEntries = Object.entries(scriptWithScenes.scenes).sort(([a], [b]) => parseInt(a) - parseInt(b));
+  
+  for (const [sceneNum, scene] of sceneEntries) {
+    const sceneIndex = parseInt(sceneNum) - 1;
+    
+    if (scene.video_mode === 'both') {
+      // BOTH HOSTS SCENE: Generate 2 separate audios
+      console.log(`🎬 [Audio v2.0] Scene ${sceneNum}: BOTH hosts - generating 2 audios`);
+      
+      // Get separate dialogues (or fallback to splitting text)
+      let hostAText = scene.hostA_text;
+      let hostBText = scene.hostB_text;
+      
+      // Fallback: if separate texts not provided, split the main text
+      if (!hostAText || !hostBText) {
+        console.warn(`⚠️ [Audio v2.0] Scene ${sceneNum}: Missing separate dialogues, splitting text`);
+        const text = scene.text.trim();
+        const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
+        const midpoint = Math.ceil(sentences.length / 2);
+        hostAText = sentences.slice(0, midpoint).join(' ').trim();
+        hostBText = sentences.slice(midpoint).join(' ').trim();
+      }
+      
+      // Generate both audios in parallel
+      const [hostAAudio, hostBAudio] = await Promise.all([
+        generateSingleAudio(hostAText, hostA.voiceName, channelId, `Scene ${sceneNum} - ${hostA.name}`),
+        generateSingleAudio(hostBText, hostB.voiceName, channelId, `Scene ${sceneNum} - ${hostB.name}`)
+      ]);
+      
+      // Create segment with BOTH audios
+      segments.push({
+        speaker: 'Both',
+        text: scene.text || `${hostAText} ${hostBText}`,
+        audioBase64: hostAAudio.audioBase64, // Primary audio (for backwards compatibility)
+        hostA_text: hostAText,
+        hostB_text: hostBText,
+        hostA_audioBase64: hostAAudio.audioBase64,
+        hostB_audioBase64: hostBAudio.audioBase64,
+        order: scene.order || 'left_first',
+        video_mode: scene.video_mode,
+        model: scene.model,
+        shot: scene.shot,
+        sceneIndex,
+        fromCache: hostAAudio.fromCache && hostBAudio.fromCache
+      });
+      
+      console.log(`✅ [Audio v2.0] Scene ${sceneNum}: Generated ${hostA.name} + ${hostB.name} audios`);
+      
+    } else {
+      // SINGLE HOST SCENE: Generate 1 audio
+      const speaker = scene.video_mode === 'hostA' ? hostA.name : hostB.name;
+      const character = scene.video_mode === 'hostA' ? hostA : hostB;
+      
+      console.log(`🎬 [Audio v2.0] Scene ${sceneNum}: ${speaker} solo`);
+      
+      const audio = await generateSingleAudio(scene.text, character.voiceName, channelId, `Scene ${sceneNum} - ${speaker}`);
+      
+      segments.push({
+        speaker,
+        text: scene.text,
+        audioBase64: audio.audioBase64,
+        video_mode: scene.video_mode,
+        model: scene.model,
+        shot: scene.shot,
+        sceneIndex,
+        fromCache: audio.fromCache
+      });
+      
+      console.log(`✅ [Audio v2.0] Scene ${sceneNum}: Generated ${speaker} audio`);
+    }
+  }
+  
+  console.log(`✅ [Audio v2.0] Generated ${segments.length} segments with audio`);
+  return segments;
 };
 
 // =============================================================================================
@@ -749,29 +895,58 @@ export const generateVideoSegmentsWithInfiniteTalk = async (
         
         // Get scene metadata if available (now includes Scene Builder visual prompts)
         const sceneMetadata = sceneMetadataMap.get(globalIndex);
+        
+        // Determine which model to use based on scene metadata
+        // This affects which image we need (single host vs two-shot)
+        const useMultiModel = sceneMetadata?.model === 'infinite_talk_multi' || sceneMetadata?.video_mode === 'both';
 
-        // Determine which image to use based on speaker
-        // Priority: use specific host image if available, otherwise fall back to two-shot or referenceImageUrl
+        // Determine which image to use based on MODEL and video_mode
+        // CRITICAL: Single model needs single-host image, Multi model needs two-shot image
         let imageUrlForSegment: string;
-        if (segment.speaker === hostAName && hostASoloUrl) {
-          imageUrlForSegment = hostASoloUrl;
-          console.log(`🖼️ [InfiniteTalk] Segment ${globalIndex}: Using Host A solo image`);
-        } else if (segment.speaker === hostBName && hostBSoloUrl) {
-          imageUrlForSegment = hostBSoloUrl;
-          console.log(`🖼️ [InfiniteTalk] Segment ${globalIndex}: Using Host B solo image`);
-        } else if (twoShotUrl) {
-          imageUrlForSegment = twoShotUrl;
-          console.log(`🖼️ [InfiniteTalk] Segment ${globalIndex}: Using two-shot image`);
+        
+        if (useMultiModel) {
+          // Multi model: MUST use two-shot image (both hosts in frame)
+          if (twoShotUrl) {
+            imageUrlForSegment = twoShotUrl;
+            console.log(`🖼️ [InfiniteTalk Multi] Segment ${globalIndex}: Using two-shot image (both hosts)`);
+          } else {
+            // Fallback if no two-shot available
+            console.warn(`⚠️ [InfiniteTalk Multi] Segment ${globalIndex}: No two-shot image available, using fallback`);
+            imageUrlForSegment = config.referenceImageUrl || hostASoloUrl || hostBSoloUrl || '';
+          }
         } else {
-          // Ultimate fallback: use any available image
-          imageUrlForSegment = hostASoloUrl || hostBSoloUrl || config.referenceImageUrl || '';
-          console.log(`🖼️ [InfiniteTalk] Segment ${globalIndex}: Using fallback image`);
+          // Single model: Use solo image of the speaking host
+          const videoMode = sceneMetadata?.video_mode || (segment.speaker === hostAName ? 'hostA' : 'hostB');
+          
+          if (videoMode === 'hostA' && hostASoloUrl) {
+            imageUrlForSegment = hostASoloUrl;
+            console.log(`🖼️ [InfiniteTalk Single] Segment ${globalIndex}: Using Host A solo image`);
+          } else if (videoMode === 'hostB' && hostBSoloUrl) {
+            imageUrlForSegment = hostBSoloUrl;
+            console.log(`🖼️ [InfiniteTalk Single] Segment ${globalIndex}: Using Host B solo image`);
+          } else if (segment.speaker === hostAName && hostASoloUrl) {
+            imageUrlForSegment = hostASoloUrl;
+            console.log(`🖼️ [InfiniteTalk Single] Segment ${globalIndex}: Using Host A solo image (by speaker)`);
+          } else if (segment.speaker === hostBName && hostBSoloUrl) {
+            imageUrlForSegment = hostBSoloUrl;
+            console.log(`🖼️ [InfiniteTalk Single] Segment ${globalIndex}: Using Host B solo image (by speaker)`);
+          } else {
+            // Fallback: use any available solo image or two-shot
+            imageUrlForSegment = hostASoloUrl || hostBSoloUrl || twoShotUrl || config.referenceImageUrl || '';
+            console.warn(`⚠️ [InfiniteTalk Single] Segment ${globalIndex}: Using fallback image`);
+          }
         }
 
         if (!imageUrlForSegment) {
           console.error(`❌ [InfiniteTalk] Segment ${globalIndex}: No image available`);
           return { index: globalIndex, url: null, reason: 'no_image' };
         }
+
+        // Get extended segment data (for "both" scenes with separate audios)
+        const extSegment = segment as ExtendedBroadcastSegment;
+        const hostA_audioUrl = extSegment.hostA_audioUrl;
+        const hostB_audioUrl = extSegment.hostB_audioUrl;
+        const order = extSegment.order;
 
         // Use retry logic for video generation
         const { retryVideoGeneration } = await import('./retryUtils');
@@ -790,6 +965,10 @@ export const generateVideoSegmentsWithInfiniteTalk = async (
               hostAVisualPrompt,
               hostBVisualPrompt,
               resolution: '720p',
+              // Pass separate audios for "both" scenes
+              hostA_audioUrl,
+              hostB_audioUrl,
+              order,
               sceneMetadata
             });
             return videoResult.url;

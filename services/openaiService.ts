@@ -147,10 +147,15 @@ Dialogue Rules:
 
   const metadataRules = `
 For EACH scene provide:
-- text: dialogue for that scene
 - video_mode: "hostA" | "hostB" | "both"
 - model: "infinite_talk" for solo, "infinite_talk_multi" for both
 - shot: default "medium", "closeup" for Hook/Conflict, "wide" for Payoff
+
+IMPORTANT - Dialogue format depends on video_mode:
+- If video_mode is "hostA" or "hostB": use "text" field with that host's dialogue
+- If video_mode is "both": use BOTH "hostA_text" AND "hostB_text" fields with SEPARATE dialogues for each host
+  - Also include "order": "left_first" if ${hostA.name} speaks first, "right_first" if ${hostB.name} speaks first
+  - Each host should have 40-65 words in their dialogue (not the same text!)
 `.trim();
 
   const outputFormat = `
@@ -160,13 +165,25 @@ Return STRICT JSON (no markdown) with this exact format:
   "narrative_used": "classic | double_conflict | hot_take | perspective_clash",
   "scenes": {
     "1": {
+      "text": "dialogue for single host scene",
+      "video_mode": "hostA | hostB",
+      "model": "infinite_talk",
+      "shot": "medium | closeup | wide"
+    },
+    "2": {
+      "hostA_text": "${hostA.name}'s dialogue (40-65 words)",
+      "hostB_text": "${hostB.name}'s dialogue (40-65 words)",
+      "order": "left_first | right_first",
       "text": "",
-      "video_mode": "hostA | hostB | both",
-      "model": "infinite_talk | infinite_talk_multi",
+      "video_mode": "both",
+      "model": "infinite_talk_multi",
       "shot": "medium | closeup | wide"
     }
   }
 }
+
+NOTE: For "both" scenes, hostA_text and hostB_text are REQUIRED and must be DIFFERENT dialogues.
+The "text" field should be empty or a combination for backwards compatibility.
 `.trim();
 
   const systemPrompt = `
@@ -235,6 +252,7 @@ ${newsContext}
 const VALID_NARRATIVES: NarrativeType[] = ['classic', 'double_conflict', 'hot_take', 'perspective_clash'];
 const VALID_VIDEO_MODES: Scene['video_mode'][] = ['hostA', 'hostB', 'both'];
 const VALID_SHOTS: Scene['shot'][] = ['medium', 'closeup', 'wide'];
+const VALID_ORDERS: Scene['order'][] = ['left_first', 'right_first', 'meanwhile'];
 
 const validateScriptWithScenes = (script: ScriptWithScenes) => {
   if (!script || typeof script !== 'object') {
@@ -257,12 +275,40 @@ const validateScriptWithScenes = (script: ScriptWithScenes) => {
     if (!scene || typeof scene !== 'object') {
       throw new Error(`Scene ${sceneId} is invalid`);
     }
-    if (!scene.text || typeof scene.text !== 'string') {
-      throw new Error(`Scene ${sceneId} missing text`);
-    }
+    
     if (!VALID_VIDEO_MODES.includes(scene.video_mode)) {
       throw new Error(`Scene ${sceneId} has invalid video_mode "${scene.video_mode}"`);
     }
+    
+    // For "both" scenes, validate hostA_text and hostB_text
+    if (scene.video_mode === 'both') {
+      if (!scene.hostA_text || typeof scene.hostA_text !== 'string' || scene.hostA_text.trim().length === 0) {
+        // Fallback: if text exists, split it for backwards compatibility
+        if (scene.text && scene.text.trim().length > 0) {
+          console.warn(`Scene ${sceneId}: "both" mode missing hostA_text, will split from text`);
+        } else {
+          throw new Error(`Scene ${sceneId} with video_mode "both" missing hostA_text`);
+        }
+      }
+      if (!scene.hostB_text || typeof scene.hostB_text !== 'string' || scene.hostB_text.trim().length === 0) {
+        // Fallback: if text exists, split it for backwards compatibility
+        if (scene.text && scene.text.trim().length > 0) {
+          console.warn(`Scene ${sceneId}: "both" mode missing hostB_text, will split from text`);
+        } else {
+          throw new Error(`Scene ${sceneId} with video_mode "both" missing hostB_text`);
+        }
+      }
+      // Validate order if provided
+      if (scene.order && !VALID_ORDERS.includes(scene.order)) {
+        throw new Error(`Scene ${sceneId} has invalid order "${scene.order}"`);
+      }
+    } else {
+      // For single host scenes, text is required
+      if (!scene.text || typeof scene.text !== 'string') {
+        throw new Error(`Scene ${sceneId} missing text`);
+      }
+    }
+    
     if (!scene.model || (scene.model !== 'infinite_talk' && scene.model !== 'infinite_talk_multi')) {
       throw new Error(`Scene ${sceneId} has invalid model "${scene.model}"`);
     }

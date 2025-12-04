@@ -154,8 +154,25 @@ const shotstackRequest = async (
 // =============================================================================================
 
 /**
+ * Check if a URL is a valid public URL (not a data URI)
+ * Shotstack only accepts public URLs, not data URIs or base64
+ */
+const isValidPublicUrl = (url: string): boolean => {
+  if (!url) return false;
+  // Data URIs are not valid
+  if (url.startsWith('data:')) return false;
+  // Blob URLs are not valid for Shotstack (they're local)
+  if (url.startsWith('blob:')) return false;
+  // Must be HTTP/HTTPS
+  return url.startsWith('http://') || url.startsWith('https://');
+};
+
+/**
  * Convert our config to Shotstack Edit format
  * Docs: https://shotstack.io/docs/api/
+ * 
+ * IMPORTANT: Shotstack only accepts public URLs, not data URIs!
+ * All video/image sources must be publicly accessible HTTPS URLs.
  */
 const buildShotstackEdit = (config: CompositionConfig): any => {
   const tracks: any[] = [];
@@ -165,8 +182,8 @@ const buildShotstackEdit = (config: CompositionConfig): any => {
   // === VIDEO TRACK ===
   const videoClips: any[] = [];
   
-  // Add intro if provided
-  if (config.intro) {
+  // Add intro if provided AND is a valid public URL
+  if (config.intro && isValidPublicUrl(config.intro.url)) {
     videoClips.push({
       asset: {
         type: 'video',
@@ -181,11 +198,20 @@ const buildShotstackEdit = (config: CompositionConfig): any => {
       } : undefined
     });
     currentTime += (config.intro.length || 3) - transitionDuration;
+  } else if (config.intro) {
+    console.warn(`⚠️ [Shotstack] Skipping intro - not a valid public URL: ${config.intro.url?.substring(0, 50)}...`);
   }
   
-  // Add main clips
-  config.clips.forEach((clip, index) => {
-    const isLast = index === config.clips.length - 1 && !config.outro;
+  // Add main clips (only those with valid public URLs)
+  const validClips = config.clips.filter(clip => isValidPublicUrl(clip.url));
+  const skippedClips = config.clips.length - validClips.length;
+  
+  if (skippedClips > 0) {
+    console.warn(`⚠️ [Shotstack] Skipping ${skippedClips} clips without valid public URLs`);
+  }
+  
+  validClips.forEach((clip, index) => {
+    const isLast = index === validClips.length - 1 && (!config.outro || !isValidPublicUrl(config.outro.url));
     
     videoClips.push({
       asset: {
@@ -206,8 +232,8 @@ const buildShotstackEdit = (config: CompositionConfig): any => {
     currentTime += clipDuration - (isLast ? 0 : transitionDuration);
   });
   
-  // Add outro if provided
-  if (config.outro) {
+  // Add outro if provided AND is a valid public URL
+  if (config.outro && isValidPublicUrl(config.outro.url)) {
     videoClips.push({
       asset: {
         type: 'video',
@@ -218,18 +244,28 @@ const buildShotstackEdit = (config: CompositionConfig): any => {
       length: config.outro.length || 3,
       fit: config.outro.fit || 'cover'
     });
+  } else if (config.outro) {
+    console.warn(`⚠️ [Shotstack] Skipping outro - not a valid public URL: ${config.outro.url?.substring(0, 50)}...`);
+  }
+  
+  // Verify we have at least one valid clip
+  if (videoClips.length === 0) {
+    throw new Error('No valid video clips with public URLs. Shotstack requires HTTPS URLs, not data URIs.');
   }
   
   tracks.push({ clips: videoClips });
   
   // === WATERMARK TRACK (above video) ===
-  if (config.watermark) {
+  if (config.watermark && isValidPublicUrl(config.watermark.url)) {
     const positionMap: Record<string, string> = {
       'topLeft': 'topLeft',
       'topRight': 'topRight', 
       'bottomLeft': 'bottomLeft',
       'bottomRight': 'bottomRight'
     };
+    
+    // Calculate total duration including outro if valid
+    const totalDuration = currentTime + (config.outro && isValidPublicUrl(config.outro.url) ? (config.outro.length || 3) : 0);
     
     tracks.unshift({
       clips: [{
@@ -238,12 +274,14 @@ const buildShotstackEdit = (config: CompositionConfig): any => {
           src: config.watermark.url
         },
         start: 0,
-        length: currentTime + (config.outro?.length || 0),
+        length: totalDuration,
         position: positionMap[config.watermark.position] || 'bottomRight',
         opacity: config.watermark.opacity || 0.7,
         scale: config.watermark.scale || 0.15
       }]
     });
+  } else if (config.watermark) {
+    console.warn(`⚠️ [Shotstack] Skipping watermark - not a valid public URL`);
   }
   
   // === TEXT OVERLAY TRACK ===
@@ -265,7 +303,7 @@ const buildShotstackEdit = (config: CompositionConfig): any => {
   }
   
   // === AUDIO TRACK (separate from video) ===
-  if (config.audioTrack) {
+  if (config.audioTrack && isValidPublicUrl(config.audioTrack.url)) {
     tracks.push({
       clips: [{
         asset: {
@@ -277,6 +315,8 @@ const buildShotstackEdit = (config: CompositionConfig): any => {
         length: config.audioTrack.length || 'auto'
       }]
     });
+  } else if (config.audioTrack) {
+    console.warn(`⚠️ [Shotstack] Skipping audio track - not a valid public URL`);
   }
   
   // Build resolution

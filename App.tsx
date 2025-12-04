@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { AppState, ChannelConfig, NewsItem, BroadcastSegment, VideoAssets, ViralMetadata, UserProfile, Channel, ScriptLine, StoredVideo, ScriptWithScenes, NarrativeType } from './types';
 import { signInWithGoogle, getSession, signOut, getAllChannels, saveChannel, getChannelById, saveVideoToDB, getNewsByDate, saveNewsToDB, markNewsAsSelected, deleteVideoFromDB, supabase, fetchVideosFromDB, saveProduction, getIncompleteProductions, getProductionById, updateProductionStatus, uploadAudioToStorage, uploadImageToStorage, getAudioFromStorage, findCachedScript, findCachedAudio, getAllProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction, verifyStorageBucket, getCompletedProductionsWithVideoInfo, ProductionWithVideoInfo, getUsedNewsIdsForDate, saveCheckpoint, getLastCheckpoint, markStepFailed, saveCachedAudio } from './services/supabaseService';
-import { fetchEconomicNews, generateScript, generateScriptWithScenes, convertScenesToScriptLines, generateSegmentedAudio, generateSegmentedAudioWithCache, setFindCachedAudioFunction, generateBroadcastVisuals, generateViralMetadata, generateThumbnail, generateThumbnailVariants, generateViralHook, generateVideoSegmentsWithInfiniteTalk, composeVideoWithShotstack, isCompositionAvailable, getCompositionStatus } from './services/geminiService';
+import { fetchEconomicNews, generateScript, generateScriptWithScenes, convertScenesToScriptLines, generateSegmentedAudio, generateSegmentedAudioWithCache, generateAudioFromScenes, ExtendedBroadcastSegment, setFindCachedAudioFunction, generateBroadcastVisuals, generateViralMetadata, generateThumbnail, generateThumbnailVariants, generateViralHook, generateVideoSegmentsWithInfiniteTalk, composeVideoWithShotstack, isCompositionAvailable, getCompositionStatus } from './services/geminiService';
 import { uploadVideoToYouTube, deleteVideoFromYouTube } from './services/youtubeService';
 import { ContentCache } from './services/ContentCache';
 import { CostTracker } from './services/CostTracker';
@@ -869,7 +869,12 @@ const App: React.FC = () => {
 
       if (audioSegments.length === 0) {
         // Generate audio with cache support
-        addLog("🎙️ Generating audio segments (checking cache first)...");
+        // Use v2.0 generateAudioFromScenes if we have scriptWithScenes (handles "both" scenes with separate audios)
+        const useV2Audio = scriptWithScenes && Object.keys(scriptWithScenes.scenes).length > 0;
+        
+        addLog(useV2Audio 
+          ? "🎙️ Generating audio with v2.0 Narrative Engine (separate audios for both-hosts scenes)..." 
+          : "🎙️ Generating audio segments (checking cache first)...");
         setProductionProgress({ 
           current: 3, 
           total: TOTAL_STEPS, 
@@ -877,17 +882,29 @@ const App: React.FC = () => {
         });
         
         let completedAudio = 0;
-        const audioTask = generateSegmentedAudioWithCache(genScript, currentConfig, activeChannel?.id || '')
-          .then(async (segs: BroadcastSegment[]) => {
-            setSegments(segs);
-            const cachedCount = segs.filter((s: BroadcastSegment) => (s as any).fromCache).length;
+        
+        // Use the appropriate audio generation function
+        const audioGenerationPromise = useV2Audio
+          ? generateAudioFromScenes(scriptWithScenes!, currentConfig, activeChannel?.id || '')
+          : generateSegmentedAudioWithCache(genScript, currentConfig, activeChannel?.id || '');
+        
+        const audioTask = audioGenerationPromise
+          .then(async (segs: ExtendedBroadcastSegment[] | BroadcastSegment[]) => {
+            setSegments(segs as BroadcastSegment[]);
+            const cachedCount = segs.filter((s: any) => s.fromCache).length;
             completedAudio = segs.length;
             setProductionProgress({ 
               current: 3, 
               total: TOTAL_STEPS, 
               step: `Audio complete: ${segs.length} segments (${cachedCount} cached)` 
             });
-            if (cachedCount > 0) {
+            
+            // Count "both" scenes that have separate audios
+            const bothScenesCount = segs.filter((s: any) => s.video_mode === 'both' && s.hostA_audioBase64 && s.hostB_audioBase64).length;
+            
+            if (bothScenesCount > 0) {
+              addLog(`✅ Audio produced: ${segs.length} segments (${bothScenesCount} with dual-host audio, ${cachedCount} cached).`);
+            } else if (cachedCount > 0) {
               addLog(`✅ Audio produced: ${segs.length} segments (${cachedCount} from cache, ${segs.length - cachedCount} new).`);
             } else {
               addLog(`✅ Audio produced (${segs.length} segments).`);
@@ -897,7 +914,12 @@ const App: React.FC = () => {
             if (productionId && activeChannel) {
               addLog("💾 Uploading audio to storage...");
               const segmentsWithUrls = await Promise.all(
-                segs.map(async (seg: BroadcastSegment, idx: number) => {
+                segs.map(async (seg: ExtendedBroadcastSegment | BroadcastSegment, idx: number) => {
+                  const extSeg = seg as ExtendedBroadcastSegment;
+                  
+                  // Check if this is a "both" scene with separate audios
+                  const isBothScene = extSeg.video_mode === 'both' && extSeg.hostA_audioBase64 && extSeg.hostB_audioBase64;
+                  
                   // Only upload if not from cache (already in storage)
                   if ((seg as any).fromCache && (seg as any).audioUrl) {
                     // Save to audio cache if not already cached
@@ -918,9 +940,15 @@ const App: React.FC = () => {
                       speaker: seg.speaker,
                       text: seg.text,
                       audioUrl: (seg as any).audioUrl,
+                      hostA_audioUrl: extSeg.hostA_audioUrl,
+                      hostB_audioUrl: extSeg.hostB_audioUrl,
+                      order: extSeg.order,
+                      video_mode: extSeg.video_mode,
                       videoUrl: seg.videoUrl
                     };
                   }
+                  
+                  // Upload main audio (or hostA audio for "both" scenes)
                   const voiceName = seg.speaker === currentConfig.characters.hostA.name 
                     ? currentConfig.characters.hostA.voiceName 
                     : currentConfig.characters.hostB.voiceName;
@@ -934,10 +962,77 @@ const App: React.FC = () => {
                       channelId: activeChannel.id
                     }
                   );
+                  
+                  // For "both" scenes, also upload Host A and Host B audios separately
+                  let hostA_audioUrl: string | undefined;
+                  let hostB_audioUrl: string | undefined;
+                  
+                  if (isBothScene) {
+                    // Upload Host A audio
+                    if (extSeg.hostA_audioBase64) {
+                      hostA_audioUrl = await uploadAudioToStorage(
+                        extSeg.hostA_audioBase64,
+                        productionId,
+                        idx,
+                        {
+                          text: extSeg.hostA_text || '',
+                          voiceName: currentConfig.characters.hostA.voiceName,
+                          channelId: activeChannel.id
+                        }
+                      ) || undefined;
+                      
+                      // Save to cache
+                      if (hostA_audioUrl && extSeg.hostA_text) {
+                        await saveCachedAudio(
+                          activeChannel.id,
+                          extSeg.hostA_text,
+                          currentConfig.characters.hostA.voiceName,
+                          hostA_audioUrl,
+                          undefined,
+                          productionId
+                        );
+                      }
+                    }
+                    
+                    // Upload Host B audio  
+                    if (extSeg.hostB_audioBase64) {
+                      hostB_audioUrl = await uploadAudioToStorage(
+                        extSeg.hostB_audioBase64,
+                        productionId,
+                        idx * 1000 + 1, // Different index to avoid collision
+                        {
+                          text: extSeg.hostB_text || '',
+                          voiceName: currentConfig.characters.hostB.voiceName,
+                          channelId: activeChannel.id
+                        }
+                      ) || undefined;
+                      
+                      // Save to cache
+                      if (hostB_audioUrl && extSeg.hostB_text) {
+                        await saveCachedAudio(
+                          activeChannel.id,
+                          extSeg.hostB_text,
+                          currentConfig.characters.hostB.voiceName,
+                          hostB_audioUrl,
+                          undefined,
+                          productionId
+                        );
+                      }
+                    }
+                    
+                    console.log(`✅ [Audio] Scene ${idx}: Uploaded both host audios (A: ${hostA_audioUrl ? 'OK' : 'FAIL'}, B: ${hostB_audioUrl ? 'OK' : 'FAIL'})`);
+                  }
+                  
                   return {
                     speaker: seg.speaker,
                     text: seg.text,
                     audioUrl,
+                    hostA_audioUrl,
+                    hostB_audioUrl,
+                    hostA_text: extSeg.hostA_text,
+                    hostB_text: extSeg.hostB_text,
+                    order: extSeg.order,
+                    video_mode: extSeg.video_mode,
                     videoUrl: seg.videoUrl
                   };
                 })

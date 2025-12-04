@@ -1269,6 +1269,7 @@ export const findCachedAudio = async (
     const textHash = createTextHash(text);
 
     // First try dedicated audio_cache table (fast)
+    // Use maybeSingle() instead of single() to avoid 406 error when no results found
     const { data: cached, error: cacheError } = await supabase
       .from('audio_cache')
       .select('audio_url, use_count')
@@ -1277,7 +1278,7 @@ export const findCachedAudio = async (
       .eq('voice_name', voiceName)
       .order('last_used_at', { ascending: false })
       .limit(1)
-      .single();
+      .maybeSingle();
 
     if (!cacheError && cached) {
       // Update use count and last_used_at
@@ -1356,13 +1357,14 @@ export const saveCachedAudio = async (
     const textHash = createTextHash(text);
 
     // Check if already exists
+    // Use maybeSingle() to avoid 406 error when no results found
     const { data: existing } = await supabase
       .from('audio_cache')
       .select('id')
       .eq('channel_id', channelId)
       .eq('text_hash', textHash)
       .eq('voice_name', voiceName)
-      .single();
+      .maybeSingle();
 
     if (existing) {
       // Already cached, just update last_used_at

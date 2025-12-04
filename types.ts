@@ -23,7 +23,16 @@ export type VideoMode = "hostA" | "hostB" | "both";
 export type ShotType = "medium" | "closeup" | "wide";
 
 export interface Scene {
+  // For single host scenes (video_mode: hostA or hostB)
   text: string;
+  
+  // For both hosts scenes (video_mode: both) - separate dialogues
+  hostA_text?: string;  // Dialogue for Host A (left side)
+  hostB_text?: string;  // Dialogue for Host B (right side)
+  
+  // Audio order for both hosts scenes
+  order?: 'left_first' | 'right_first' | 'meanwhile';  // Who speaks first in the scene
+  
   video_mode: VideoMode;
   model: "infinite_talk" | "infinite_talk_multi";
   shot: ShotType;
