@@ -66,8 +66,9 @@ const serpApiRequest = async (params: Record<string, string>): Promise<any> => {
 /**
  * Calculate viral score using OpenAI analysis (with caching)
  * Falls back to basic calculation if OpenAI fails
+ * NOTE: This function is currently unused but kept for potential future use
  */
-const calculateViralScore = async (item: any): Promise<number> => {
+const calculateViralScore = async (item: any): Promise<{ score: number; reasoning: string }> => {
   const headline = item.title || '';
   const summary = item.snippet || item.title || '';
   const source = item.source?.name || item.source || 'Unknown';
@@ -78,20 +79,30 @@ const calculateViralScore = async (item: any): Promise<number> => {
   
   // Try to get from cache first
   const cached = await ContentCache.get(cacheKey);
-  if (cached !== null && typeof cached === 'number') {
-    return cached;
+  if (cached !== null) {
+    // Handle both old format (number) and new format (object)
+    if (typeof cached === 'number') {
+      return { score: cached, reasoning: 'Cached score (legacy format)' };
+    }
+    if (typeof cached === 'object' && 'score' in cached) {
+      return cached as { score: number; reasoning: string };
+    }
   }
   
   // Calculate using OpenAI
   try {
-    const score = await calculateViralScoreWithGPT(headline, summary, source, date);
+    const result = await calculateViralScoreWithGPT(headline, summary, source, date);
     // Cache for 24 hours
-    await ContentCache.set(cacheKey, score, 86400000);
-    return score;
+    await ContentCache.set(cacheKey, result, 86400000);
+    return result;
   } catch (error) {
     console.warn(`[Viral Score] OpenAI failed, using basic calculation:`, (error as Error).message);
     // Fallback to basic calculation
-    return calculateBasicViralScore(headline, summary, source, date);
+    const fallbackScore = calculateBasicViralScore(headline, summary, source, date);
+    return {
+      score: fallbackScore,
+      reasoning: 'Score calculated using basic algorithm (GPT analysis unavailable)'
+    };
   }
 };
 
