@@ -502,6 +502,11 @@ export const generateSegmentedAudioWithCache = async (
   config: ChannelConfig,
   channelId: string = ''
 ): Promise<BroadcastSegment[]> => {
+  // DEBUG: Log the config voices being used
+  console.log(`🔍 [Audio DEBUG] Config received for audio generation:`);
+  console.log(`🔍 [Audio DEBUG] Host A (${config.characters.hostA.name}): voiceName = "${config.characters.hostA.voiceName}"`);
+  console.log(`🔍 [Audio DEBUG] Host B (${config.characters.hostB.name}): voiceName = "${config.characters.hostB.voiceName}"`);
+  
   // Split "Both" dialogues into separate lines for each host
   const processedScript = splitBothDialogues(script, config);
   
@@ -569,11 +574,13 @@ export const generateIntroVideo = async (
   channelId: string,
   productionId?: string
 ): Promise<string | null> => {
-  // For intro, we just return the reference image URL
-  // The BroadcastPlayer will handle displaying it as a static intro
-  if (config.referenceImageUrl) {
-    console.log(`✅ [Intro] Using reference image as intro frame`);
-    return config.referenceImageUrl;
+  // For intro, prefer two-shot image, then fallback to referenceImageUrl or any available image
+  const twoShotUrl = config.seedImages?.twoShotUrl;
+  const introImage = twoShotUrl || config.referenceImageUrl || config.seedImages?.hostASoloUrl || config.seedImages?.hostBSoloUrl;
+  
+  if (introImage) {
+    console.log(`✅ [Intro] Using ${twoShotUrl ? 'two-shot' : 'fallback'} image as intro frame`);
+    return introImage;
   }
   
   // If no reference image, return null (no intro video)
@@ -589,10 +596,13 @@ export const generateOutroVideo = async (
   channelId: string,
   productionId?: string
 ): Promise<string | null> => {
-  // For outro, we just return the reference image URL
-  if (config.referenceImageUrl) {
-    console.log(`✅ [Outro] Using reference image as outro frame`);
-    return config.referenceImageUrl;
+  // For outro, prefer two-shot image, then fallback
+  const twoShotUrl = config.seedImages?.twoShotUrl;
+  const outroImage = twoShotUrl || config.referenceImageUrl || config.seedImages?.hostASoloUrl || config.seedImages?.hostBSoloUrl;
+  
+  if (outroImage) {
+    console.log(`✅ [Outro] Using ${twoShotUrl ? 'two-shot' : 'fallback'} image as outro frame`);
+    return outroImage;
   }
   
   console.log(`⚠️ [Outro] No reference image available for outro`);
@@ -622,9 +632,16 @@ export const generateVideoSegmentsWithInfiniteTalk = async (
   productionId?: string,
   scriptWithScenes?: ScriptWithScenes
 ): Promise<(string | null)[]> => {
-  if (!config.referenceImageUrl) {
-    console.error(`❌ [InfiniteTalk] No reference image URL provided. Cannot generate lip-sync videos.`);
-    console.error(`❌ [InfiniteTalk] Please set a reference image in the channel settings.`);
+  // Get seed images for each host (prefer individual images, fallback to referenceImageUrl)
+  const hostASoloUrl = config.seedImages?.hostASoloUrl;
+  const hostBSoloUrl = config.seedImages?.hostBSoloUrl;
+  const twoShotUrl = config.seedImages?.twoShotUrl || config.referenceImageUrl;
+  
+  // Check if we have at least one image to work with
+  const hasAnyImage = hostASoloUrl || hostBSoloUrl || twoShotUrl || config.referenceImageUrl;
+  if (!hasAnyImage) {
+    console.error(`❌ [InfiniteTalk] No reference images found. Please set seed images in channel settings.`);
+    console.error(`❌ [InfiniteTalk] Need at least one of: hostASoloUrl, hostBSoloUrl, twoShotUrl, or referenceImageUrl`);
     return new Array(segments.length).fill(null);
   }
 
@@ -635,7 +652,9 @@ export const generateVideoSegmentsWithInfiniteTalk = async (
   }
 
   console.log(`🎬 [InfiniteTalk Multi] Generating ${segments.length} lip-sync videos`);
-  console.log(`🖼️ [InfiniteTalk Multi] Reference image: ${config.referenceImageUrl.substring(0, 60)}...`);
+  console.log(`🖼️ [InfiniteTalk Multi] Host A image: ${hostASoloUrl ? hostASoloUrl.substring(0, 60) + '...' : 'Not set (using fallback)'}`);
+  console.log(`🖼️ [InfiniteTalk Multi] Host B image: ${hostBSoloUrl ? hostBSoloUrl.substring(0, 60) + '...' : 'Not set (using fallback)'}`);
+  console.log(`🖼️ [InfiniteTalk Multi] Two-shot image: ${twoShotUrl ? twoShotUrl.substring(0, 60) + '...' : 'Not set'}`);
   
   // Log character descriptions to verify they're being used
   const hostAName = config.characters.hostA.name;
@@ -731,6 +750,29 @@ export const generateVideoSegmentsWithInfiniteTalk = async (
         // Get scene metadata if available (now includes Scene Builder visual prompts)
         const sceneMetadata = sceneMetadataMap.get(globalIndex);
 
+        // Determine which image to use based on speaker
+        // Priority: use specific host image if available, otherwise fall back to two-shot or referenceImageUrl
+        let imageUrlForSegment: string;
+        if (segment.speaker === hostAName && hostASoloUrl) {
+          imageUrlForSegment = hostASoloUrl;
+          console.log(`🖼️ [InfiniteTalk] Segment ${globalIndex}: Using Host A solo image`);
+        } else if (segment.speaker === hostBName && hostBSoloUrl) {
+          imageUrlForSegment = hostBSoloUrl;
+          console.log(`🖼️ [InfiniteTalk] Segment ${globalIndex}: Using Host B solo image`);
+        } else if (twoShotUrl) {
+          imageUrlForSegment = twoShotUrl;
+          console.log(`🖼️ [InfiniteTalk] Segment ${globalIndex}: Using two-shot image`);
+        } else {
+          // Ultimate fallback: use any available image
+          imageUrlForSegment = hostASoloUrl || hostBSoloUrl || config.referenceImageUrl || '';
+          console.log(`🖼️ [InfiniteTalk] Segment ${globalIndex}: Using fallback image`);
+        }
+
+        if (!imageUrlForSegment) {
+          console.error(`❌ [InfiniteTalk] Segment ${globalIndex}: No image available`);
+          return { index: globalIndex, url: null, reason: 'no_image' };
+        }
+
         // Use retry logic for video generation
         const { retryVideoGeneration } = await import('./retryUtils');
         const result = await retryVideoGeneration(
@@ -740,7 +782,7 @@ export const generateVideoSegmentsWithInfiniteTalk = async (
               productionId,
               segmentIndex: globalIndex,
               audioUrl,
-              referenceImageUrl: config.referenceImageUrl!,
+              referenceImageUrl: imageUrlForSegment,
               speaker: segment.speaker,
               dialogueText: segment.text,
               hostAName,

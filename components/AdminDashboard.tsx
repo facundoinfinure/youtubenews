@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { ChannelConfig, CharacterProfile, StoredVideo, Channel, UserProfile, Production } from '../types';
-import { fetchVideosFromDB, saveConfigToDB, getAllChannels, saveChannel, uploadImageToStorage, getIncompleteProductions, getAllProductions, getPublishedProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction } from '../services/supabaseService';
+import { fetchVideosFromDB, saveConfigToDB, getAllChannels, saveChannel, getChannelById, uploadImageToStorage, getIncompleteProductions, getAllProductions, getPublishedProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction } from '../services/supabaseService';
 import { generateSeedImage } from '../services/geminiService';
 import { CostTracker } from '../services/CostTracker';
 import { ContentCache } from '../services/ContentCache';
@@ -256,12 +256,45 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
   const handleSave = async () => {
     if (!activeChannel) return;
 
-    // Update the channel config
-    const updatedChannel = { ...activeChannel, config: tempConfig };
-    await saveChannel(updatedChannel);
+    // Log what we're saving
+    console.log(`💾 [Save] Saving config to Supabase...`);
+    console.log(`💾 [Save] Host A voice: "${tempConfig.characters.hostA.voiceName}"`);
+    console.log(`💾 [Save] Host B voice: "${tempConfig.characters.hostB.voiceName}"`);
 
-    onUpdateConfig(tempConfig);
-    toast.success('Configuration saved & synced to database!');
+    // Save to Supabase
+    const updatedChannel = { ...activeChannel, config: tempConfig };
+    const savedResult = await saveChannel(updatedChannel);
+    
+    if (!savedResult) {
+      toast.error('Failed to save configuration to database!');
+      return;
+    }
+
+    // VERIFICATION: Reload from Supabase to confirm what was actually saved
+    // This is the SOURCE OF TRUTH - we use what's in the database, not local state
+    const verifiedChannel = await getChannelById(activeChannel.id);
+    
+    if (!verifiedChannel) {
+      toast.error('Failed to verify save - could not reload from database');
+      return;
+    }
+
+    const confirmedConfig = verifiedChannel.config;
+    
+    console.log(`✅ [Save] VERIFIED from Supabase (reloaded):`);
+    console.log(`✅ [Save] Host A voice: "${confirmedConfig?.characters?.hostA?.voiceName}"`);
+    console.log(`✅ [Save] Host B voice: "${confirmedConfig?.characters?.hostB?.voiceName}"`);
+    console.log(`✅ [Save] Host A image: "${confirmedConfig?.seedImages?.hostASoloUrl || 'not set'}"`);
+    console.log(`✅ [Save] Host B image: "${confirmedConfig?.seedImages?.hostBSoloUrl || 'not set'}"`);
+
+    // Update the app state with the config FROM SUPABASE (source of truth)
+    onUpdateConfig(confirmedConfig);
+    setTempConfig(confirmedConfig);
+    
+    // Also update the channel in parent state
+    onChannelChange(verifiedChannel);
+    
+    toast.success('Configuration saved & verified from database!');
   };
 
 

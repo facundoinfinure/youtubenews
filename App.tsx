@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { AppState, ChannelConfig, NewsItem, BroadcastSegment, VideoAssets, ViralMetadata, UserProfile, Channel, ScriptLine, StoredVideo, ScriptWithScenes, NarrativeType } from './types';
-import { signInWithGoogle, getSession, signOut, getAllChannels, saveChannel, saveVideoToDB, getNewsByDate, saveNewsToDB, markNewsAsSelected, deleteVideoFromDB, supabase, fetchVideosFromDB, saveProduction, getIncompleteProductions, getProductionById, updateProductionStatus, uploadAudioToStorage, uploadImageToStorage, getAudioFromStorage, findCachedScript, findCachedAudio, getAllProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction, verifyStorageBucket, getCompletedProductionsWithVideoInfo, ProductionWithVideoInfo, getUsedNewsIdsForDate, saveCheckpoint, getLastCheckpoint, markStepFailed, saveCachedAudio } from './services/supabaseService';
+import { signInWithGoogle, getSession, signOut, getAllChannels, saveChannel, getChannelById, saveVideoToDB, getNewsByDate, saveNewsToDB, markNewsAsSelected, deleteVideoFromDB, supabase, fetchVideosFromDB, saveProduction, getIncompleteProductions, getProductionById, updateProductionStatus, uploadAudioToStorage, uploadImageToStorage, getAudioFromStorage, findCachedScript, findCachedAudio, getAllProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction, verifyStorageBucket, getCompletedProductionsWithVideoInfo, ProductionWithVideoInfo, getUsedNewsIdsForDate, saveCheckpoint, getLastCheckpoint, markStepFailed, saveCachedAudio } from './services/supabaseService';
 import { fetchEconomicNews, generateScript, generateScriptWithScenes, convertScenesToScriptLines, generateSegmentedAudio, generateSegmentedAudioWithCache, setFindCachedAudioFunction, generateBroadcastVisuals, generateViralMetadata, generateThumbnail, generateThumbnailVariants, generateViralHook, generateVideoSegmentsWithInfiniteTalk, composeVideoWithShotstack, isCompositionAvailable, getCompositionStatus } from './services/geminiService';
 import { uploadVideoToYouTube, deleteVideoFromYouTube } from './services/youtubeService';
 import { ContentCache } from './services/ContentCache';
@@ -635,6 +635,29 @@ const App: React.FC = () => {
       return;
     }
 
+    // IMPORTANT: Reload config from Supabase before starting production
+    // This ensures we use the SOURCE OF TRUTH, not stale local state
+    const freshChannel = await getChannelById(activeChannel.id);
+    if (!freshChannel) {
+      setState(AppState.ERROR);
+      addLog("❌ Failed to load channel configuration from database.");
+      toast.error('Failed to load channel configuration. Please try again.');
+      return;
+    }
+    
+    // Update local state with fresh data from Supabase
+    // IMPORTANT: Use currentConfig throughout this function, NOT the closure's `config`
+    // because React state updates are async and `config` still has the old value
+    const currentConfig = freshChannel.config;
+    setConfig(currentConfig);
+    setActiveChannel(freshChannel);
+    
+    console.log(`🔄 [Production] Loaded fresh config from Supabase:`);
+    console.log(`🔄 [Production] Host A voice: "${currentConfig?.characters?.hostA?.voiceName}"`);
+    console.log(`🔄 [Production] Host B voice: "${currentConfig?.characters?.hostB?.voiceName}"`);
+    console.log(`🔄 [Production] Host A image: "${currentConfig?.seedImages?.hostASoloUrl || 'not set'}"`);
+    console.log(`🔄 [Production] Host B image: "${currentConfig?.seedImages?.hostBSoloUrl || 'not set'}"`);
+
     // Clear logs when starting a new production
     setLogs([]);
     setVideos(EMPTY_VIDEO_ASSETS);
@@ -708,7 +731,7 @@ const App: React.FC = () => {
         // Check for cached script first
         if (activeChannel) {
           setProductionProgress({ current: 2, total: TOTAL_STEPS, step: 'Checking for cached script...' });
-          const cachedScript = await findCachedScript(finalNews, activeChannel.id, config);
+          const cachedScript = await findCachedScript(finalNews, activeChannel.id, currentConfig);
           
           if (cachedScript && cachedScript.length > 0) {
             genScript = cachedScript;
@@ -717,7 +740,7 @@ const App: React.FC = () => {
             
             // Still need to generate viral hook for consistency
             setProductionProgress({ current: 1, total: TOTAL_STEPS, step: 'Creating viral hook...' });
-            viralHook = await generateViralHook(finalNews, config);
+            viralHook = await generateViralHook(finalNews, currentConfig);
             addLog(`🎣 Viral hook: "${viralHook.substring(0, 40)}..."`);
             
             // Save viral hook and script
@@ -726,11 +749,11 @@ const App: React.FC = () => {
           } else {
             // No cached script found, generate new one
             setState(AppState.GENERATING_SCRIPT);
-            addLog(`✍️ Editorial approved. Scripting with tone: ${config.tone}...`);
+            addLog(`✍️ Editorial approved. Scripting with tone: ${currentConfig.tone}...`);
 
             // Step 1: Generate viral hook first
             setProductionProgress({ current: 1, total: TOTAL_STEPS, step: 'Creating viral hook...' });
-            viralHook = await generateViralHook(finalNews, config);
+            viralHook = await generateViralHook(finalNews, currentConfig);
             addLog(`🎣 Viral hook: "${viralHook.substring(0, 40)}..."`);
 
             // Save viral hook
@@ -738,9 +761,9 @@ const App: React.FC = () => {
 
             // Step 2: Generate script with v2.0 Narrative Engine
             setProductionProgress({ current: 2, total: TOTAL_STEPS, step: 'Writing script with Narrative Engine...' });
-            scriptWithScenes = await generateScriptWithScenes(finalNews, config, viralHook);
+            scriptWithScenes = await generateScriptWithScenes(finalNews, currentConfig, viralHook);
             setCurrentScriptWithScenes(scriptWithScenes);
-            genScript = convertScenesToScriptLines(scriptWithScenes, config);
+            genScript = convertScenesToScriptLines(scriptWithScenes, currentConfig);
             addLog(`✅ Script written using "${scriptWithScenes.narrative_used}" narrative (${Object.keys(scriptWithScenes.scenes).length} scenes).`);
 
             // Save script and scenes to DB
@@ -791,7 +814,7 @@ const App: React.FC = () => {
       // 3. Generate Media (Parallel)
       setState(AppState.GENERATING_MEDIA);
       setProductionProgress({ current: 3, total: TOTAL_STEPS, step: 'Generating audio & video...' });
-      addLog(`🎬 Rolling cameras (${config.format})...`);
+      addLog(`🎬 Rolling cameras (${currentConfig.format})...`);
       addLog("🎙️ Sound check...");
 
 
@@ -836,7 +859,7 @@ const App: React.FC = () => {
         });
         
         let completedAudio = 0;
-        const audioTask = generateSegmentedAudioWithCache(genScript, config, activeChannel?.id || '')
+        const audioTask = generateSegmentedAudioWithCache(genScript, currentConfig, activeChannel?.id || '')
           .then(async (segs: BroadcastSegment[]) => {
             setSegments(segs);
             const cachedCount = segs.filter((s: BroadcastSegment) => (s as any).fromCache).length;
@@ -860,10 +883,10 @@ const App: React.FC = () => {
                   // Only upload if not from cache (already in storage)
                   if ((seg as any).fromCache && (seg as any).audioUrl) {
                     // Save to audio cache if not already cached
-                    if (seg.text && config.characters.hostA.voiceName && config.characters.hostB.voiceName) {
-                      const voiceName = seg.speaker === config.characters.hostA.name 
-                        ? config.characters.hostA.voiceName 
-                        : config.characters.hostB.voiceName;
+                    if (seg.text && currentConfig.characters.hostA.voiceName && currentConfig.characters.hostB.voiceName) {
+                      const voiceName = seg.speaker === currentConfig.characters.hostA.name 
+                        ? currentConfig.characters.hostA.voiceName 
+                        : currentConfig.characters.hostB.voiceName;
                       await saveCachedAudio(
                         activeChannel.id,
                         seg.text,
@@ -880,9 +903,9 @@ const App: React.FC = () => {
                       videoUrl: seg.videoUrl
                     };
                   }
-                  const voiceName = seg.speaker === config.characters.hostA.name 
-                    ? config.characters.hostA.voiceName 
-                    : config.characters.hostB.voiceName;
+                  const voiceName = seg.speaker === currentConfig.characters.hostA.name 
+                    ? currentConfig.characters.hostA.voiceName 
+                    : currentConfig.characters.hostB.voiceName;
                   const audioUrl = await uploadAudioToStorage(
                     seg.audioBase64, 
                     productionId, 
@@ -934,7 +957,7 @@ const App: React.FC = () => {
       // Generate SEO metadata in parallel while we prepare for video generation
       const mainContext = finalNews[0]?.headline || "News";
       
-      const metaTask = generateViralMetadata(finalNews, config, parseSelectedDate(selectedDate))
+      const metaTask = generateViralMetadata(finalNews, currentConfig, parseSelectedDate(selectedDate))
         .then(async (meta) => {
           setViralMeta(meta);
           addLog("✅ SEO Metadata generated.");
@@ -948,7 +971,7 @@ const App: React.FC = () => {
         });
 
       // Get intro/outro (just reference image for InfiniteTalk workflow)
-      const backgroundVideos = await generateBroadcastVisuals(mainContext, config, genScript, activeChannel.id, productionId || undefined);
+      const backgroundVideos = await generateBroadcastVisuals(mainContext, currentConfig, genScript, activeChannel.id, productionId || undefined);
       setVideos(normalizeVideoAssets(backgroundVideos));
       addLog("✅ Reference image ready for video generation.");
 
@@ -994,7 +1017,7 @@ const App: React.FC = () => {
 
         videoSegments = await generateVideoSegmentsWithInfiniteTalk(
           segmentsForVideo,
-          config,
+          currentConfig,
           activeChannel.id,
           productionId || undefined,
           scriptWithScenes || undefined // v2.0 Narrative Engine scene metadata
@@ -1048,11 +1071,11 @@ const App: React.FC = () => {
       
       finalSegments.forEach((seg, i) => {
         if (seg.videoUrl) {
-          if (seg.speaker === config.characters.hostA.name) {
+          if (seg.speaker === currentConfig.characters.hostA.name) {
             if (!hostAVideos.includes(seg.videoUrl)) {
               hostAVideos.push(seg.videoUrl);
             }
-          } else if (seg.speaker === config.characters.hostB.name) {
+          } else if (seg.speaker === currentConfig.characters.hostB.name) {
             if (!hostBVideos.includes(seg.videoUrl)) {
               hostBVideos.push(seg.videoUrl);
             }
@@ -1091,7 +1114,7 @@ const App: React.FC = () => {
         setProductionProgress({ current: 5, total: TOTAL_STEPS, step: 'Creating thumbnails...' });
         addLog("🎨 Creating thumbnail variants...");
         // Generate thumbnails (can be done in parallel with other operations)
-        thumbnails = await generateThumbnailVariants(mainContext, config, metadata);
+        thumbnails = await generateThumbnailVariants(mainContext, currentConfig, metadata);
         addLog(`✅ Thumbnails ready (${thumbnails.variant ? '2 variants for A/B testing' : '1 thumbnail'})`);
         
         // Save checkpoint after thumbnails
@@ -1339,6 +1362,13 @@ const App: React.FC = () => {
 
   const handleChannelSwitch = async (channel: Channel) => {
     if (!channel) return;
+    
+    // DEBUG: Log the config being loaded from channel
+    console.log(`📥 [Load DEBUG] Loading channel "${channel.name}" config:`);
+    console.log(`📥 [Load DEBUG] Host A (${channel.config?.characters?.hostA?.name}): voiceName = "${channel.config?.characters?.hostA?.voiceName}"`);
+    console.log(`📥 [Load DEBUG] Host B (${channel.config?.characters?.hostB?.name}): voiceName = "${channel.config?.characters?.hostB?.voiceName}"`);
+    console.log(`📥 [Load DEBUG] Host A seedImage URL: ${channel.config?.seedImages?.hostASoloUrl || 'not set'}`);
+    console.log(`📥 [Load DEBUG] Host B seedImage URL: ${channel.config?.seedImages?.hostBSoloUrl || 'not set'}`);
     
     // Reset all state when switching channels (including logs to avoid showing logs from deleted productions)
     setActiveChannel(channel);
@@ -1593,8 +1623,12 @@ const App: React.FC = () => {
         activeChannel={activeChannel}
         channels={channels}
         onChannelChange={(channel) => {
+          // Update active channel and config from Supabase data
           setActiveChannel(channel);
           setConfig(channel.config);
+          // Also update the channel in the channels array
+          setChannels(prev => prev.map(c => c.id === channel.id ? channel : c));
+          console.log(`📥 [Channel Update] Config loaded from Supabase: Host A voice = "${channel.config?.characters?.hostA?.voiceName}", Host B voice = "${channel.config?.characters?.hostB?.voiceName}"`);
         }}
         onDeleteVideo={handleDeleteVideo}
         onResumeProduction={resumeProduction}
