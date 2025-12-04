@@ -124,7 +124,7 @@ export const NewsSelector: React.FC<NewsSelectorProps> = ({ news, onConfirmSelec
                     <img
                       src={item.imageUrl}
                       alt={item.headline}
-                      className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity"
+                      className="absolute inset-0 w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity z-0"
                       loading="lazy"
                       onError={(e) => {
                         // Hide broken image and show gradient background
@@ -137,7 +137,7 @@ export const NewsSelector: React.FC<NewsSelectorProps> = ({ news, onConfirmSelec
                     </div>
                   )}
                   <div 
-                    className="absolute top-2 right-2 bg-black/80 backdrop-blur-sm text-xs font-bold px-2 py-1 rounded-md text-yellow-400 flex items-center gap-1 shadow-lg cursor-help relative z-10"
+                    className="absolute top-2 right-2 bg-black/80 backdrop-blur-sm text-xs font-bold px-2 py-1 rounded-md text-yellow-400 flex items-center gap-1 shadow-lg cursor-help z-10"
                     onMouseEnter={() => setHoveredScoreIndex(idx)}
                     onMouseLeave={() => setHoveredScoreIndex(null)}
                   >

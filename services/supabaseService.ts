@@ -340,25 +340,11 @@ export const saveNewsToDB = async (newsDate: Date, news: NewsItem[], channelId: 
   }
 
   // Insert new news items
+  // publication_date = selected date (SerpAPI already filters by this date)
   const newsRecords = news.map(item => {
-    // Parse publication date from item, fallback to newsDate if not available
-    let publicationDateStr = dateStr; // Default to selected date
-    if (item.publicationDate) {
-      try {
-        const pubDate = typeof item.publicationDate === 'string' 
-          ? new Date(item.publicationDate) 
-          : item.publicationDate;
-        if (!isNaN(pubDate.getTime())) {
-          publicationDateStr = pubDate.toISOString().split('T')[0];
-        }
-      } catch (e) {
-        console.warn(`⚠️ Could not parse publication date for "${item.headline}", using news_date`);
-      }
-    }
-    
     return {
       news_date: dateStr,
-      publication_date: publicationDateStr,
+      publication_date: dateStr, // Always use selected date since SerpAPI filtered by it
       channel_id: channelId,
       headline: item.headline,
       source: item.source,
@@ -394,14 +380,14 @@ export const getNewsByDate = async (newsDate: Date, channelId: string): Promise<
 
   const dateStr = newsDate.toISOString().split('T')[0];
 
-  // Get all news items for this channel (we'll filter by date on the client side)
-  // This allows us to include recent news from surrounding dates (within 7 days)
+  // Get all news items for this channel and the selected publication date
+  // Filter by publication_date (the date the user selected, which SerpAPI filtered by)
   const { data, error } = await supabase
     .from('news_items')
     .select('*')
     .eq('channel_id', channelId)
-    .order('viral_score', { ascending: false })
-    .limit(200); // Increased limit to account for wider date range
+    .eq('publication_date', dateStr)
+    .order('viral_score', { ascending: false });
 
   if (error) {
     console.error("Error fetching news:", error);
@@ -413,29 +399,9 @@ export const getNewsByDate = async (newsDate: Date, channelId: string): Promise<
     return [];
   }
 
-  // Filter by publication_date to include recent news (within 7 days of target date)
-  // This allows news from the target date and recent surrounding dates
-  // For backward compatibility: if publication_date is null, use news_date
-  const targetDate = new Date(dateStr);
-  const filteredData = data.filter((row: any) => {
-    let pubDate: Date;
-    if (row.publication_date) {
-      pubDate = new Date(row.publication_date);
-    } else {
-      // If no publication_date (old records), use news_date
-      pubDate = new Date(row.news_date);
-    }
-    
-    // Calculate days difference
-    const daysDiff = Math.floor((targetDate.getTime() - pubDate.getTime()) / (1000 * 60 * 60 * 24));
-    
-    // Include if publication date is within 7 days of target date (before or after)
-    return Math.abs(daysDiff) <= 7;
-  });
-
-  console.log(`📰 Retrieved ${filteredData.length} news items from database for date ${dateStr} (filtered from ${data.length} total)`);
+  console.log(`📰 Retrieved ${data.length} news items from database for date ${dateStr}`);
   
-  return filteredData.map((row: any) => ({
+  return data.map((row: any) => ({
     id: row.id, // Include UUID from database
     headline: row.headline,
     source: row.source,
