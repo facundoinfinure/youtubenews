@@ -1,0 +1,505 @@
+/**
+ * Shotstack Video Composition Service
+ * 
+ * Shotstack es un API de composición de video en la nube que funciona
+ * perfectamente con Vercel (serverless).
+ * 
+ * Pricing: ~$0.05 por minuto de video renderizado
+ * Sign up: https://shotstack.io
+ * 
+ * Alternativas si Shotstack no funciona:
+ * - Creatomate (https://creatomate.com)
+ * - Renderforest API
+ * - Modal.com (si necesitas FFmpeg real)
+ */
+
+import { CostTracker } from "./CostTracker";
+
+// =============================================================================================
+// TYPES
+// =============================================================================================
+
+export interface VideoClip {
+  url: string;
+  start: number;      // Start time in seconds
+  length?: number;    // Duration in seconds (auto-detect if not provided)
+  fit?: 'cover' | 'contain' | 'crop' | 'none';
+  volume?: number;    // 0-1
+}
+
+export interface AudioClip {
+  url: string;
+  start: number;
+  length?: number;
+  volume?: number;
+}
+
+export interface TextOverlay {
+  text: string;
+  start: number;
+  length: number;
+  style?: 'minimal' | 'blockbuster' | 'vogue' | 'sketch';
+  position?: 'top' | 'center' | 'bottom';
+  size?: 'small' | 'medium' | 'large';
+  color?: string;
+}
+
+export interface CompositionConfig {
+  // Video segments in order
+  clips: VideoClip[];
+  
+  // Optional audio track (if not using clip audio)
+  audioTrack?: AudioClip;
+  
+  // Text overlays (subtitles, titles)
+  textOverlays?: TextOverlay[];
+  
+  // Branding
+  watermark?: {
+    url: string;
+    position: 'topLeft' | 'topRight' | 'bottomLeft' | 'bottomRight';
+    opacity?: number;
+    scale?: number;
+  };
+  
+  // Intro/Outro
+  intro?: VideoClip;
+  outro?: VideoClip;
+  
+  // Output settings
+  resolution: 'sd' | 'hd' | '1080' | '4k';
+  aspectRatio: '16:9' | '9:16' | '1:1' | '4:5';
+  fps?: number;
+  
+  // Transitions between clips
+  transition?: {
+    type: 'fade' | 'dissolve' | 'wipeLeft' | 'wipeRight' | 'slideLeft' | 'slideRight' | 'zoom';
+    duration: number; // seconds
+  };
+  
+  // Callback URL for webhook (optional)
+  callbackUrl?: string;
+}
+
+export interface RenderResult {
+  success: boolean;
+  renderId?: string;
+  status?: 'queued' | 'rendering' | 'done' | 'failed';
+  videoUrl?: string;
+  posterUrl?: string;
+  error?: string;
+  duration?: number;
+  cost?: number;
+}
+
+// =============================================================================================
+// CONFIGURATION
+// =============================================================================================
+
+const getShotstackConfig = () => {
+  const apiKey = import.meta.env.VITE_SHOTSTACK_API_KEY || '';
+  const env = import.meta.env.VITE_SHOTSTACK_ENV || 'stage'; // 'stage' for testing, 'v1' for production
+  
+  return {
+    apiKey,
+    baseUrl: `https://api.shotstack.io/${env}`,
+    isConfigured: !!apiKey
+  };
+};
+
+export const checkShotstackConfig = () => {
+  const config = getShotstackConfig();
+  return {
+    configured: config.isConfigured,
+    message: config.isConfigured 
+      ? 'Shotstack configured' 
+      : 'Set VITE_SHOTSTACK_API_KEY in .env'
+  };
+};
+
+// =============================================================================================
+// SHOTSTACK API HELPERS
+// =============================================================================================
+
+const shotstackRequest = async (
+  endpoint: string,
+  method: 'GET' | 'POST' = 'GET',
+  body?: any
+): Promise<any> => {
+  const config = getShotstackConfig();
+  
+  if (!config.isConfigured) {
+    throw new Error('Shotstack not configured. Set VITE_SHOTSTACK_API_KEY');
+  }
+  
+  const response = await fetch(`${config.baseUrl}${endpoint}`, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': config.apiKey
+    },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.message || `Shotstack API error: ${response.status}`);
+  }
+  
+  return response.json();
+};
+
+// =============================================================================================
+// BUILD SHOTSTACK TIMELINE
+// =============================================================================================
+
+/**
+ * Convert our config to Shotstack Edit format
+ * Docs: https://shotstack.io/docs/api/
+ */
+const buildShotstackEdit = (config: CompositionConfig): any => {
+  const tracks: any[] = [];
+  let currentTime = 0;
+  const transitionDuration = config.transition?.duration || 0;
+  
+  // === VIDEO TRACK ===
+  const videoClips: any[] = [];
+  
+  // Add intro if provided
+  if (config.intro) {
+    videoClips.push({
+      asset: {
+        type: 'video',
+        src: config.intro.url,
+        volume: config.intro.volume ?? 1
+      },
+      start: currentTime,
+      length: config.intro.length || 3,
+      fit: config.intro.fit || 'cover',
+      transition: config.transition ? {
+        out: config.transition.type
+      } : undefined
+    });
+    currentTime += (config.intro.length || 3) - transitionDuration;
+  }
+  
+  // Add main clips
+  config.clips.forEach((clip, index) => {
+    const isLast = index === config.clips.length - 1 && !config.outro;
+    
+    videoClips.push({
+      asset: {
+        type: 'video',
+        src: clip.url,
+        volume: clip.volume ?? 1
+      },
+      start: currentTime,
+      length: clip.length || 'auto',
+      fit: clip.fit || 'cover',
+      transition: config.transition && !isLast ? {
+        out: config.transition.type
+      } : undefined
+    });
+    
+    // Estimate clip duration if not provided (assume 5 seconds for auto)
+    const clipDuration = clip.length || 5;
+    currentTime += clipDuration - (isLast ? 0 : transitionDuration);
+  });
+  
+  // Add outro if provided
+  if (config.outro) {
+    videoClips.push({
+      asset: {
+        type: 'video',
+        src: config.outro.url,
+        volume: config.outro.volume ?? 1
+      },
+      start: currentTime,
+      length: config.outro.length || 3,
+      fit: config.outro.fit || 'cover'
+    });
+  }
+  
+  tracks.push({ clips: videoClips });
+  
+  // === WATERMARK TRACK (above video) ===
+  if (config.watermark) {
+    const positionMap: Record<string, string> = {
+      'topLeft': 'topLeft',
+      'topRight': 'topRight', 
+      'bottomLeft': 'bottomLeft',
+      'bottomRight': 'bottomRight'
+    };
+    
+    tracks.unshift({
+      clips: [{
+        asset: {
+          type: 'image',
+          src: config.watermark.url
+        },
+        start: 0,
+        length: currentTime + (config.outro?.length || 0),
+        position: positionMap[config.watermark.position] || 'bottomRight',
+        opacity: config.watermark.opacity || 0.7,
+        scale: config.watermark.scale || 0.15
+      }]
+    });
+  }
+  
+  // === TEXT OVERLAY TRACK ===
+  if (config.textOverlays && config.textOverlays.length > 0) {
+    const textClips = config.textOverlays.map(overlay => ({
+      asset: {
+        type: 'title',
+        text: overlay.text,
+        style: overlay.style || 'minimal',
+        color: overlay.color || '#ffffff',
+        size: overlay.size || 'medium',
+        position: overlay.position || 'bottom'
+      },
+      start: overlay.start,
+      length: overlay.length
+    }));
+    
+    tracks.unshift({ clips: textClips });
+  }
+  
+  // === AUDIO TRACK (separate from video) ===
+  if (config.audioTrack) {
+    tracks.push({
+      clips: [{
+        asset: {
+          type: 'audio',
+          src: config.audioTrack.url,
+          volume: config.audioTrack.volume ?? 1
+        },
+        start: config.audioTrack.start,
+        length: config.audioTrack.length || 'auto'
+      }]
+    });
+  }
+  
+  // Build resolution
+  const resolutionMap: Record<string, string> = {
+    'sd': 'sd',
+    'hd': 'hd',
+    '1080': '1080',
+    '4k': '4k'
+  };
+  
+  return {
+    timeline: {
+      soundtrack: config.audioTrack ? undefined : {
+        src: 'https://shotstack-assets.s3.ap-southeast-2.amazonaws.com/music/freepd/silence.mp3',
+        effect: 'fadeOut',
+        volume: 0
+      },
+      background: '#000000',
+      tracks
+    },
+    output: {
+      format: 'mp4',
+      resolution: resolutionMap[config.resolution] || 'hd',
+      aspectRatio: config.aspectRatio,
+      fps: config.fps || 30,
+      // Generate poster/thumbnail
+      poster: {
+        capture: 1 // Capture at 1 second
+      }
+    },
+    callback: config.callbackUrl || undefined
+  };
+};
+
+// =============================================================================================
+// MAIN API FUNCTIONS
+// =============================================================================================
+
+/**
+ * Submit a video composition job to Shotstack
+ */
+export const submitRenderJob = async (
+  config: CompositionConfig
+): Promise<{ renderId: string; message: string }> => {
+  console.log('🎬 [Shotstack] Submitting render job...');
+  
+  const edit = buildShotstackEdit(config);
+  
+  console.log('📋 [Shotstack] Edit config:', JSON.stringify(edit, null, 2).substring(0, 500) + '...');
+  
+  const response = await shotstackRequest('/render', 'POST', edit);
+  
+  console.log(`✅ [Shotstack] Job submitted: ${response.response.id}`);
+  
+  return {
+    renderId: response.response.id,
+    message: response.response.message
+  };
+};
+
+/**
+ * Check the status of a render job
+ */
+export const checkRenderStatus = async (
+  renderId: string
+): Promise<RenderResult> => {
+  const response = await shotstackRequest(`/render/${renderId}`);
+  const data = response.response;
+  
+  const statusMap: Record<string, RenderResult['status']> = {
+    'queued': 'queued',
+    'fetching': 'queued',
+    'rendering': 'rendering',
+    'saving': 'rendering',
+    'done': 'done',
+    'failed': 'failed'
+  };
+  
+  const result: RenderResult = {
+    success: data.status === 'done',
+    renderId,
+    status: statusMap[data.status] || 'queued'
+  };
+  
+  if (data.status === 'done') {
+    result.videoUrl = data.url;
+    result.posterUrl = data.poster;
+    result.duration = data.data?.duration;
+    
+    // Track cost (~$0.05 per minute)
+    if (data.data?.duration) {
+      const cost = (data.data.duration / 60) * 0.05;
+      CostTracker.track('composition', 'shotstack', cost);
+      result.cost = cost;
+    }
+  }
+  
+  if (data.status === 'failed') {
+    result.error = data.error || 'Render failed';
+  }
+  
+  return result;
+};
+
+/**
+ * Poll for render completion
+ */
+export const pollRenderJob = async (
+  renderId: string,
+  maxWaitMs: number = 600000, // 10 minutes
+  pollIntervalMs: number = 5000 // 5 seconds
+): Promise<RenderResult> => {
+  const startTime = Date.now();
+  
+  console.log(`⏳ [Shotstack] Waiting for render ${renderId}...`);
+  
+  while (Date.now() - startTime < maxWaitMs) {
+    const result = await checkRenderStatus(renderId);
+    
+    if (result.status === 'done') {
+      console.log(`✅ [Shotstack] Render complete: ${result.videoUrl}`);
+      return result;
+    }
+    
+    if (result.status === 'failed') {
+      console.error(`❌ [Shotstack] Render failed: ${result.error}`);
+      return result;
+    }
+    
+    console.log(`⏳ [Shotstack] Status: ${result.status}, waiting...`);
+    await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+  }
+  
+  return {
+    success: false,
+    renderId,
+    status: 'failed',
+    error: 'Timeout waiting for render'
+  };
+};
+
+/**
+ * Full render workflow: submit and wait for completion
+ */
+export const renderVideo = async (
+  config: CompositionConfig
+): Promise<RenderResult> => {
+  try {
+    // Submit job
+    const { renderId } = await submitRenderJob(config);
+    
+    // Poll for completion
+    return await pollRenderJob(renderId);
+  } catch (error) {
+    console.error('❌ [Shotstack] Render error:', (error as Error).message);
+    return {
+      success: false,
+      error: (error as Error).message
+    };
+  }
+};
+
+// =============================================================================================
+// HELPER: Create composition from BroadcastSegments
+// =============================================================================================
+
+import { BroadcastSegment, VideoAssets, ChannelConfig } from "../types";
+
+/**
+ * Create a Shotstack composition config from production data
+ */
+export const createCompositionFromSegments = (
+  segments: BroadcastSegment[],
+  videoUrls: (string | null)[],
+  videos: VideoAssets,
+  config: ChannelConfig,
+  options: {
+    resolution?: '1080' | 'hd' | 'sd';
+    transition?: CompositionConfig['transition'];
+    watermarkUrl?: string;
+    callbackUrl?: string;
+  } = {}
+): CompositionConfig => {
+  // Build clips from segments with their video URLs
+  const clips: VideoClip[] = segments
+    .map((segment, index) => {
+      const videoUrl = videoUrls[index] || segment.videoUrl;
+      if (!videoUrl) return null;
+      
+      return {
+        url: videoUrl,
+        start: 0, // Will be calculated by Shotstack
+        volume: 1
+      };
+    })
+    .filter((clip): clip is VideoClip => clip !== null);
+  
+  return {
+    clips,
+    intro: videos.intro ? { url: videos.intro, start: 0, length: 3 } : undefined,
+    outro: videos.outro ? { url: videos.outro, start: 0, length: 3 } : undefined,
+    resolution: options.resolution || '1080',
+    aspectRatio: config.format,
+    transition: options.transition || { type: 'dissolve', duration: 0.3 },
+    watermark: options.watermarkUrl ? {
+      url: options.watermarkUrl,
+      position: 'bottomRight',
+      opacity: 0.7,
+      scale: 0.1
+    } : undefined,
+    callbackUrl: options.callbackUrl
+  };
+};
+
+// =============================================================================================
+// EXPORTS
+// =============================================================================================
+
+export const ShotstackService = {
+  checkConfig: checkShotstackConfig,
+  submitRender: submitRenderJob,
+  checkStatus: checkRenderStatus,
+  pollRender: pollRenderJob,
+  render: renderVideo,
+  createFromSegments: createCompositionFromSegments
+};

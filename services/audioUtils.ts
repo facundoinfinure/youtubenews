@@ -1,4 +1,24 @@
 /**
+ * Audio Utilities for ChimpNews
+ * 
+ * Provides audio decoding, normalization, and enhancement functions
+ * using Web Audio API for professional-quality audio output.
+ */
+
+// =============================================================================================
+// CONSTANTS
+// =============================================================================================
+
+// Target loudness for broadcast audio (EBU R128 / ITU-R BS.1770)
+const TARGET_LOUDNESS_LUFS = -16; // Standard for streaming/podcast
+const TRUE_PEAK_LIMIT = -1.5; // dBTP
+const LOUDNESS_RANGE = 11; // LRA
+
+// =============================================================================================
+// BASIC DECODING
+// =============================================================================================
+
+/**
  * Decode base64 string to Uint8Array
  */
 export function decode(base64: string): Uint8Array {
@@ -9,6 +29,17 @@ export function decode(base64: string): Uint8Array {
     bytes[i] = binaryString.charCodeAt(i);
   }
   return bytes;
+}
+
+/**
+ * Encode Uint8Array to base64 string
+ */
+export function encode(bytes: Uint8Array): string {
+  let binaryString = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binaryString += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binaryString);
 }
 
 /**
@@ -36,4 +67,394 @@ export async function decodeAudioData(
       (error) => reject(new Error(`Failed to decode audio: ${error}`))
     );
   });
+}
+
+// =============================================================================================
+// AUDIO ANALYSIS
+// =============================================================================================
+
+/**
+ * Calculate RMS (Root Mean Square) loudness of audio buffer
+ */
+export function calculateRMS(audioBuffer: AudioBuffer): number {
+  let sumOfSquares = 0;
+  let totalSamples = 0;
+  
+  for (let channel = 0; channel < audioBuffer.numberOfChannels; channel++) {
+    const channelData = audioBuffer.getChannelData(channel);
+    for (let i = 0; i < channelData.length; i++) {
+      sumOfSquares += channelData[i] * channelData[i];
+      totalSamples++;
+    }
+  }
+  
+  return Math.sqrt(sumOfSquares / totalSamples);
+}
+
+/**
+ * Calculate peak amplitude of audio buffer
+ */
+export function calculatePeak(audioBuffer: AudioBuffer): number {
+  let peak = 0;
+  
+  for (let channel = 0; channel < audioBuffer.numberOfChannels; channel++) {
+    const channelData = audioBuffer.getChannelData(channel);
+    for (let i = 0; i < channelData.length; i++) {
+      const absSample = Math.abs(channelData[i]);
+      if (absSample > peak) {
+        peak = absSample;
+      }
+    }
+  }
+  
+  return peak;
+}
+
+/**
+ * Convert linear amplitude to decibels
+ */
+export function linearToDb(linear: number): number {
+  if (linear <= 0) return -Infinity;
+  return 20 * Math.log10(linear);
+}
+
+/**
+ * Convert decibels to linear amplitude
+ */
+export function dbToLinear(db: number): number {
+  return Math.pow(10, db / 20);
+}
+
+/**
+ * Approximate LUFS calculation (simplified, not full ITU-R BS.1770)
+ * For accurate LUFS, use a dedicated library like 'loudness' on backend
+ */
+export function approximateLUFS(audioBuffer: AudioBuffer): number {
+  const rms = calculateRMS(audioBuffer);
+  const dbRMS = linearToDb(rms);
+  // Approximate LUFS from RMS (rough estimate, not accurate for all content)
+  return dbRMS - 0.691; // Rough offset
+}
+
+// =============================================================================================
+// AUDIO NORMALIZATION
+// =============================================================================================
+
+export interface NormalizationOptions {
+  targetLUFS?: number;      // Target loudness in LUFS (default: -16)
+  truePeakLimit?: number;   // True peak limit in dB (default: -1.5)
+  applyCompression?: boolean; // Apply dynamic compression (default: false)
+  compressionRatio?: number;  // Compression ratio if enabled (default: 3)
+  compressionThreshold?: number; // Threshold in dB (default: -20)
+}
+
+/**
+ * Normalize audio buffer to target loudness
+ * Uses peak normalization with loudness targeting
+ */
+export async function normalizeAudio(
+  audioBuffer: AudioBuffer,
+  options: NormalizationOptions = {}
+): Promise<AudioBuffer> {
+  const {
+    targetLUFS = TARGET_LOUDNESS_LUFS,
+    truePeakLimit = TRUE_PEAK_LIMIT,
+    applyCompression = false,
+    compressionRatio = 3,
+    compressionThreshold = -20
+  } = options;
+  
+  // Calculate current loudness
+  const currentLUFS = approximateLUFS(audioBuffer);
+  const currentPeak = calculatePeak(audioBuffer);
+  const currentPeakDb = linearToDb(currentPeak);
+  
+  console.log(`🔊 [Audio] Current: ${currentLUFS.toFixed(1)} LUFS, Peak: ${currentPeakDb.toFixed(1)} dB`);
+  
+  // Calculate required gain
+  let gainDb = targetLUFS - currentLUFS;
+  
+  // Limit gain to prevent clipping (respect true peak limit)
+  const maxGainDb = truePeakLimit - currentPeakDb;
+  if (gainDb > maxGainDb) {
+    console.log(`🔊 [Audio] Limiting gain from ${gainDb.toFixed(1)} to ${maxGainDb.toFixed(1)} dB (peak limiting)`);
+    gainDb = maxGainDb;
+  }
+  
+  const gainLinear = dbToLinear(gainDb);
+  
+  // Create new audio buffer for normalized audio
+  const ctx = new OfflineAudioContext(
+    audioBuffer.numberOfChannels,
+    audioBuffer.length,
+    audioBuffer.sampleRate
+  );
+  
+  // Copy and normalize
+  const normalizedBuffer = ctx.createBuffer(
+    audioBuffer.numberOfChannels,
+    audioBuffer.length,
+    audioBuffer.sampleRate
+  );
+  
+  for (let channel = 0; channel < audioBuffer.numberOfChannels; channel++) {
+    const inputData = audioBuffer.getChannelData(channel);
+    const outputData = normalizedBuffer.getChannelData(channel);
+    
+    for (let i = 0; i < inputData.length; i++) {
+      let sample = inputData[i] * gainLinear;
+      
+      // Apply soft compression if enabled
+      if (applyCompression) {
+        const thresholdLinear = dbToLinear(compressionThreshold);
+        const absSample = Math.abs(sample);
+        
+        if (absSample > thresholdLinear) {
+          // Soft knee compression
+          const overThreshold = absSample - thresholdLinear;
+          const compressed = thresholdLinear + (overThreshold / compressionRatio);
+          sample = (sample >= 0 ? 1 : -1) * compressed;
+        }
+      }
+      
+      // Hard limiter to prevent clipping
+      const peakLimitLinear = dbToLinear(truePeakLimit);
+      if (Math.abs(sample) > peakLimitLinear) {
+        sample = (sample >= 0 ? 1 : -1) * peakLimitLinear;
+      }
+      
+      outputData[i] = sample;
+    }
+  }
+  
+  const finalLUFS = approximateLUFS(normalizedBuffer);
+  const finalPeak = linearToDb(calculatePeak(normalizedBuffer));
+  console.log(`✅ [Audio] Normalized: ${finalLUFS.toFixed(1)} LUFS, Peak: ${finalPeak.toFixed(1)} dB`);
+  
+  return normalizedBuffer;
+}
+
+// =============================================================================================
+// AUDIO ENHANCEMENT
+// =============================================================================================
+
+/**
+ * Apply simple noise gate to reduce background noise
+ */
+export function applyNoiseGate(
+  audioBuffer: AudioBuffer,
+  thresholdDb: number = -50,
+  attackMs: number = 5,
+  releaseMs: number = 50
+): AudioBuffer {
+  const threshold = dbToLinear(thresholdDb);
+  const attackSamples = Math.floor((attackMs / 1000) * audioBuffer.sampleRate);
+  const releaseSamples = Math.floor((releaseMs / 1000) * audioBuffer.sampleRate);
+  
+  const ctx = new OfflineAudioContext(
+    audioBuffer.numberOfChannels,
+    audioBuffer.length,
+    audioBuffer.sampleRate
+  );
+  
+  const outputBuffer = ctx.createBuffer(
+    audioBuffer.numberOfChannels,
+    audioBuffer.length,
+    audioBuffer.sampleRate
+  );
+  
+  for (let channel = 0; channel < audioBuffer.numberOfChannels; channel++) {
+    const inputData = audioBuffer.getChannelData(channel);
+    const outputData = outputBuffer.getChannelData(channel);
+    
+    let gateOpen = false;
+    let gateLevel = 0;
+    
+    for (let i = 0; i < inputData.length; i++) {
+      const sample = inputData[i];
+      const absSample = Math.abs(sample);
+      
+      // Determine gate state
+      if (absSample > threshold) {
+        gateOpen = true;
+      } else if (gateOpen && absSample < threshold * 0.5) {
+        gateOpen = false;
+      }
+      
+      // Smooth gate transition
+      const targetLevel = gateOpen ? 1 : 0;
+      const smoothingFactor = gateOpen ? (1 / attackSamples) : (1 / releaseSamples);
+      gateLevel += (targetLevel - gateLevel) * smoothingFactor;
+      
+      outputData[i] = sample * gateLevel;
+    }
+  }
+  
+  return outputBuffer;
+}
+
+/**
+ * Apply high-pass filter to remove low-frequency rumble
+ */
+export async function applyHighPassFilter(
+  audioBuffer: AudioBuffer,
+  cutoffHz: number = 80
+): Promise<AudioBuffer> {
+  const ctx = new OfflineAudioContext(
+    audioBuffer.numberOfChannels,
+    audioBuffer.length,
+    audioBuffer.sampleRate
+  );
+  
+  // Create source
+  const source = ctx.createBufferSource();
+  source.buffer = audioBuffer;
+  
+  // Create high-pass filter
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'highpass';
+  filter.frequency.value = cutoffHz;
+  filter.Q.value = 0.707; // Butterworth
+  
+  // Connect
+  source.connect(filter);
+  filter.connect(ctx.destination);
+  
+  // Render
+  source.start(0);
+  return ctx.startRendering();
+}
+
+// =============================================================================================
+// AUDIO EXPORT
+// =============================================================================================
+
+/**
+ * Export AudioBuffer to WAV format as base64
+ */
+export function audioBufferToWavBase64(audioBuffer: AudioBuffer): string {
+  const wavData = audioBufferToWav(audioBuffer);
+  return encode(wavData);
+}
+
+/**
+ * Convert AudioBuffer to WAV Uint8Array
+ */
+export function audioBufferToWav(audioBuffer: AudioBuffer): Uint8Array {
+  const numChannels = audioBuffer.numberOfChannels;
+  const sampleRate = audioBuffer.sampleRate;
+  const format = 1; // PCM
+  const bitsPerSample = 16;
+  
+  const bytesPerSample = bitsPerSample / 8;
+  const blockAlign = numChannels * bytesPerSample;
+  
+  const dataLength = audioBuffer.length * blockAlign;
+  const buffer = new ArrayBuffer(44 + dataLength);
+  const view = new DataView(buffer);
+  
+  // WAV header
+  writeString(view, 0, 'RIFF');
+  view.setUint32(4, 36 + dataLength, true);
+  writeString(view, 8, 'WAVE');
+  writeString(view, 12, 'fmt ');
+  view.setUint32(16, 16, true); // fmt chunk size
+  view.setUint16(20, format, true);
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * blockAlign, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitsPerSample, true);
+  writeString(view, 36, 'data');
+  view.setUint32(40, dataLength, true);
+  
+  // Interleave channels and write samples
+  let offset = 44;
+  for (let i = 0; i < audioBuffer.length; i++) {
+    for (let channel = 0; channel < numChannels; channel++) {
+      const sample = audioBuffer.getChannelData(channel)[i];
+      const intSample = Math.max(-1, Math.min(1, sample));
+      view.setInt16(offset, intSample < 0 ? intSample * 0x8000 : intSample * 0x7FFF, true);
+      offset += 2;
+    }
+  }
+  
+  return new Uint8Array(buffer);
+}
+
+function writeString(view: DataView, offset: number, string: string): void {
+  for (let i = 0; i < string.length; i++) {
+    view.setUint8(offset + i, string.charCodeAt(i));
+  }
+}
+
+// =============================================================================================
+// BATCH PROCESSING
+// =============================================================================================
+
+export interface ProcessedAudioResult {
+  audioBase64: string;
+  duration: number;
+  peakDb: number;
+  rmsDb: number;
+  normalized: boolean;
+}
+
+/**
+ * Process audio segment with normalization and enhancement
+ */
+export async function processAudioSegment(
+  audioBase64: string,
+  options: {
+    normalize?: boolean;
+    targetLUFS?: number;
+    applyHighPass?: boolean;
+    highPassCutoff?: number;
+    applyNoiseGate?: boolean;
+    noiseGateThreshold?: number;
+  } = {}
+): Promise<ProcessedAudioResult> {
+  const {
+    normalize = true,
+    targetLUFS = TARGET_LOUDNESS_LUFS,
+    applyHighPass = true,
+    highPassCutoff = 80,
+    applyNoiseGate: useNoiseGate = false,
+    noiseGateThreshold = -50
+  } = options;
+  
+  // Decode audio
+  const audioData = decode(audioBase64.split(',')[1] || audioBase64);
+  const ctx = new AudioContext();
+  let audioBuffer = await decodeAudioData(audioData, ctx);
+  
+  // Apply high-pass filter
+  if (applyHighPass) {
+    audioBuffer = await applyHighPassFilter(audioBuffer, highPassCutoff);
+  }
+  
+  // Apply noise gate
+  if (useNoiseGate) {
+    audioBuffer = applyNoiseGate(audioBuffer, noiseGateThreshold);
+  }
+  
+  // Normalize
+  if (normalize) {
+    audioBuffer = await normalizeAudio(audioBuffer, { targetLUFS });
+  }
+  
+  // Export
+  const wavBase64 = audioBufferToWavBase64(audioBuffer);
+  const peakDb = linearToDb(calculatePeak(audioBuffer));
+  const rmsDb = linearToDb(calculateRMS(audioBuffer));
+  
+  await ctx.close();
+  
+  return {
+    audioBase64: `data:audio/wav;base64,${wavBase64}`,
+    duration: audioBuffer.duration,
+    peakDb,
+    rmsDb,
+    normalized: normalize
+  };
 }

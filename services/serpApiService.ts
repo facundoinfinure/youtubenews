@@ -376,10 +376,10 @@ export const fetchNewsWithSerpAPI = async (
           return isRecent;
         });
       
-      // Sort by viral score and take top 15
+      // Sort by viral score (for display purposes, but don't limit quantity)
+      // User will choose which news to use, so we save ALL news that pass the date filter
       const sortedNews = processedNews
-        .sort((a, b) => b.viralScore - a.viralScore)
-        .slice(0, 15);
+        .sort((a, b) => b.viralScore - a.viralScore);
       
       // Log score distribution
       const scores = sortedNews.map(n => n.viralScore);
@@ -388,7 +388,7 @@ export const fetchNewsWithSerpAPI = async (
         : 'N/A';
       console.log(`[SerpAPI] 📊 Viral score range: ${scoreRange}`);
       
-      console.log(`[SerpAPI] ✅ Processed ${sortedNews.length} news items`);
+      console.log(`[SerpAPI] ✅ Processed ${sortedNews.length} news items (all news saved, user will choose)`);
       
       // Validate we have enough news
       if (sortedNews.length === 0) {

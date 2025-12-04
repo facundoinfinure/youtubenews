@@ -5,7 +5,7 @@
  * Uses the /api/openai proxy for all requests.
  */
 
-import { ScriptLine, NewsItem, ViralMetadata, ChannelConfig } from "../types";
+import { ScriptLine, NewsItem, ViralMetadata, ChannelConfig, ScriptWithScenes, NarrativeType, Scene } from "../types";
 import { CostTracker } from "./CostTracker";
 
 // Get proxy URL (auto-detect in production)
@@ -98,34 +98,105 @@ export const generateScriptWithGPT = async (
   news: NewsItem[], 
   config: ChannelConfig, 
   viralHook?: string
-): Promise<ScriptLine[]> => {
+): Promise<ScriptWithScenes> => {
   // Limit news items to reduce context size and latency
   const limitedNews = news.slice(0, 5);
-  const newsContext = limitedNews.map(n => `- ${n.headline} (${n.source}): ${n.summary?.substring(0, 100) || ''}`).join('\n');
+  const newsContext = limitedNews.map(n => `- ${n.headline} (${n.source}): ${n.summary?.substring(0, 160) || ''}`).join('\n');
 
-  const systemPrompt = `You are the showrunner for "${config.channelName}", a 1-minute news segment hosted by: 
-1. "${config.characters.hostA.name}" (${config.characters.hostA.bio}).
-2. "${config.characters.hostB.name}" (${config.characters.hostB.bio}).
+  const hostA = config.characters.hostA;
+  const hostB = config.characters.hostB;
 
-Tone: ${config.tone}. Language: ${config.language}.
+  const hostProfilePrompt = `
+hostA:
+- name: ${hostA.name}
+- voice: ${hostA.voiceName}
+- outfit: ${hostA.outfit || 'dark hoodie'}
+- personality: ${hostA.personality || hostA.bio}
+- gender: ${hostA.gender || 'male'}
 
-SCRIPT STRUCTURE (60 seconds):
-- 0-10s: HOOK${viralHook ? ` "${viralHook}"` : ''}
-- 10-40s: CONTENT (cite sources)
-- 40-50s: PAYOFF
-- 50-60s: CTA
+hostB:
+- name: ${hostB.name}
+- voice: ${hostB.voiceName}
+- outfit: ${hostB.outfit || 'teal blazer and white shirt'}
+- personality: ${hostB.personality || hostB.bio}
+- gender: ${hostB.gender || 'female'}
+`.trim();
 
-Rules:
-- MAX 150 WORDS TOTAL
-- CITE the news source in dialogue
-- JSON Array: [{"speaker": "${config.characters.hostA.name}", "text": "..."}, ...]
-- Use "Both" for intro/outro
-- STRICT JSON. NO MARKDOWN.`;
+  const narrativeInstructions = `
+Choose ONE narrative structure based on the complexity of the news:
+Classic Arc (6 scenes)
+Double Conflict Arc (7 scenes)
+Hot Take Compressed (4 scenes)
+Perspective Clash (6 scenes)
+
+Logic:
+- Use Double Conflict if multiple drivers or volatile news
+- Use Hot Take if the story is simple or meme-like
+- Use Perspective Clash if the story has two clear interpretations
+- Otherwise use Classic
+`.trim();
+
+  const dialogueRules = `
+Dialogue Rules:
+- Alternate dialogue strictly (${hostA.name} then ${hostB.name})
+- No narration, stage directions, or camera cues
+- Tone: conversational podcast banter (${config.tone})
+- 80–130 words per scene (40–80 for Hot Take scenes)
+- Reference news sources naturally in dialogue
+`.trim();
+
+  const metadataRules = `
+For EACH scene provide:
+- text: dialogue for that scene
+- video_mode: "hostA" | "hostB" | "both"
+- model: "infinite_talk" for solo, "infinite_talk_multi" for both
+- shot: default "medium", "closeup" for Hook/Conflict, "wide" for Payoff
+`.trim();
+
+  const outputFormat = `
+Return STRICT JSON (no markdown) with this exact format:
+{
+  "title": "",
+  "narrative_used": "classic | double_conflict | hot_take | perspective_clash",
+  "scenes": {
+    "1": {
+      "text": "",
+      "video_mode": "hostA | hostB | both",
+      "model": "infinite_talk | infinite_talk_multi",
+      "shot": "medium | closeup | wide"
+    }
+  }
+}
+`.trim();
+
+  const systemPrompt = `
+You are the head writer of "${config.channelName}", a daily business/markets podcast hosted by two animated chimpanzees.
+
+${hostProfilePrompt}
+
+${narrativeInstructions}
+
+${dialogueRules}
+
+${metadataRules}
+
+${outputFormat}
+`.trim();
+
+  const userPrompt = `
+Generate a complete narrative using the instructions above.
+Language: ${config.language}
+Tone: ${config.tone}
+${viralHook ? `Hook reference: "${viralHook}"` : ''}
+
+Today's news:
+${newsContext}
+`.trim();
 
   const requestBody = {
     messages: [
       { role: 'system', content: systemPrompt },
-      { role: 'user', content: `Today's news:\n${newsContext}\n\nWrite the script as JSON.` }
+      { role: 'user', content: userPrompt }
     ],
     response_format: { type: 'json_object' },
     temperature: 0.7
@@ -145,10 +216,11 @@ Rules:
 
       CostTracker.track('script', model, model === 'gpt-4o' ? 0.01 : 0.002);
 
-      const content = response.choices[0]?.message?.content || '{"script":[]}';
-      const parsed = JSON.parse(content);
+      const content = response.choices[0]?.message?.content || '{}';
+      const parsed = JSON.parse(content) as ScriptWithScenes;
+      validateScriptWithScenes(parsed);
       console.log(`[Script] ✅ Success with ${model}`);
-      return Array.isArray(parsed) ? parsed : parsed.script || [];
+      return parsed;
     } catch (error: any) {
       console.warn(`[Script] ⚠️ ${model} failed:`, error.message);
       lastError = error;
@@ -158,6 +230,46 @@ Rules:
 
   console.error("[Script] ❌ All models failed");
   throw lastError || new Error('Script generation failed');
+};
+
+const VALID_NARRATIVES: NarrativeType[] = ['classic', 'double_conflict', 'hot_take', 'perspective_clash'];
+const VALID_VIDEO_MODES: Scene['video_mode'][] = ['hostA', 'hostB', 'both'];
+const VALID_SHOTS: Scene['shot'][] = ['medium', 'closeup', 'wide'];
+
+const validateScriptWithScenes = (script: ScriptWithScenes) => {
+  if (!script || typeof script !== 'object') {
+    throw new Error('Invalid script payload (not an object)');
+  }
+
+  if (!script.title || typeof script.title !== 'string') {
+    throw new Error('Script missing title');
+  }
+
+  if (!VALID_NARRATIVES.includes(script.narrative_used as NarrativeType)) {
+    throw new Error(`Invalid narrative_used "${script.narrative_used}"`);
+  }
+
+  if (!script.scenes || typeof script.scenes !== 'object' || Object.keys(script.scenes).length === 0) {
+    throw new Error('Script missing scenes');
+  }
+
+  for (const [sceneId, scene] of Object.entries(script.scenes)) {
+    if (!scene || typeof scene !== 'object') {
+      throw new Error(`Scene ${sceneId} is invalid`);
+    }
+    if (!scene.text || typeof scene.text !== 'string') {
+      throw new Error(`Scene ${sceneId} missing text`);
+    }
+    if (!VALID_VIDEO_MODES.includes(scene.video_mode)) {
+      throw new Error(`Scene ${sceneId} has invalid video_mode "${scene.video_mode}"`);
+    }
+    if (!scene.model || (scene.model !== 'infinite_talk' && scene.model !== 'infinite_talk_multi')) {
+      throw new Error(`Scene ${sceneId} has invalid model "${scene.model}"`);
+    }
+    if (!VALID_SHOTS.includes(scene.shot)) {
+      throw new Error(`Scene ${sceneId} has invalid shot "${scene.shot}"`);
+    }
+  }
 };
 
 /**
@@ -335,63 +447,79 @@ Return ONLY the hook text, no explanation, no quotes.`;
 // TEXT-TO-SPEECH (OpenAI TTS)
 // =============================================================================================
 
-// Voice mapping - map character voice names to OpenAI voices
-// Standard: Kore/echo for Male, Leda/shimmer for Female
-const OPENAI_VOICES = {
-  // Male voices - use 'Kore' → 'echo'
-  'Kore': 'echo',      // Standard male voice (warm)
-  'Puck': 'onyx',      // Deep male (alternative)
-  'Charon': 'onyx',    // Deep male (alternative)
-  'Fenrir': 'echo',    // Warm male (legacy)
-  'Orus': 'fable',     // British male (alternative)
-  
-  // Female voices - use 'Leda' → 'shimmer'
-  'Leda': 'shimmer',   // Standard female voice (expressive)
-  'Aoede': 'nova',     // Warm female (alternative)
-  'Zephyr': 'nova',    // Warm female (alternative)
-  'Elara': 'shimmer',  // Expressive female (alternative)
-  'Hera': 'alloy',     // Neutral female (alternative)
-  
-  // Default mappings
-  'default_male': 'echo',
-  'default_female': 'shimmer'
-} as const;
-
+/**
+ * OpenAI TTS Voices (as per ChimpNews Spec v2.0):
+ * - hostA (Rusty) → echo (male, warm)
+ * - hostB (Dani) → shimmer (female, expressive)
+ * 
+ * Available OpenAI voices: alloy, echo, fable, onyx, nova, shimmer
+ */
 type OpenAIVoice = 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer';
 
+// Direct OpenAI voices - no mapping needed
+const DIRECT_OPENAI_VOICES: OpenAIVoice[] = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'];
+
+// Legacy voice name mappings (for backwards compatibility)
+const LEGACY_VOICE_MAP: Record<string, OpenAIVoice> = {
+  // Legacy male voices → echo
+  'Kore': 'echo',
+  'Puck': 'onyx',
+  'Charon': 'onyx',
+  'Fenrir': 'echo',
+  'Orus': 'fable',
+  // Legacy female voices → shimmer  
+  'Leda': 'shimmer',
+  'Aoede': 'nova',
+  'Zephyr': 'nova',
+  'Elara': 'shimmer',
+  'Hera': 'alloy',
+};
+
 /**
- * Map a character voice name to an OpenAI voice
+ * Get OpenAI voice from character voice name
+ * Simplified: if voice is already an OpenAI voice, use it directly
+ * Otherwise, check legacy mapping or default to alloy
  */
-const mapVoiceToOpenAI = (voiceName: string): OpenAIVoice => {
-  // Direct mapping
-  if (voiceName in OPENAI_VOICES) {
-    return OPENAI_VOICES[voiceName as keyof typeof OPENAI_VOICES] as OpenAIVoice;
+const getOpenAIVoice = (voiceName: string): OpenAIVoice => {
+  const normalized = voiceName.toLowerCase().trim();
+  
+  // Check if it's already a direct OpenAI voice (spec compliant: echo/shimmer)
+  if (DIRECT_OPENAI_VOICES.includes(normalized as OpenAIVoice)) {
+    return normalized as OpenAIVoice;
   }
   
-  // Try to detect gender from name
-  const lowerName = voiceName.toLowerCase();
-  if (lowerName.includes('female') || lowerName.includes('woman')) {
-    return 'nova';
-  }
-  if (lowerName.includes('male') || lowerName.includes('man')) {
-    return 'onyx';
+  // Check legacy mapping for backwards compatibility
+  if (voiceName in LEGACY_VOICE_MAP) {
+    return LEGACY_VOICE_MAP[voiceName];
   }
   
-  // Default to alloy (neutral)
+  // Default: echo for unrecognized male-sounding, shimmer for female-sounding
+  if (normalized.includes('female') || normalized.includes('woman') || normalized.includes('girl')) {
+    return 'shimmer';
+  }
+  if (normalized.includes('male') || normalized.includes('man') || normalized.includes('boy')) {
+    return 'echo';
+  }
+  
+  // Ultimate fallback
   return 'alloy';
 };
 
 /**
  * Generate TTS audio for a single line
  * Returns base64-encoded MP3
+ * 
+ * Per ChimpNews Spec v2.0:
+ * - hostA uses "echo" voice
+ * - hostB uses "shimmer" voice
  */
 export const generateTTSAudio = async (
   text: string,
   voiceName: string
 ): Promise<string> => {
-  const voice = mapVoiceToOpenAI(voiceName);
+  const voice = getOpenAIVoice(voiceName);
   
-  console.log(`[OpenAI TTS] 🎙️ Generating audio with voice: ${voice} (mapped from ${voiceName})`);
+  console.log(`[OpenAI TTS] 🎙️ Generating audio with voice: ${voice}${voice !== voiceName.toLowerCase() ? ` (from ${voiceName})` : ''}`);
   
   const response = await openaiRequest('audio/speech', {
     model: 'tts-1',

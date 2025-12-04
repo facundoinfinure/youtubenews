@@ -1,5 +1,5 @@
 import { GoogleGenAI, Modality } from "@google/genai";
-import { NewsItem, ScriptLine, BroadcastSegment, VideoAssets, ViralMetadata, ChannelConfig } from "../types";
+import { NewsItem, ScriptLine, BroadcastSegment, VideoAssets, ViralMetadata, ChannelConfig, Scene, ScriptWithScenes, VideoMode, ShotType } from "../types";
 import { ContentCache } from "./ContentCache";
 import { retryWithBackoff } from "./retryUtils";
 import { getModelForTask, getCostForTask } from "./modelStrategy";
@@ -41,6 +41,18 @@ import {
   fetchTrendingWithSerpAPI,
   checkSerpAPIConfig
 } from "./serpApiService";
+import { 
+  generateScenePrompts, 
+  ScenePrompt, 
+  SCENE_BUILDER_DEFAULTS 
+} from "./sceneBuilderService";
+import { 
+  ShotstackService, 
+  checkShotstackConfig,
+  createCompositionFromSegments,
+  CompositionConfig,
+  RenderResult
+} from "./shotstackService";
 
 const getApiKey = () => import.meta.env.VITE_GEMINI_API_KEY || window.env?.API_KEY || process.env.API_KEY || "";
 const getAiClient = () => new GoogleGenAI({ apiKey: getApiKey() });
@@ -138,6 +150,13 @@ interface InfiniteTalkVideoOptions {
   hostAVisualPrompt: string;  // Visual description of host A
   hostBVisualPrompt: string;  // Visual description of host B
   resolution?: '480p' | '720p';
+  // Scene metadata from v2.0 Narrative Engine
+  sceneMetadata?: {
+    video_mode: VideoMode;
+    model: 'infinite_talk' | 'infinite_talk_multi';
+    shot: ShotType;
+    scenePrompt?: string; // Prompt from Scene Builder
+  };
 }
 
 /**
@@ -160,17 +179,31 @@ const generateInfiniteTalkVideo = async (
     hostBName,
     hostAVisualPrompt,
     hostBVisualPrompt,
-    resolution = '720p'
+    resolution = '720p',
+    sceneMetadata
   } = options;
 
-  // Determine video type based on speaker
+  // Determine video type based on scene metadata or speaker name
   let videoType: VideoType = 'segment';
-  if (speaker === hostAName) {
-    videoType = 'host_a';
-  } else if (speaker === hostBName) {
-    videoType = 'host_b';
-  } else if (speaker === 'Both' || speaker.includes('Both')) {
-    videoType = 'both_hosts';
+  let effectiveVideoMode: VideoMode | null = null;
+  
+  if (sceneMetadata?.video_mode) {
+    effectiveVideoMode = sceneMetadata.video_mode;
+    videoType = effectiveVideoMode === 'hostA' ? 'host_a' 
+      : effectiveVideoMode === 'hostB' ? 'host_b' 
+      : 'both_hosts';
+  } else {
+    // Fallback to speaker-based detection
+    if (speaker === hostAName) {
+      videoType = 'host_a';
+      effectiveVideoMode = 'hostA';
+    } else if (speaker === hostBName) {
+      videoType = 'host_b';
+      effectiveVideoMode = 'hostB';
+    } else if (speaker === 'Both' || speaker.includes('Both')) {
+      videoType = 'both_hosts';
+      effectiveVideoMode = 'both';
+    }
   }
 
   // Check cache first
@@ -183,16 +216,16 @@ const generateInfiniteTalkVideo = async (
   // Generate new video with InfiniteTalk Multi
   const silentAudioUrl = getSilentAudioUrl();
   
-  // Determine which audio goes to which side
+  // Determine which audio goes to which side based on video_mode
   // Host A = left, Host B = right (based on typical two-person shot)
   let leftAudio = silentAudioUrl;
   let rightAudio = silentAudioUrl;
   let order: 'left_first' | 'right_first' | 'meanwhile' = 'meanwhile';
 
-  if (speaker === hostAName) {
+  if (effectiveVideoMode === 'hostA') {
     leftAudio = audioUrl;
     order = 'left_first';
-  } else if (speaker === hostBName) {
+  } else if (effectiveVideoMode === 'hostB') {
     rightAudio = audioUrl;
     order = 'right_first';
   } else {
@@ -202,15 +235,22 @@ const generateInfiniteTalkVideo = async (
     order = 'meanwhile';
   }
 
-  // Build strict character-specific prompt
+  // Get shot type from scene metadata or default to medium
+  const shotType = sceneMetadata?.shot || 'medium';
+  const shotDescription = shotType === 'closeup' ? 'Close-up shot, tight framing' 
+    : shotType === 'wide' ? 'Wide shot, showing full studio' 
+    : 'Medium shot, standard framing';
+
+  // Use scene prompt if available, otherwise build character-specific prompt
   // CRITICAL: Be very specific about the characters to avoid generating humans
-  const characterPrompt = `
+  const characterPrompt = sceneMetadata?.scenePrompt || `
 STRICT CHARACTER REQUIREMENTS - DO NOT DEVIATE:
 - LEFT CHARACTER: ${hostAName} - ${hostAVisualPrompt}
 - RIGHT CHARACTER: ${hostBName} - ${hostBVisualPrompt}
 
 SCENE: Professional podcast news studio with two animated characters.
-SPEAKING: ${speaker} is currently speaking with lip-sync animation.
+SHOT: ${shotDescription}
+SPEAKING: ${effectiveVideoMode === 'hostA' ? hostAName : effectiveVideoMode === 'hostB' ? hostBName : 'Both hosts'} is currently speaking with lip-sync animation.
 STYLE: Maintain exact character appearances from the reference image.
 
 CRITICAL: These are NOT human beings. They are animated/CGI characters as described above. 
@@ -279,14 +319,82 @@ export const fetchEconomicNews = async (targetDate: Date | undefined, config: Ch
   }
 };
 
-export const generateScript = async (news: NewsItem[], config: ChannelConfig, viralHook?: string): Promise<ScriptLine[]> => {
-  // Use GPT-4o for script generation (no more Gemini quota issues!)
-  console.log(`📝 [Script] Generating script using GPT-4o...`);
+/**
+ * Convert ScriptWithScenes to ScriptLine[] for backwards compatibility
+ * Extracts dialogue text from scenes and alternates between hostA and hostB
+ */
+export const convertScenesToScriptLines = (
+  scriptWithScenes: ScriptWithScenes,
+  config: ChannelConfig
+): ScriptLine[] => {
+  const lines: ScriptLine[] = [];
+  const hostAName = config.characters.hostA.name;
+  const hostBName = config.characters.hostB.name;
+  
+  Object.entries(scriptWithScenes.scenes)
+    .sort(([a], [b]) => parseInt(a) - parseInt(b))
+    .forEach(([_, scene]) => {
+      // Parse dialogue from scene text - extract speaker labels if present
+      const text = scene.text;
+      
+      // Check if scene text contains speaker labels like "Rusty:" or "Dani:"
+      const dialoguePattern = new RegExp(`(${hostAName}|${hostBName}):\\s*([^${hostAName}${hostBName}]+)`, 'gi');
+      const matches = [...text.matchAll(dialoguePattern)];
+      
+      if (matches.length > 0) {
+        // Extract labeled dialogues
+        matches.forEach(match => {
+          const speaker = match[1];
+          const dialogue = match[2].trim();
+          if (dialogue) {
+            lines.push({ speaker, text: dialogue });
+          }
+        });
+      } else {
+        // No labels found - assign based on video_mode
+        const speaker = scene.video_mode === 'hostA' ? hostAName
+          : scene.video_mode === 'hostB' ? hostBName
+          : 'Both';
+        lines.push({ speaker, text: text.trim() });
+      }
+    });
+  
+  return lines;
+};
+
+/**
+ * Generate script with v2.0 Narrative Engine (returns full scene structure)
+ */
+export const generateScriptWithScenes = async (
+  news: NewsItem[], 
+  config: ChannelConfig, 
+  viralHook?: string
+): Promise<ScriptWithScenes> => {
+  console.log(`📝 [Script v2.0] Generating script with Narrative Engine...`);
   
   try {
-    const script = await generateScriptWithGPT(news, config, viralHook);
-    console.log(`✅ [Script] Successfully generated ${script.length} script lines via GPT-4o`);
-    return script;
+    const scriptWithScenes = await generateScriptWithGPT(news, config, viralHook);
+    console.log(`✅ [Script v2.0] Generated ${Object.keys(scriptWithScenes.scenes).length} scenes using "${scriptWithScenes.narrative_used}" narrative`);
+    return scriptWithScenes;
+  } catch (error) {
+    console.error(`❌ [Script v2.0] GPT-4o failed:`, (error as Error).message);
+    throw error;
+  }
+};
+
+/**
+ * Legacy function for backwards compatibility - returns ScriptLine[]
+ * Internally uses v2.0 Narrative Engine and converts to legacy format
+ */
+export const generateScript = async (news: NewsItem[], config: ChannelConfig, viralHook?: string): Promise<ScriptLine[]> => {
+  // Use GPT-4o for script generation with v2.0 Narrative Engine
+  console.log(`📝 [Script] Generating script using GPT-4o (v2.0)...`);
+  
+  try {
+    const scriptWithScenes = await generateScriptWithGPT(news, config, viralHook);
+    const scriptLines = convertScenesToScriptLines(scriptWithScenes, config);
+    console.log(`✅ [Script] Successfully generated ${scriptLines.length} script lines via GPT-4o`);
+    return scriptLines;
   } catch (error) {
     console.error(`❌ [Script] GPT-4o failed:`, (error as Error).message);
     throw error;
@@ -499,16 +607,20 @@ export const generateOutroVideo = async (
  * 
  * IMPORTANT: Segments must have audioUrl (uploaded to storage) before calling this.
  * 
+ * Now integrates with Scene Builder for professional-quality visual prompts.
+ * 
  * @param segments - Array of segments with audio URLs
  * @param config - Channel configuration (needs referenceImageUrl)
  * @param channelId - Channel ID for caching
  * @param productionId - Production ID for caching
+ * @param scriptWithScenes - Optional v2.0 script with scene metadata
  */
 export const generateVideoSegmentsWithInfiniteTalk = async (
   segments: BroadcastSegment[],
   config: ChannelConfig,
   channelId: string,
-  productionId?: string
+  productionId?: string,
+  scriptWithScenes?: ScriptWithScenes
 ): Promise<(string | null)[]> => {
   if (!config.referenceImageUrl) {
     console.error(`❌ [InfiniteTalk] No reference image URL provided. Cannot generate lip-sync videos.`);
@@ -533,11 +645,70 @@ export const generateVideoSegmentsWithInfiniteTalk = async (
   
   console.log(`👤 [InfiniteTalk Multi] Host A: ${hostAName} - ${hostAVisualPrompt}`);
   console.log(`👤 [InfiniteTalk Multi] Host B: ${hostBName} - ${hostBVisualPrompt}`);
+  
+  // === SCENE BUILDER INTEGRATION ===
+  // Generate optimized visual prompts for each scene using Scene Builder
+  let scenePrompts: ScenePrompt[] = [];
+  if (scriptWithScenes) {
+    console.log(`📖 [InfiniteTalk Multi] Using v2.0 Narrative Engine: ${scriptWithScenes.narrative_used}`);
+    console.log(`📖 [InfiniteTalk Multi] Scene count: ${Object.keys(scriptWithScenes.scenes).length}`);
+    
+    // Generate scene prompts with Scene Builder (validates shot types and adds visual details)
+    scenePrompts = generateScenePrompts(scriptWithScenes, config);
+    console.log(`🎨 [Scene Builder] Generated ${scenePrompts.length} optimized visual prompts`);
+    
+    // Log shot corrections made by Scene Builder
+    scenePrompts.forEach((sp, idx) => {
+      const originalShot = Object.values(scriptWithScenes.scenes)[idx]?.shot;
+      if (originalShot !== sp.scene.shot) {
+        console.log(`🎬 [Scene Builder] Scene ${idx + 1}: Shot corrected from ${originalShot} to ${sp.scene.shot}`);
+      }
+    });
+  }
 
   // Generate videos in batches with retry logic
   const BATCH_SIZE = 3; // Process 3 videos at a time to avoid rate limits
   const videoUrls: (string | null)[] = new Array(segments.length).fill(null);
   const failedIndices: number[] = [];
+  const missingAudioIndices: number[] = [];
+  
+  // Build scene metadata lookup from scriptWithScenes (scene index -> metadata)
+  // Now includes visual prompts from Scene Builder
+  const sceneMetadataMap: Map<number, { 
+    video_mode: VideoMode; 
+    model: 'infinite_talk' | 'infinite_talk_multi'; 
+    shot: ShotType;
+    scenePrompt?: string;
+    lightingMood?: string;
+    expressionHint?: string;
+  }> = new Map();
+  
+  if (scriptWithScenes?.scenes) {
+    Object.entries(scriptWithScenes.scenes).forEach(([sceneNum, scene], idx) => {
+      const scenePrompt = scenePrompts[idx];
+      sceneMetadataMap.set(idx, {
+        video_mode: scene.video_mode,
+        model: scene.model,
+        shot: scenePrompt?.scene.shot || scene.shot, // Use corrected shot from Scene Builder
+        scenePrompt: scenePrompt?.visualPrompt, // Use optimized visual prompt
+        lightingMood: scenePrompt?.lightingMood,
+        expressionHint: scenePrompt?.expressionHint
+      });
+    });
+  }
+
+  // === PRE-VALIDATION: Check all audio URLs exist before starting ===
+  segments.forEach((segment, idx) => {
+    const audioUrl = (segment as any).audioUrl;
+    if (!audioUrl) {
+      missingAudioIndices.push(idx);
+    }
+  });
+  
+  if (missingAudioIndices.length > 0) {
+    console.warn(`⚠️ [InfiniteTalk] ${missingAudioIndices.length} segments missing audio URLs: [${missingAudioIndices.join(', ')}]`);
+    console.warn(`⚠️ [InfiniteTalk] These segments will be skipped. Ensure audio is uploaded before video generation.`);
+  }
 
   // Process in batches
   for (let i = 0; i < segments.length; i += BATCH_SIZE) {
@@ -553,9 +724,12 @@ export const generateVideoSegmentsWithInfiniteTalk = async (
         const audioUrl = (segment as any).audioUrl;
         
         if (!audioUrl) {
-          console.warn(`⚠️ [InfiniteTalk] Segment ${globalIndex} has no audio URL, skipping`);
-          return { index: globalIndex, url: null };
+          // Already warned above, just skip
+          return { index: globalIndex, url: null, reason: 'missing_audio' };
         }
+        
+        // Get scene metadata if available (now includes Scene Builder visual prompts)
+        const sceneMetadata = sceneMetadataMap.get(globalIndex);
 
         // Use retry logic for video generation
         const { retryVideoGeneration } = await import('./retryUtils');
@@ -573,7 +747,8 @@ export const generateVideoSegmentsWithInfiniteTalk = async (
               hostBName,
               hostAVisualPrompt,
               hostBVisualPrompt,
-              resolution: '720p'
+              resolution: '720p',
+              sceneMetadata
             });
             return videoResult.url;
           },
@@ -614,7 +789,16 @@ export const generateVideoSegmentsWithInfiniteTalk = async (
   }
   
   const successCount = videoUrls.filter(url => url !== null).length;
-  console.log(`✅ [InfiniteTalk Multi] Generated ${successCount}/${segments.length} videos${failedIndices.length > 0 ? ` (${failedIndices.length} failed)` : ''}`);
+  const skippedCount = missingAudioIndices.length;
+  const failedCount = failedIndices.length - skippedCount;
+  
+  console.log(`✅ [InfiniteTalk Multi] Generated ${successCount}/${segments.length} videos`);
+  if (skippedCount > 0) {
+    console.log(`⏭️ [InfiniteTalk Multi] Skipped ${skippedCount} (missing audio)`);
+  }
+  if (failedCount > 0) {
+    console.log(`❌ [InfiniteTalk Multi] Failed ${failedCount} (generation errors)`);
+  }
 
   return videoUrls;
 };
@@ -1001,4 +1185,125 @@ export const generateViralHook = async (
     console.error(`❌ [Hook] GPT-4o failed:`, (error as Error).message);
     return `Breaking news about ${news[0]?.headline?.substring(0, 30) || 'today'}...`;
   }
+};
+
+// =============================================================================================
+// VIDEO COMPOSITION (Shotstack - Cloud FFmpeg)
+// =============================================================================================
+
+/**
+ * Check if video composition is available
+ */
+export const isCompositionAvailable = (): boolean => {
+  const config = checkShotstackConfig();
+  return config.configured;
+};
+
+/**
+ * Compose final video from segments using Shotstack
+ * This creates a professional video with transitions, normalized audio, etc.
+ * 
+ * Call this AFTER generateVideoSegmentsWithInfiniteTalk to combine all clips
+ * 
+ * @param segments - Broadcast segments with video URLs
+ * @param videoUrls - Array of video URLs (from InfiniteTalk)
+ * @param videos - Video assets (intro/outro)
+ * @param config - Channel config
+ * @param options - Composition options
+ */
+export const composeVideoWithShotstack = async (
+  segments: BroadcastSegment[],
+  videoUrls: (string | null)[],
+  videos: VideoAssets,
+  config: ChannelConfig,
+  options: {
+    resolution?: '1080' | 'hd' | 'sd';
+    transition?: 'fade' | 'dissolve' | 'wipeLeft' | 'slideLeft';
+    transitionDuration?: number;
+    watermarkUrl?: string;
+    callbackUrl?: string;
+  } = {}
+): Promise<RenderResult> => {
+  // Check if Shotstack is configured
+  const shotstackConfig = checkShotstackConfig();
+  if (!shotstackConfig.configured) {
+    console.warn('⚠️ [Composition] Shotstack not configured');
+    console.warn('⚠️ [Composition] Set VITE_SHOTSTACK_API_KEY to enable video composition');
+    return {
+      success: false,
+      error: 'Shotstack not configured. Set VITE_SHOTSTACK_API_KEY in your environment.'
+    };
+  }
+
+  // Filter out null video URLs
+  const validVideoCount = videoUrls.filter(url => url !== null).length;
+  if (validVideoCount === 0) {
+    console.error('❌ [Composition] No valid video URLs to compose');
+    return {
+      success: false,
+      error: 'No valid video URLs to compose'
+    };
+  }
+
+  console.log(`🎬 [Composition] Starting video composition with Shotstack...`);
+  console.log(`🎬 [Composition] ${validVideoCount}/${videoUrls.length} valid video segments`);
+  console.log(`🎬 [Composition] Intro: ${videos.intro ? 'Yes' : 'No'}, Outro: ${videos.outro ? 'Yes' : 'No'}`);
+
+  try {
+    // Create composition config
+    const compositionConfig = createCompositionFromSegments(
+      segments,
+      videoUrls,
+      videos,
+      config,
+      {
+        resolution: options.resolution || '1080',
+        transition: options.transition ? {
+          type: options.transition,
+          duration: options.transitionDuration || 0.3
+        } : { type: 'dissolve', duration: 0.3 },
+        watermarkUrl: options.watermarkUrl,
+        callbackUrl: options.callbackUrl
+      }
+    );
+
+    // Submit render job
+    const result = await ShotstackService.render(compositionConfig);
+
+    if (result.success) {
+      console.log(`✅ [Composition] Video composed successfully!`);
+      console.log(`🎥 [Composition] URL: ${result.videoUrl}`);
+      console.log(`🖼️ [Composition] Poster: ${result.posterUrl}`);
+      console.log(`⏱️ [Composition] Duration: ${result.duration}s`);
+      console.log(`💰 [Composition] Cost: $${result.cost?.toFixed(4) || '?'}`);
+    } else {
+      console.error(`❌ [Composition] Failed: ${result.error}`);
+    }
+
+    return result;
+  } catch (error) {
+    console.error('❌ [Composition] Error:', (error as Error).message);
+    return {
+      success: false,
+      error: (error as Error).message
+    };
+  }
+};
+
+/**
+ * Quick composition check - returns what's available
+ */
+export const getCompositionStatus = () => {
+  const shotstack = checkShotstackConfig();
+  
+  return {
+    shotstack: {
+      available: shotstack.configured,
+      message: shotstack.message,
+      pricing: '~$0.05/min of video'
+    },
+    recommendation: shotstack.configured 
+      ? 'Use Shotstack for professional video composition'
+      : 'Configure Shotstack API key for video composition'
+  };
 };

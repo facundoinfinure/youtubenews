@@ -17,6 +17,24 @@ export interface ScriptLine {
   text: string;
 }
 
+// Narrative Engine Types (v2.0)
+export type NarrativeType = "classic" | "double_conflict" | "hot_take" | "perspective_clash";
+export type VideoMode = "hostA" | "hostB" | "both";
+export type ShotType = "medium" | "closeup" | "wide";
+
+export interface Scene {
+  text: string;
+  video_mode: VideoMode;
+  model: "infinite_talk" | "infinite_talk_multi";
+  shot: ShotType;
+}
+
+export interface ScriptWithScenes {
+  title: string;
+  narrative_used: NarrativeType;
+  scenes: Record<string, Scene>; // Key is scene number as string: "1", "2", etc.
+}
+
 export interface BroadcastSegment {
   speaker: string;
   text: string;
@@ -96,6 +114,10 @@ export interface CharacterProfile {
   voiceStyle?: 'energetic' | 'calm' | 'dramatic' | 'neutral'; // Voice emotion/style
   speakingRate?: number; // 0.5 - 2.0, default 1.0
   pitch?: number; // -20 to +20, default 0
+  // New fields for v2.0 Narrative Engine
+  outfit?: string; // e.g., "dark hoodie", "teal blazer and white shirt"
+  personality?: string; // Detailed personality description
+  gender?: "male" | "female";
 }
 
 export interface ChannelConfig {
@@ -114,6 +136,14 @@ export interface ChannelConfig {
     hostA: CharacterProfile;
     hostB: CharacterProfile;
   };
+  // New fields for v2.0 Narrative Engine
+  seedImages?: {
+    hostASolo?: string; // Seed image prompt for hostA solo
+    hostBSolo?: string; // Seed image prompt for hostB solo
+    twoShot?: string; // Seed image prompt for both hosts
+  };
+  studioSetup?: string; // Description of the podcast studio setup
+  preferredNarrative?: NarrativeType; // Optional preferred narrative (auto-selection if not set)
 }
 
 export interface Channel {
@@ -136,7 +166,7 @@ export interface Production {
   news_date: string; // ISO date string
   status: ProductionStatus;
   selected_news_ids: string[];
-  script?: ScriptLine[];
+  script?: ScriptLine[]; // Legacy format, kept for compatibility
   viral_hook?: string;
   viral_metadata?: ViralMetadata;
   segments?: BroadcastSegment[]; // Without audioBase64, only metadata
@@ -153,6 +183,9 @@ export interface Production {
   estimated_cost?: number; // Estimated cost before generation
   actual_cost?: number; // Actual cost after completion
   cost_breakdown?: Record<string, number>; // Cost breakdown by task type
+  // New fields for v2.0 Narrative Engine
+  narrative_used?: NarrativeType; // Which narrative structure was used
+  scenes?: ScriptWithScenes; // Complete scene structure with metadata
 }
 
 // Window augmentation for AI Studio key selection & Google Identity & Runtime Env

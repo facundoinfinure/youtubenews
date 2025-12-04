@@ -1,6 +1,6 @@
 
 import { createClient } from '@supabase/supabase-js';
-import { ChannelConfig, StoredVideo, ViralMetadata, NewsItem, Channel, Production, ProductionStatus, ScriptLine, BroadcastSegment, VideoAssets } from '../types';
+import { ChannelConfig, StoredVideo, ViralMetadata, NewsItem, Channel, Production, ProductionStatus, ScriptLine, BroadcastSegment, VideoAssets, ScriptWithScenes, NarrativeType } from '../types';
 import { checkFileExists } from './storageManager';
 
 // Initialize Client with Runtime Fallbacks
@@ -770,7 +770,10 @@ const normalizeProduction = (data: any): Production => ({
   failed_steps: data.failed_steps ?? undefined,
   estimated_cost: data.estimated_cost ?? undefined,
   actual_cost: data.actual_cost ?? undefined,
-  cost_breakdown: data.cost_breakdown ?? undefined
+  cost_breakdown: data.cost_breakdown ?? undefined,
+  // v2.0 Narrative Engine fields
+  narrative_used: data.narrative_used ?? undefined,
+  scenes: data.scenes ?? undefined
 });
 
 export const saveProduction = async (
@@ -808,7 +811,10 @@ export const saveProduction = async (
     failed_steps: production.failed_steps || null,
     estimated_cost: production.estimated_cost ?? null,
     actual_cost: production.actual_cost ?? null,
-    cost_breakdown: production.cost_breakdown || null
+    cost_breakdown: production.cost_breakdown || null,
+    // v2.0 Narrative Engine fields
+    narrative_used: production.narrative_used || null,
+    scenes: production.scenes || null
   };
 
   if (production.id) {

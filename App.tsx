@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
-import { AppState, ChannelConfig, NewsItem, BroadcastSegment, VideoAssets, ViralMetadata, UserProfile, Channel, ScriptLine, StoredVideo } from './types';
+import { AppState, ChannelConfig, NewsItem, BroadcastSegment, VideoAssets, ViralMetadata, UserProfile, Channel, ScriptLine, StoredVideo, ScriptWithScenes } from './types';
 import { signInWithGoogle, getSession, signOut, getAllChannels, saveChannel, saveVideoToDB, getNewsByDate, saveNewsToDB, markNewsAsSelected, deleteVideoFromDB, loadConfigFromDB, supabase, fetchVideosFromDB, saveProduction, getIncompleteProductions, getProductionById, updateProductionStatus, uploadAudioToStorage, uploadImageToStorage, getAudioFromStorage, findCachedScript, findCachedAudio, getAllProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction, verifyStorageBucket, getCompletedProductionsWithVideoInfo, ProductionWithVideoInfo, getUsedNewsIdsForDate, saveCheckpoint, getLastCheckpoint, markStepFailed, saveCachedAudio } from './services/supabaseService';
-import { fetchEconomicNews, generateScript, generateSegmentedAudio, generateSegmentedAudioWithCache, setFindCachedAudioFunction, generateBroadcastVisuals, generateViralMetadata, generateThumbnail, generateThumbnailVariants, generateViralHook, generateVideoSegmentsWithInfiniteTalk } from './services/geminiService';
+import { fetchEconomicNews, generateScript, generateScriptWithScenes, convertScenesToScriptLines, generateSegmentedAudio, generateSegmentedAudioWithCache, setFindCachedAudioFunction, generateBroadcastVisuals, generateViralMetadata, generateThumbnail, generateThumbnailVariants, generateViralHook, generateVideoSegmentsWithInfiniteTalk, composeVideoWithShotstack, isCompositionAvailable, getCompositionStatus } from './services/geminiService';
 import { uploadVideoToYouTube, deleteVideoFromYouTube } from './services/youtubeService';
 import { ContentCache } from './services/ContentCache';
 import { CostTracker } from './services/CostTracker';
@@ -14,7 +14,7 @@ import { AdminDashboard } from './components/AdminDashboard';
 // Runtime configuration access
 const getAdminEmail = () => import.meta.env.VITE_ADMIN_EMAIL || window.env?.ADMIN_EMAIL || process.env.ADMIN_EMAIL || "";
 
-// Default Configuration (ChimpNews)
+// Default Configuration (ChimpNews) - v2.0 Narrative Engine compatible
 const DEFAULT_CONFIG: ChannelConfig = {
   channelName: "ChimpNews",
   tagline: "Investing is Bananas",
@@ -29,18 +29,30 @@ const DEFAULT_CONFIG: ChannelConfig = {
     hostA: {
       id: 'hostA',
       name: "Rusty",
-      bio: "Male, Republican-leaning, loves free markets, sarcastic, grumpy, wears a red tie",
-      visualPrompt: "Male chimpanzee news anchor wearing a suit and red tie",
-      voiceName: "Kore"
+      bio: "Male chimpanzee podcaster, sarcastic, dry humor, tired-finance-bro energy, skeptical",
+      visualPrompt: "Male chimpanzee podcaster wearing a dark hoodie, sarcastic expression, relaxed posture",
+      voiceName: "echo",
+      outfit: "dark hoodie",
+      personality: "sarcastic, dry humor, tired-finance-bro energy, skeptical",
+      gender: "male"
     },
     hostB: {
       id: 'hostB',
       name: "Dani",
-      bio: "Female, Democrat-leaning, loves social safety nets, witty, optimistic, wears a blue suit",
-      visualPrompt: "Female chimpanzee news anchor wearing a blue suit and glasses",
-      voiceName: "Leda"
+      bio: "Female chimpanzee podcaster, playful, witty, energetic, optimistic but grounded",
+      visualPrompt: "Female chimpanzee podcaster wearing a teal blazer and white shirt, playful, expressive look",
+      voiceName: "shimmer",
+      outfit: "teal blazer and white shirt",
+      personality: "playful, witty, energetic, optimistic but grounded",
+      gender: "female"
     }
-  }
+  },
+  seedImages: {
+    hostASolo: "Ultra-detailed 3D render of a male chimpanzee podcaster wearing a dark hoodie, at a modern podcast desk. Sarcastic expression, relaxed posture. Warm tungsten key light + purple/blue LED accents. Acoustic foam panels, Shure SM7B microphone. Medium shot, eye-level.",
+    hostBSolo: "Ultra-detailed 3D render of a female chimpanzee podcaster wearing a teal blazer and white shirt. Playful, expressive look. Warm tungsten lighting + purple/blue LEDs. Acoustic foam panels. Medium shot, eye-level.",
+    twoShot: "Ultra-detailed 3D render of hostA and hostB at a sleek podcast desk. hostA in dark hoodie, hostB in teal blazer. Warm tungsten key light, purple/blue LEDs, Shure SM7B mics. Medium two-shot, eye-level."
+  },
+  studioSetup: "modern podcast room, warm tungsten key light, purple/blue LED accents, acoustic foam panels, Shure SM7B microphones"
 };
 
 const EMPTY_VIDEO_ASSETS: VideoAssets = {
@@ -85,10 +97,16 @@ const App: React.FC = () => {
   const [thumbnailDataUrl, setThumbnailDataUrl] = useState<string | null>(null);
   const [thumbnailVariant, setThumbnailVariant] = useState<string | null>(null);
   const [previewScript, setPreviewScript] = useState<ScriptLine[]>([]);
+  const [currentScriptWithScenes, setCurrentScriptWithScenes] = useState<ScriptWithScenes | null>(null); // v2.0 Narrative Engine
   const [storedVideos, setStoredVideos] = useState<StoredVideo[]>([]); // NEW: For home page sidebar
   const [completedProductions, setCompletedProductions] = useState<ProductionWithVideoInfo[]>([]); // For home page sidebar - completed/published productions
   const [productionProgress, setProductionProgress] = useState({ current: 0, total: 0, step: '' });
   const [currentProductionId, setCurrentProductionId] = useState<string | null>(null); // Track current production
+  
+  // Video Composition State (Shotstack)
+  const [composedVideoUrl, setComposedVideoUrl] = useState<string | null>(null);
+  const [compositionStatus, setCompositionStatus] = useState<'idle' | 'composing' | 'done' | 'error'>('idle');
+  const [compositionError, setCompositionError] = useState<string | null>(null);
 
   // UI State
   const getYesterday = () => {
@@ -653,6 +671,7 @@ const App: React.FC = () => {
       let productionId: string | null = null;
       let genScript: ScriptLine[] = [];
       let viralHook: string = '';
+      let scriptWithScenes: ScriptWithScenes | null = null; // v2.0 Narrative Engine
 
       // Check if resuming from existing production
       if (resumeFromProduction) {
@@ -663,6 +682,10 @@ const App: React.FC = () => {
         if (resumeFromProduction.script) {
           genScript = resumeFromProduction.script;
           setPreviewScript(genScript);
+        }
+        if (resumeFromProduction.scenes) {
+          scriptWithScenes = resumeFromProduction.scenes;
+          setCurrentScriptWithScenes(scriptWithScenes);
         }
         if (resumeFromProduction.viral_hook) {
           viralHook = resumeFromProduction.viral_hook;
@@ -714,13 +737,19 @@ const App: React.FC = () => {
             // Save viral hook
             productionId = await saveProductionState(productionId, 1, 'in_progress', { viralHook }) || productionId;
 
-            // Step 2: Generate script
-            setProductionProgress({ current: 2, total: TOTAL_STEPS, step: 'Writing script...' });
-            genScript = await generateScript(finalNews, config, viralHook);
-            addLog("✅ Script written.");
+            // Step 2: Generate script with v2.0 Narrative Engine
+            setProductionProgress({ current: 2, total: TOTAL_STEPS, step: 'Writing script with Narrative Engine...' });
+            scriptWithScenes = await generateScriptWithScenes(finalNews, config, viralHook);
+            setCurrentScriptWithScenes(scriptWithScenes);
+            genScript = convertScenesToScriptLines(scriptWithScenes, config);
+            addLog(`✅ Script written using "${scriptWithScenes.narrative_used}" narrative (${Object.keys(scriptWithScenes.scenes).length} scenes).`);
 
-            // Save script to DB
-            productionId = await saveProductionState(productionId, 2, 'in_progress', { script: genScript }) || productionId;
+            // Save script and scenes to DB
+            productionId = await saveProductionState(productionId, 2, 'in_progress', { 
+              script: genScript,
+              scenes: scriptWithScenes,
+              narrative_used: scriptWithScenes.narrative_used
+            }) || productionId;
           }
         }
       } else {
@@ -968,7 +997,8 @@ const App: React.FC = () => {
           segmentsForVideo,
           config,
           activeChannel.id,
-          productionId || undefined
+          productionId || undefined,
+          scriptWithScenes || undefined // v2.0 Narrative Engine scene metadata
         );
         
         const generatedCount = videoSegments.filter(v => v !== null).length;
@@ -1324,6 +1354,7 @@ const App: React.FC = () => {
     setThumbnailDataUrl(null);
     setThumbnailVariant(null);
     setPreviewScript([]);
+    setCurrentScriptWithScenes(null); // v2.0 Narrative Engine
     setUploadStatus(null);
     setCurrentProductionId(null); // Clear production ID when switching channels
     
@@ -1442,6 +1473,74 @@ const App: React.FC = () => {
       const updatedChannel = { ...activeChannel, config: newConfig };
       setActiveChannel(updatedChannel);
       setChannels(prev => prev.map(c => c.id === updatedChannel.id ? updatedChannel : c));
+    }
+  };
+
+  // Handle video composition with Shotstack
+  const handleComposeVideo = async () => {
+    if (!activeChannel || segments.length === 0) {
+      toast.error('No segments available to compose');
+      return;
+    }
+
+    // Check if Shotstack is configured
+    if (!isCompositionAvailable()) {
+      const status = getCompositionStatus();
+      toast.error(status.recommendation);
+      addLog(`❌ ${status.shotstack.message}`);
+      return;
+    }
+
+    setCompositionStatus('composing');
+    setCompositionError(null);
+    setComposedVideoUrl(null);
+    addLog('🎬 Starting video composition with Shotstack...');
+
+    try {
+      // Extract video URLs from segments
+      const videoUrls = segments.map(seg => seg.videoUrl || null);
+      
+      const result = await composeVideoWithShotstack(
+        segments,
+        videoUrls,
+        videos,
+        config,
+        {
+          resolution: '1080',
+          transition: 'dissolve',
+          transitionDuration: 0.3
+        }
+      );
+
+      if (result.success && result.videoUrl) {
+        setComposedVideoUrl(result.videoUrl);
+        setCompositionStatus('done');
+        addLog(`✅ Video composed successfully! Duration: ${result.duration}s`);
+        addLog(`🎥 Final video URL: ${result.videoUrl}`);
+        if (result.cost) {
+          addLog(`💰 Composition cost: $${result.cost.toFixed(4)}`);
+        }
+        toast.success('Video composed! Ready for download.');
+
+        // Save composition URL to production if we have one
+        if (currentProductionId) {
+          await saveProduction({
+            id: currentProductionId,
+            video_composition_url: result.videoUrl,
+            composition_status: 'completed'
+          } as any);
+        }
+      } else {
+        setCompositionStatus('error');
+        setCompositionError(result.error || 'Unknown error');
+        addLog(`❌ Composition failed: ${result.error}`);
+        toast.error(`Composition failed: ${result.error}`);
+      }
+    } catch (error) {
+      setCompositionStatus('error');
+      setCompositionError((error as Error).message);
+      addLog(`❌ Composition error: ${(error as Error).message}`);
+      toast.error(`Composition error: ${(error as Error).message}`);
     }
   };
 
@@ -1791,6 +1890,107 @@ const App: React.FC = () => {
                   <div className="bg-[#1b1b1b] border border-[#2a2a2a] rounded-xl p-3 space-y-2">
                     <div className="text-xs uppercase tracking-[0.3em] text-gray-400">Thumbnail B</div>
                     <img src={thumbnailVariant} alt="Thumbnail B" className="w-full h-48 object-cover rounded-lg" />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Video Composition Section */}
+            {state === AppState.READY && segments.length > 0 && (
+              <div className="bg-[#191919] border border-[#2f2f2f] rounded-xl p-4 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-lg font-bold">🎬 Final Video Composition</h3>
+                    <p className="text-sm text-gray-400">
+                      {isCompositionAvailable() 
+                        ? 'Combine all segments into one video with transitions'
+                        : 'Configure Shotstack API to enable composition'}
+                    </p>
+                  </div>
+                  {compositionStatus === 'idle' && (
+                    <button
+                      onClick={handleComposeVideo}
+                      disabled={!isCompositionAvailable()}
+                      className={`px-4 py-2 rounded-lg font-bold transition ${
+                        isCompositionAvailable()
+                          ? 'bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white'
+                          : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                      }`}
+                    >
+                      🎥 Compose Video
+                    </button>
+                  )}
+                  {compositionStatus === 'composing' && (
+                    <div className="flex items-center gap-2 text-blue-400">
+                      <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                      <span className="text-sm font-medium">Composing...</span>
+                    </div>
+                  )}
+                </div>
+
+                {compositionStatus === 'done' && composedVideoUrl && (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 text-green-400">
+                      <span>✅</span>
+                      <span className="font-medium">Video composed successfully!</span>
+                    </div>
+                    <div className="flex flex-wrap gap-3">
+                      <a
+                        href={composedVideoUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold transition"
+                      >
+                        <span>🔗</span> Open Video
+                      </a>
+                      <a
+                        href={composedVideoUrl}
+                        download={`${config.channelName}_${selectedDate}.mp4`}
+                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold transition"
+                      >
+                        <span>⬇️</span> Download
+                      </a>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(composedVideoUrl);
+                          toast.success('URL copied to clipboard!');
+                        }}
+                        className="flex items-center gap-2 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-bold transition"
+                      >
+                        <span>📋</span> Copy URL
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {compositionStatus === 'error' && compositionError && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-red-400">
+                      <span>❌</span>
+                      <span className="font-medium">Composition failed</span>
+                    </div>
+                    <p className="text-sm text-red-300 bg-red-900/30 rounded p-2">{compositionError}</p>
+                    <button
+                      onClick={() => {
+                        setCompositionStatus('idle');
+                        setCompositionError(null);
+                      }}
+                      className="text-sm text-blue-400 hover:text-blue-300 underline"
+                    >
+                      Try again
+                    </button>
+                  </div>
+                )}
+
+                {!isCompositionAvailable() && (
+                  <div className="bg-yellow-900/30 border border-yellow-600/50 rounded-lg p-3 text-sm">
+                    <p className="text-yellow-400 font-medium mb-1">⚠️ Shotstack not configured</p>
+                    <p className="text-yellow-200/70">
+                      Add <code className="bg-black/30 px-1 rounded">VITE_SHOTSTACK_API_KEY</code> to your environment variables.
+                      <a href="https://shotstack.io" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline ml-1">
+                        Get API key →
+                      </a>
+                    </p>
                   </div>
                 )}
               </div>

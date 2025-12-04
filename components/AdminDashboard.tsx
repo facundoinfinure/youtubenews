@@ -29,17 +29,52 @@ const CharacterEditor: React.FC<{
     <div className="bg-[#1a1a1a] p-4 rounded-lg border border-[#333] space-y-3">
       <h4 className="text-yellow-500 font-bold uppercase text-sm border-b border-[#333] pb-2">{label}</h4>
 
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs text-gray-500 block mb-1">Name</label>
+          <input
+            type="text" value={profile.name}
+            onChange={(e) => onChange({ ...profile, name: e.target.value })}
+            className="w-full bg-[#111] border border-[#333] rounded px-2 py-1 text-sm text-white"
+          />
+        </div>
+        
+        <div>
+          <label className="text-xs text-gray-500 block mb-1">Gender</label>
+          <select
+            value={profile.gender || 'male'}
+            onChange={(e) => onChange({ ...profile, gender: e.target.value as 'male' | 'female' })}
+            className="w-full bg-[#111] border border-[#333] rounded px-2 py-1 text-sm text-white"
+          >
+            <option value="male">Male</option>
+            <option value="female">Female</option>
+          </select>
+        </div>
+      </div>
+
       <div>
-        <label className="text-xs text-gray-500 block mb-1">Name</label>
+        <label className="text-xs text-gray-500 block mb-1">Outfit (v2.0)</label>
         <input
-          type="text" value={profile.name}
-          onChange={(e) => onChange({ ...profile, name: e.target.value })}
+          type="text" 
+          value={profile.outfit || ''}
+          placeholder="e.g., dark hoodie, teal blazer and white shirt"
+          onChange={(e) => onChange({ ...profile, outfit: e.target.value })}
           className="w-full bg-[#111] border border-[#333] rounded px-2 py-1 text-sm text-white"
         />
       </div>
 
       <div>
-        <label className="text-xs text-gray-500 block mb-1">Bio / Politics</label>
+        <label className="text-xs text-gray-500 block mb-1">Personality (v2.0)</label>
+        <textarea
+          value={profile.personality || ''}
+          placeholder="e.g., sarcastic, dry humor, tired-finance-bro energy, skeptical"
+          onChange={(e) => onChange({ ...profile, personality: e.target.value })}
+          className="w-full bg-[#111] border border-[#333] rounded px-2 py-1 text-sm text-white h-16"
+        />
+      </div>
+
+      <div>
+        <label className="text-xs text-gray-500 block mb-1">Bio / Politics (legacy)</label>
         <textarea
           value={profile.bio}
           onChange={(e) => onChange({ ...profile, bio: e.target.value })}
@@ -63,14 +98,20 @@ const CharacterEditor: React.FC<{
           onChange={(e) => onChange({ ...profile, voiceName: e.target.value })}
           className="w-full bg-[#111] border border-[#333] rounded px-2 py-1 text-sm text-white"
         >
-          <optgroup label="Male Voices">
-            <option value="Kore">Kore (Male, Warm) ⭐ Recommended</option>
+          <optgroup label="OpenAI TTS Voices (Recommended for v2.0)">
+            <option value="echo">echo (Male, Warm) ⭐ Recommended for hostA</option>
+            <option value="shimmer">shimmer (Female, Expressive) ⭐ Recommended for hostB</option>
+            <option value="alloy">alloy (Neutral)</option>
+            <option value="fable">fable (British)</option>
+            <option value="onyx">onyx (Deep Male)</option>
+            <option value="nova">nova (Warm Female)</option>
+          </optgroup>
+          <optgroup label="Legacy Voice IDs">
+            <option value="Kore">Kore (Male, Warm)</option>
             <option value="Puck">Puck (Male, Deep)</option>
             <option value="Charon">Charon (Male, Deep)</option>
             <option value="Orus">Orus (Male, British)</option>
-          </optgroup>
-          <optgroup label="Female Voices">
-            <option value="Leda">Leda (Female, Expressive) ⭐ Recommended</option>
+            <option value="Leda">Leda (Female, Expressive)</option>
             <option value="Aoede">Aoede (Female, Warm)</option>
             <option value="Zephyr">Zephyr (Female, Warm)</option>
             <option value="Hera">Hera (Female, Neutral)</option>
@@ -774,6 +815,83 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                     className="hidden"
                   />
                 </div>
+              </div>
+            </div>
+
+            {/* Narrative Engine Settings (v2.0) */}
+            <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
+              <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+                <span className="text-green-500">🎬</span> Narrative Engine Settings (v2.0)
+              </h3>
+              <p className="text-sm text-gray-400 mb-4">
+                Configure the visual prompts and studio setup used by the v2.0 Narrative Engine for InfiniteTalk video generation.
+              </p>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="text-sm text-gray-400 block mb-1">Studio Setup Description</label>
+                  <textarea
+                    value={tempConfig.studioSetup || 'modern podcast room, warm tungsten key light, purple/blue LED accents, acoustic foam panels, Shure SM7B microphones'}
+                    onChange={(e) => setTempConfig({ ...tempConfig, studioSetup: e.target.value })}
+                    className="w-full bg-[#111] border border-[#333] p-2 rounded text-white h-20"
+                    placeholder="Describe the studio environment..."
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 gap-4">
+                  <div>
+                    <label className="text-sm text-gray-400 block mb-1">Seed Image Prompt: Host A Solo</label>
+                    <textarea
+                      value={tempConfig.seedImages?.hostASolo || ''}
+                      onChange={(e) => setTempConfig({ 
+                        ...tempConfig, 
+                        seedImages: { 
+                          ...tempConfig.seedImages, 
+                          hostASolo: e.target.value 
+                        } 
+                      })}
+                      className="w-full bg-[#111] border border-[#333] p-2 rounded text-white h-20"
+                      placeholder="Ultra-detailed 3D render of a male chimpanzee podcaster wearing a dark hoodie..."
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-sm text-gray-400 block mb-1">Seed Image Prompt: Host B Solo</label>
+                    <textarea
+                      value={tempConfig.seedImages?.hostBSolo || ''}
+                      onChange={(e) => setTempConfig({ 
+                        ...tempConfig, 
+                        seedImages: { 
+                          ...tempConfig.seedImages, 
+                          hostBSolo: e.target.value 
+                        } 
+                      })}
+                      className="w-full bg-[#111] border border-[#333] p-2 rounded text-white h-20"
+                      placeholder="Ultra-detailed 3D render of a female chimpanzee podcaster wearing a teal blazer..."
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-sm text-gray-400 block mb-1">Seed Image Prompt: Two-Shot (Both Hosts)</label>
+                    <textarea
+                      value={tempConfig.seedImages?.twoShot || ''}
+                      onChange={(e) => setTempConfig({ 
+                        ...tempConfig, 
+                        seedImages: { 
+                          ...tempConfig.seedImages, 
+                          twoShot: e.target.value 
+                        } 
+                      })}
+                      className="w-full bg-[#111] border border-[#333] p-2 rounded text-white h-20"
+                      placeholder="Ultra-detailed 3D render of hostA and hostB at a sleek podcast desk..."
+                    />
+                  </div>
+                </div>
+
+                <p className="text-xs text-gray-500 mt-2">
+                  💡 These prompts are used by the Scene Builder to maintain visual consistency across all video segments.
+                  Leave blank to use the default prompts from the specification.
+                </p>
               </div>
             </div>
 
