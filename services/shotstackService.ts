@@ -462,7 +462,7 @@ export const createCompositionFromSegments = (
 ): CompositionConfig => {
   // Build clips from segments with their video URLs
   const clips: VideoClip[] = segments
-    .map((segment, index) => {
+    .map((segment, index): VideoClip | null => {
       const videoUrl = videoUrls[index] || segment.videoUrl;
       if (!videoUrl) return null;
       

@@ -554,6 +554,8 @@ const App: React.FC = () => {
       segments?: BroadcastSegment[];
       videoAssets?: VideoAssets;
       thumbnailUrls?: string[];
+      scenes?: ScriptWithScenes;
+      narrative_used?: string;
     }
   ): Promise<string | null> => {
     if (!activeChannel || !user) return null;
