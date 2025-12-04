@@ -7,9 +7,11 @@ interface NewsSelectorProps {
   onConfirmSelection: (selectedNews: NewsItem[]) => void;
   date: Date;
   usedNewsIds?: Set<string>; // News IDs already used in other productions
+  onRefresh?: () => void; // Callback to refresh news from API
+  isRefreshing?: boolean;
 }
 
-export const NewsSelector: React.FC<NewsSelectorProps> = ({ news, onConfirmSelection, date, usedNewsIds = new Set() }) => {
+export const NewsSelector: React.FC<NewsSelectorProps> = ({ news, onConfirmSelection, date, usedNewsIds = new Set(), onRefresh, isRefreshing = false }) => {
   const [selectedIndices, setSelectedIndices] = useState<number[]>([]);
   const [hoveredScoreIndex, setHoveredScoreIndex] = useState<number | null>(null);
 
@@ -74,10 +76,29 @@ export const NewsSelector: React.FC<NewsSelectorProps> = ({ news, onConfirmSelec
         </div>
       </div>
 
-      {/* News count indicator */}
-      <p className="text-xs text-gray-500 mb-4">
-        Showing {news.length} news items
-      </p>
+      {/* News count indicator with refresh button */}
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-xs text-gray-500">
+          Showing {news.length} news items
+        </p>
+        {onRefresh && (
+          <button
+            onClick={onRefresh}
+            disabled={isRefreshing}
+            className="text-xs bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600 text-white px-3 py-1 rounded flex items-center gap-1"
+          >
+            {isRefreshing ? (
+              <>
+                <span className="animate-spin">⏳</span> Refreshing...
+              </>
+            ) : (
+              <>
+                🔄 Refresh News
+              </>
+            )}
+          </button>
+        )}
+      </div>
 
       <div className="space-y-3 mb-8 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
         {news.map((item, idx) => {

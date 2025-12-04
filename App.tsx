@@ -89,6 +89,7 @@ const App: React.FC = () => {
   const [allNews, setAllNews] = useState<NewsItem[]>([]);
   const [selectedNews, setSelectedNews] = useState<NewsItem[]>([]);
   const [usedNewsIds, setUsedNewsIds] = useState<Set<string>>(new Set()); // Track news IDs already used in other productions
+  const [isRefreshingNews, setIsRefreshingNews] = useState(false);
   const [segments, setSegments] = useState<BroadcastSegment[]>([]);
   const [videos, setVideos] = useState<VideoAssets>(EMPTY_VIDEO_ASSETS);
   const [viralMeta, setViralMeta] = useState<ViralMetadata | null>(null);
@@ -465,7 +466,7 @@ const App: React.FC = () => {
   };
 
   // STEP 1: Fetch News Only
-  const initiateNewsSearch = async () => {
+  const initiateNewsSearch = async (forceRefresh: boolean = false) => {
     setState(AppState.FETCHING_NEWS);
     setLogs([]);
     setAllNews([]);
@@ -475,7 +476,7 @@ const App: React.FC = () => {
     try {
       // Fix timezone issue: Parse as local date, not UTC
       const dateObj = parseSelectedDate(selectedDate);
-      addLog(`📡 Checking for cached news for ${dateObj.toLocaleDateString()}...`);
+      addLog(`📡 ${forceRefresh ? 'Refreshing' : 'Checking for cached'} news for ${dateObj.toLocaleDateString()}...`);
 
       if (!activeChannel) {
         addLog(`❌ No active channel selected. Please select a channel first.`);
@@ -484,11 +485,16 @@ const App: React.FC = () => {
         return;
       }
 
-      // Check if news already exists in database
-      let fetchedNews = await getNewsByDate(dateObj, activeChannel.id);
-      console.log(`🔍 Database query returned ${fetchedNews.length} news items`);
+      let fetchedNews: NewsItem[] = [];
 
-      if (fetchedNews.length > 0) {
+      // If forceRefresh, always fetch new news from API
+      if (!forceRefresh) {
+        // Check if news already exists in database
+        fetchedNews = await getNewsByDate(dateObj, activeChannel.id);
+        console.log(`🔍 Database query returned ${fetchedNews.length} news items`);
+      }
+
+      if (fetchedNews.length > 0 && !forceRefresh) {
         addLog(`✅ Found ${fetchedNews.length} cached stories.`);
         console.log(`📊 News items from DB:`, fetchedNews.map(n => ({ headline: n.headline, hasImage: !!n.imageUrl })));
       } else {
@@ -1730,6 +1736,15 @@ const App: React.FC = () => {
                   date={parseSelectedDate(selectedDate)}
                   onConfirmSelection={handleNewsSelection}
                   usedNewsIds={usedNewsIds}
+                  isRefreshing={isRefreshingNews}
+                  onRefresh={async () => {
+                    setIsRefreshingNews(true);
+                    try {
+                      await initiateNewsSearch(true); // Force refresh
+                    } finally {
+                      setIsRefreshingNews(false);
+                    }
+                  }}
                 />
               </div>
 
