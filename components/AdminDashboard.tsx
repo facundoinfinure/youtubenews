@@ -859,14 +859,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                                   const fileName = `seed-hostA-${activeChannel?.id || 'default'}-${Date.now()}.png`;
                                   const uploadedUrl = await uploadImageToStorage(imageDataUrl, fileName);
                                   if (uploadedUrl) {
-                                    setTempConfig({
-                                      ...tempConfig,
+                                    setTempConfig(prev => ({
+                                      ...prev,
                                       seedImages: {
-                                        ...tempConfig.seedImages,
+                                        ...prev.seedImages,
                                         hostASoloUrl: uploadedUrl
                                       }
-                                    });
-                                    toast.success('Host A image generated!');
+                                    }));
+                                    toast.success('Host A image generated & saved!');
                                   }
                                 } else {
                                   toast.error('Failed to generate image');
@@ -906,10 +906,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                         <div className="w-32 h-32 rounded-lg overflow-hidden border border-[#333] flex-shrink-0 relative group">
                           <img src={tempConfig.seedImages.hostASoloUrl} alt="Host A" className="w-full h-full object-cover" />
                           <button
-                            onClick={() => setTempConfig({
-                              ...tempConfig,
-                              seedImages: { ...tempConfig.seedImages, hostASoloUrl: undefined }
-                            })}
+                            onClick={() => setTempConfig(prev => ({
+                              ...prev,
+                              seedImages: { ...prev.seedImages, hostASoloUrl: undefined }
+                            }))}
                             className="absolute top-1 right-1 bg-red-600 text-white rounded-full w-6 h-6 text-xs opacity-0 group-hover:opacity-100 transition-opacity"
                           >
                             ✕
@@ -951,14 +951,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                                   const fileName = `seed-hostB-${activeChannel?.id || 'default'}-${Date.now()}.png`;
                                   const uploadedUrl = await uploadImageToStorage(imageDataUrl, fileName);
                                   if (uploadedUrl) {
-                                    setTempConfig({
-                                      ...tempConfig,
+                                    setTempConfig(prev => ({
+                                      ...prev,
                                       seedImages: {
-                                        ...tempConfig.seedImages,
+                                        ...prev.seedImages,
                                         hostBSoloUrl: uploadedUrl
                                       }
-                                    });
-                                    toast.success('Host B image generated!');
+                                    }));
+                                    toast.success('Host B image generated & saved!');
                                   }
                                 } else {
                                   toast.error('Failed to generate image');
@@ -998,10 +998,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                         <div className="w-32 h-32 rounded-lg overflow-hidden border border-[#333] flex-shrink-0 relative group">
                           <img src={tempConfig.seedImages.hostBSoloUrl} alt="Host B" className="w-full h-full object-cover" />
                           <button
-                            onClick={() => setTempConfig({
-                              ...tempConfig,
-                              seedImages: { ...tempConfig.seedImages, hostBSoloUrl: undefined }
-                            })}
+                            onClick={() => setTempConfig(prev => ({
+                              ...prev,
+                              seedImages: { ...prev.seedImages, hostBSoloUrl: undefined }
+                            }))}
                             className="absolute top-1 right-1 bg-red-600 text-white rounded-full w-6 h-6 text-xs opacity-0 group-hover:opacity-100 transition-opacity"
                           >
                             ✕
@@ -1043,14 +1043,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                                   const fileName = `seed-twoshot-${activeChannel?.id || 'default'}-${Date.now()}.png`;
                                   const uploadedUrl = await uploadImageToStorage(imageDataUrl, fileName);
                                   if (uploadedUrl) {
-                                    setTempConfig({
-                                      ...tempConfig,
+                                    setTempConfig(prev => ({
+                                      ...prev,
                                       seedImages: {
-                                        ...tempConfig.seedImages,
+                                        ...prev.seedImages,
                                         twoShotUrl: uploadedUrl
                                       }
-                                    });
-                                    toast.success('Two-shot image generated!');
+                                    }));
+                                    toast.success('Two-shot image generated & saved!');
                                   }
                                 } else {
                                   toast.error('Failed to generate image');
@@ -1090,10 +1090,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                         <div className="w-40 h-24 rounded-lg overflow-hidden border border-[#333] flex-shrink-0 relative group">
                           <img src={tempConfig.seedImages.twoShotUrl} alt="Two-Shot" className="w-full h-full object-cover" />
                           <button
-                            onClick={() => setTempConfig({
-                              ...tempConfig,
-                              seedImages: { ...tempConfig.seedImages, twoShotUrl: undefined }
-                            })}
+                            onClick={() => setTempConfig(prev => ({
+                              ...prev,
+                              seedImages: { ...prev.seedImages, twoShotUrl: undefined }
+                            }))}
                             className="absolute top-1 right-1 bg-red-600 text-white rounded-full w-6 h-6 text-xs opacity-0 group-hover:opacity-100 transition-opacity"
                           >
                             ✕
@@ -1112,29 +1112,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                   className="hidden"
                   onChange={async (e) => {
                     const file = e.target.files?.[0];
-                    if (!file || !uploadingSeedImage) return;
+                    const currentUploadType = uploadingSeedImage;
+                    if (!file || !currentUploadType) return;
                     
                     try {
                       // Convert file to data URL
                       const reader = new FileReader();
                       reader.onload = async () => {
                         const dataUrl = reader.result as string;
-                        const fileName = `seed-${uploadingSeedImage}-${activeChannel?.id || 'default'}-${Date.now()}.png`;
+                        const fileName = `seed-${currentUploadType}-${activeChannel?.id || 'default'}-${Date.now()}.png`;
                         const uploadedUrl = await uploadImageToStorage(dataUrl, fileName);
                         
                         if (uploadedUrl) {
-                          const urlKey = uploadingSeedImage === 'hostASolo' ? 'hostASoloUrl' 
-                            : uploadingSeedImage === 'hostBSolo' ? 'hostBSoloUrl' 
+                          const urlKey = currentUploadType === 'hostASolo' ? 'hostASoloUrl' 
+                            : currentUploadType === 'hostBSolo' ? 'hostBSoloUrl' 
                             : 'twoShotUrl';
                           
-                          setTempConfig({
-                            ...tempConfig,
+                          // Use function form to get latest state
+                          setTempConfig(prev => ({
+                            ...prev,
                             seedImages: {
-                              ...tempConfig.seedImages,
+                              ...prev.seedImages,
                               [urlKey]: uploadedUrl
                             }
-                          });
-                          toast.success('Image uploaded!');
+                          }));
+                          toast.success('Image uploaded to Supabase Storage!');
                         } else {
                           toast.error('Failed to upload image');
                         }
