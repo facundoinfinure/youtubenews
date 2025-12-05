@@ -214,3 +214,110 @@ export const findDuplicateFile = async (
     return null;
   }
 };
+
+/**
+ * Verify if a Storage URL is valid and accessible
+ * Extracts the path from the URL and checks if the file exists in Storage
+ */
+export const verifyStorageUrl = async (url: string): Promise<boolean> => {
+  if (!url || !supabase) return false;
+
+  try {
+    // Check if it's a Supabase storage URL
+    if (!url.includes('supabase.co/storage/v1/object/public/channel-assets')) {
+      // For external URLs, do a HEAD request
+      try {
+        const response = await fetch(url, { method: 'HEAD' });
+        return response.ok;
+      } catch {
+        return false;
+      }
+    }
+
+    // Extract path from Supabase URL
+    const urlParts = url.split('/channel-assets/');
+    if (urlParts.length < 2) return false;
+    
+    const filePath = urlParts[1];
+    return await checkFileExists('channel-assets', filePath);
+  } catch (e) {
+    console.error("Error verifying storage URL:", e);
+    return false;
+  }
+};
+
+/**
+ * Verify multiple URLs in parallel with batching for performance
+ * Returns a map of URL -> isValid
+ */
+export const verifyStorageUrls = async (
+  urls: (string | null | undefined)[]
+): Promise<Map<string, boolean>> => {
+  const results = new Map<string, boolean>();
+  const validUrls = urls.filter((url): url is string => !!url);
+  
+  if (validUrls.length === 0) return results;
+
+  // Process in batches of 5 to avoid overwhelming the server
+  const batchSize = 5;
+  for (let i = 0; i < validUrls.length; i += batchSize) {
+    const batch = validUrls.slice(i, i + batchSize);
+    const batchResults = await Promise.all(
+      batch.map(async (url) => ({
+        url,
+        valid: await verifyStorageUrl(url)
+      }))
+    );
+    
+    for (const { url, valid } of batchResults) {
+      results.set(url, valid);
+    }
+  }
+
+  return results;
+};
+
+/**
+ * Interface for segment resource status
+ */
+export interface SegmentResourceStatus {
+  index: number;
+  audioUrl: string | null;
+  audioValid: boolean;
+  videoUrl: string | null;
+  videoValid: boolean;
+  needsAudio: boolean;
+  needsVideo: boolean;
+}
+
+/**
+ * Analyze segments to determine which resources need to be generated
+ * Returns detailed status for each segment
+ */
+export const analyzeSegmentResources = async (
+  segments: Array<{ audioUrl?: string | null; videoUrl?: string | null }>
+): Promise<SegmentResourceStatus[]> => {
+  if (!segments || segments.length === 0) return [];
+
+  // Collect all URLs to verify
+  const allUrls = segments.flatMap(seg => [seg.audioUrl, seg.videoUrl]);
+  const urlValidityMap = await verifyStorageUrls(allUrls);
+
+  // Build status for each segment
+  return segments.map((seg, index) => {
+    const audioUrl = seg.audioUrl || null;
+    const videoUrl = seg.videoUrl || null;
+    const audioValid = audioUrl ? (urlValidityMap.get(audioUrl) ?? false) : false;
+    const videoValid = videoUrl ? (urlValidityMap.get(videoUrl) ?? false) : false;
+
+    return {
+      index,
+      audioUrl,
+      audioValid,
+      videoUrl,
+      videoValid,
+      needsAudio: !audioUrl || !audioValid,
+      needsVideo: !videoUrl || !videoValid
+    };
+  });
+};

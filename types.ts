@@ -171,6 +171,18 @@ export interface Channel {
 // Production Types
 export type ProductionStatus = 'draft' | 'in_progress' | 'completed' | 'failed';
 
+// Segment resource status for incremental regeneration
+export type SegmentResourceState = 'pending' | 'generating' | 'done' | 'failed';
+
+export interface SegmentStatus {
+  audio: SegmentResourceState;
+  video: SegmentResourceState;
+  audioUrl?: string;
+  videoUrl?: string;
+  lastUpdated?: string;
+  error?: string;
+}
+
 export interface Production {
   id: string;
   created_at: string;
@@ -200,6 +212,8 @@ export interface Production {
   // New fields for v2.0 Narrative Engine
   narrative_used?: NarrativeType; // Which narrative structure was used
   scenes?: ScriptWithScenes; // Complete scene structure with metadata
+  // New field for granular segment tracking (v2.1)
+  segment_status?: Record<number, SegmentStatus>; // Per-segment resource status
 }
 
 // Window augmentation for AI Studio key selection & Google Identity & Runtime Env

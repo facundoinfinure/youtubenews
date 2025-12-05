@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { AppState, ChannelConfig, NewsItem, BroadcastSegment, VideoAssets, ViralMetadata, UserProfile, Channel, ScriptLine, StoredVideo, ScriptWithScenes, NarrativeType } from './types';
-import { signInWithGoogle, getSession, signOut, getAllChannels, saveChannel, getChannelById, saveVideoToDB, getNewsByDate, saveNewsToDB, markNewsAsSelected, deleteVideoFromDB, supabase, fetchVideosFromDB, saveProduction, getIncompleteProductions, getProductionById, updateProductionStatus, uploadAudioToStorage, uploadImageToStorage, getAudioFromStorage, findCachedScript, findCachedAudio, getAllProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction, verifyStorageBucket, getCompletedProductionsWithVideoInfo, ProductionWithVideoInfo, getUsedNewsIdsForDate, saveCheckpoint, getLastCheckpoint, markStepFailed, saveCachedAudio } from './services/supabaseService';
+import { signInWithGoogle, getSession, signOut, getAllChannels, saveChannel, getChannelById, saveVideoToDB, getNewsByDate, saveNewsToDB, markNewsAsSelected, deleteVideoFromDB, supabase, fetchVideosFromDB, saveProduction, getIncompleteProductions, getProductionById, updateProductionStatus, uploadAudioToStorage, uploadImageToStorage, getAudioFromStorage, findCachedScript, findCachedAudio, getAllProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction, verifyStorageBucket, getCompletedProductionsWithVideoInfo, ProductionWithVideoInfo, getUsedNewsIdsForDate, saveCheckpoint, getLastCheckpoint, markStepFailed, saveCachedAudio, updateSegmentStatus, getSegmentsNeedingRegeneration } from './services/supabaseService';
 import { fetchEconomicNews, generateScript, generateScriptWithScenes, convertScenesToScriptLines, generateSegmentedAudio, generateSegmentedAudioWithCache, generateAudioFromScenes, ExtendedBroadcastSegment, setFindCachedAudioFunction, generateBroadcastVisuals, generateViralMetadata, generateThumbnail, generateThumbnailVariants, generateViralHook, generateVideoSegmentsWithInfiniteTalk, composeVideoWithShotstack, isCompositionAvailable, getCompositionStatus } from './services/geminiService';
 import { uploadVideoToYouTube, deleteVideoFromYouTube } from './services/youtubeService';
 import { ContentCache } from './services/ContentCache';
 import { CostTracker } from './services/CostTracker';
 import { retryVideoGeneration, retryBatch } from './services/retryUtils';
+import { analyzeSegmentResources, SegmentResourceStatus } from './services/storageManager';
 import { NewsSelector } from './components/NewsSelector';
 import { BroadcastPlayer } from './components/BroadcastPlayer';
 import { AdminDashboard } from './components/AdminDashboard';
@@ -838,32 +839,106 @@ const App: React.FC = () => {
 
       // Check if we need to generate audio (if resuming, check if segments exist)
       let audioSegments: BroadcastSegment[] = [];
+      let segmentResourceStatus: SegmentResourceStatus[] = [];
+      let missingAudioIndices: number[] = [];
+      
       if (resumeFromProduction?.segments && resumeFromProduction.segments.length > 0) {
-        // Load audio from Storage
-        addLog("🔄 Loading audio from storage...");
-        const loadedSegments = await Promise.all(
-          resumeFromProduction.segments.map(async (seg: any, idx: number) => {
-            if (seg.audioUrl && productionId) {
-              const audioBase64 = await getAudioFromStorage(seg.audioUrl);
-              if (audioBase64) {
-                return {
-                  speaker: seg.speaker,
-                  text: seg.text,
-                  audioBase64,
-                  videoUrl: seg.videoUrl
-                };
-              }
-            }
-            return null;
-          })
-        );
-        audioSegments = loadedSegments.filter(Boolean) as BroadcastSegment[];
+        // INCREMENTAL REGENERATION: Analyze which segments need audio
+        addLog("🔍 Analyzing existing resources...");
+        segmentResourceStatus = await analyzeSegmentResources(resumeFromProduction.segments);
         
-        if (audioSegments.length === resumeFromProduction.segments.length) {
-          addLog("✅ Audio loaded from storage.");
+        // Identify segments that need audio regeneration
+        missingAudioIndices = segmentResourceStatus
+          .filter(s => s.needsAudio)
+          .map(s => s.index);
+        
+        const validAudioCount = segmentResourceStatus.filter(s => !s.needsAudio).length;
+        const totalSegments = resumeFromProduction.segments.length;
+        
+        if (missingAudioIndices.length === 0) {
+          // All audio is valid, load from Storage
+          addLog("🔄 Loading all audio from storage...");
+          const loadedSegments = await Promise.all(
+            resumeFromProduction.segments.map(async (seg: any, idx: number) => {
+              if (seg.audioUrl) {
+                const audioBase64 = await getAudioFromStorage(seg.audioUrl);
+                if (audioBase64) {
+                  return {
+                    speaker: seg.speaker,
+                    text: seg.text,
+                    audioBase64,
+                    audioUrl: seg.audioUrl,
+                    videoUrl: seg.videoUrl,
+                    hostA_audioUrl: seg.hostA_audioUrl,
+                    hostB_audioUrl: seg.hostB_audioUrl,
+                    order: seg.order,
+                    video_mode: seg.video_mode
+                  };
+                }
+              }
+              return null;
+            })
+          );
+          audioSegments = loadedSegments.filter(Boolean) as BroadcastSegment[];
+          addLog(`✅ Audio loaded: ${audioSegments.length}/${totalSegments} segments from storage.`);
+        } else if (missingAudioIndices.length < totalSegments) {
+          // PARTIAL: Some audio exists, only regenerate missing ones
+          addLog(`⚠️ ${missingAudioIndices.length}/${totalSegments} audio segments missing - regenerating only missing ones...`);
+          
+          // Load valid segments first
+          const loadedSegments = await Promise.all(
+            resumeFromProduction.segments.map(async (seg: any, idx: number) => {
+              if (!missingAudioIndices.includes(idx) && seg.audioUrl) {
+                const audioBase64 = await getAudioFromStorage(seg.audioUrl);
+                if (audioBase64) {
+                  return {
+                    speaker: seg.speaker,
+                    text: seg.text,
+                    audioBase64,
+                    audioUrl: seg.audioUrl,
+                    videoUrl: seg.videoUrl,
+                    hostA_audioUrl: seg.hostA_audioUrl,
+                    hostB_audioUrl: seg.hostB_audioUrl,
+                    order: seg.order,
+                    video_mode: seg.video_mode,
+                    fromCache: true // Mark as loaded from storage
+                  };
+                }
+              }
+              return null; // Will be regenerated
+            })
+          );
+          
+          // Regenerate only missing segments
+          const missingScriptLines = genScript.filter((_, idx) => missingAudioIndices.includes(idx));
+          addLog(`🎙️ Generating ${missingScriptLines.length} missing audio segments...`);
+          
+          const newAudioSegments = await generateSegmentedAudioWithCache(
+            missingScriptLines,
+            currentConfig,
+            activeChannel?.id || ''
+          );
+          
+          // Merge loaded and new segments in correct order
+          let newSegmentIdx = 0;
+          audioSegments = resumeFromProduction.segments.map((seg: any, idx: number) => {
+            if (missingAudioIndices.includes(idx)) {
+              // Use newly generated segment
+              const newSeg = newAudioSegments[newSegmentIdx++];
+              return {
+                ...newSeg,
+                videoUrl: seg.videoUrl // Preserve existing videoUrl if any
+              };
+            } else {
+              // Use loaded segment
+              return loadedSegments[idx];
+            }
+          }).filter(Boolean) as BroadcastSegment[];
+          
+          addLog(`✅ Audio complete: ${validAudioCount} from storage + ${missingAudioIndices.length} regenerated.`);
         } else {
-          addLog("⚠️ Some audio missing, regenerating...");
-          audioSegments = [];
+          // All audio missing, will regenerate everything below
+          addLog(`⚠️ All ${totalSegments} audio segments missing - generating from scratch...`);
         }
       }
 
@@ -1045,6 +1120,15 @@ const App: React.FC = () => {
                   completed: segmentsWithUrls.map((_, idx) => `segment_${idx}`),
                   data: { segmentCount: segmentsWithUrls.length }
                 });
+                
+                // Update segment status for granular tracking
+                for (let idx = 0; idx < segmentsWithUrls.length; idx++) {
+                  const seg = segmentsWithUrls[idx];
+                  await updateSegmentStatus(productionId, idx, {
+                    audio: seg?.audioUrl ? 'done' : 'failed',
+                    audioUrl: seg?.audioUrl || undefined
+                  });
+                }
               }
               
               // Save segments metadata (without audioBase64) to production
@@ -1097,19 +1181,69 @@ const App: React.FC = () => {
       // INFINITETALK VIDEO GENERATION
       // Now that audio is uploaded and has URLs, generate lip-sync videos
       let videoSegments: (string | null)[] = [];
+      let missingVideoIndices: number[] = [];
       
-      // Check if videos already exist from resumed production
-      if (resumeFromProduction?.segments) {
-        const existingVideoUrls = resumeFromProduction.segments.map((seg: any) => seg.videoUrl || null);
-        const hasVideos = existingVideoUrls.some((url: string | null) => url !== null);
+      // INCREMENTAL VIDEO REGENERATION: Check which videos exist and are valid
+      if (resumeFromProduction?.segments && resumeFromProduction.segments.length > 0) {
+        // Use previously calculated status if available, otherwise calculate now
+        if (segmentResourceStatus.length === 0) {
+          segmentResourceStatus = await analyzeSegmentResources(resumeFromProduction.segments);
+        }
         
-        if (hasVideos) {
+        // Identify segments that need video regeneration
+        missingVideoIndices = segmentResourceStatus
+          .filter(s => s.needsVideo)
+          .map(s => s.index);
+        
+        const existingVideoUrls = resumeFromProduction.segments.map((seg: any) => seg.videoUrl || null);
+        const validVideoCount = segmentResourceStatus.filter(s => !s.needsVideo).length;
+        const totalSegments = resumeFromProduction.segments.length;
+        
+        if (missingVideoIndices.length === 0) {
+          // All videos are valid
           videoSegments = existingVideoUrls;
-          addLog("✅ Using existing video assets from previous production.");
+          addLog(`✅ All ${validVideoCount} video assets verified and loaded from storage.`);
+        } else if (missingVideoIndices.length < totalSegments && validVideoCount > 0) {
+          // PARTIAL: Some videos exist, only regenerate missing ones
+          addLog(`⚠️ ${missingVideoIndices.length}/${totalSegments} videos missing - regenerating only missing ones...`);
+          
+          // Keep existing valid videos
+          videoSegments = existingVideoUrls;
+          
+          // Prepare only missing segments for video generation
+          const segmentsToRegenerate = audioSegments
+            .filter((_, idx) => missingVideoIndices.includes(idx))
+            .map((seg, originalIdx) => ({
+              ...seg,
+              audioUrl: (seg as any).audioUrl,
+              _originalIndex: missingVideoIndices[originalIdx] // Track original position
+            }));
+          
+          addLog(`🎬 Generating ${segmentsToRegenerate.length} missing lip-sync videos...`);
+          
+          // Generate only missing videos
+          const newVideoSegments = await generateVideoSegmentsWithInfiniteTalk(
+            segmentsToRegenerate,
+            currentConfig,
+            activeChannel.id,
+            productionId || undefined,
+            scriptWithScenes || undefined
+          );
+          
+          // Merge new videos into the correct positions
+          missingVideoIndices.forEach((originalIdx, newIdx) => {
+            videoSegments[originalIdx] = newVideoSegments[newIdx];
+          });
+          
+          const newlyGeneratedCount = newVideoSegments.filter(v => v !== null).length;
+          addLog(`✅ Videos complete: ${validVideoCount} from storage + ${newlyGeneratedCount} regenerated.`);
+        } else {
+          // All videos missing, will regenerate everything below
+          addLog(`⚠️ All ${totalSegments} videos missing - generating from scratch...`);
         }
       }
 
-      // Generate videos with InfiniteTalk if not already generated
+      // Generate all videos if none exist
       if (videoSegments.length === 0 || !videoSegments.some(v => v !== null)) {
         addLog("🎬 Generating lip-sync videos with WaveSpeed InfiniteTalk Multi...");
         addLog(`🖼️ Using reference image for two-character lip-sync`);
@@ -1142,31 +1276,44 @@ const App: React.FC = () => {
         const generatedCount = videoSegments.filter(v => v !== null).length;
         const failedCount = videoSegments.length - generatedCount;
         addLog(`✅ Generated ${generatedCount}/${audioSegments.length} lip-sync videos${failedCount > 0 ? ` (${failedCount} failed - will continue)` : ''}.`);
+      }
+      
+      // Track failed videos if any
+      const generatedCount = videoSegments.filter(v => v !== null).length;
+      const failedCount = videoSegments.length - generatedCount;
         
-        // Mark failed videos in failed_steps
-        if (productionId && failedCount > 0) {
-          const failedIndices = videoSegments
-            .map((url, idx) => url === null ? idx : -1)
-            .filter(idx => idx >= 0);
-          
-          for (const idx of failedIndices) {
-            await markStepFailed(productionId, `video_segment_${idx}`, 'Video generation failed after retries');
-          }
+      // Mark failed videos in failed_steps
+      if (productionId && failedCount > 0) {
+        const failedIndices = videoSegments
+          .map((url, idx) => url === null ? idx : -1)
+          .filter(idx => idx >= 0);
+        
+        for (const idx of failedIndices) {
+          await markStepFailed(productionId, `video_segment_${idx}`, 'Video generation failed after retries');
         }
+      }
 
-        // Save checkpoint after video generation
-        if (productionId) {
-          await saveCheckpoint(productionId, {
-            step: 'videos',
-            completed: videoSegments
-              .map((url, idx) => url !== null ? `segment_${idx}` : null)
-              .filter(Boolean) as string[],
-            in_progress: [],
-            data: { 
-              total: videoSegments.length,
-              completed: generatedCount,
-              failed: failedCount
-            }
+      // Save checkpoint after video generation
+      if (productionId) {
+        await saveCheckpoint(productionId, {
+          step: 'videos',
+          completed: videoSegments
+            .map((url, idx) => url !== null ? `segment_${idx}` : null)
+            .filter(Boolean) as string[],
+          in_progress: [],
+          data: { 
+            total: videoSegments.length,
+            completed: generatedCount,
+            failed: failedCount
+          }
+        });
+        
+        // Update segment status for granular tracking
+        for (let idx = 0; idx < videoSegments.length; idx++) {
+          const videoUrl = videoSegments[idx];
+          await updateSegmentStatus(productionId, idx, {
+            video: videoUrl ? 'done' : 'failed',
+            videoUrl: videoUrl || undefined
           });
         }
       }

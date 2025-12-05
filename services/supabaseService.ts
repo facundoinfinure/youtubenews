@@ -767,7 +767,9 @@ const normalizeProduction = (data: any): Production => ({
   cost_breakdown: data.cost_breakdown ?? undefined,
   // v2.0 Narrative Engine fields
   narrative_used: data.narrative_used ?? undefined,
-  scenes: data.scenes ?? undefined
+  scenes: data.scenes ?? undefined,
+  // v2.1 Granular segment tracking
+  segment_status: data.segment_status ?? undefined
 });
 
 export const saveProduction = async (
@@ -808,7 +810,9 @@ export const saveProduction = async (
     cost_breakdown: production.cost_breakdown || null,
     // v2.0 Narrative Engine fields
     narrative_used: production.narrative_used || null,
-    scenes: production.scenes || null
+    scenes: production.scenes || null,
+    // v2.1 Granular segment tracking
+    segment_status: production.segment_status || null
   };
 
   if (production.id) {
@@ -1088,6 +1092,111 @@ export const updateProductionStatus = async (
   }
 
   return true;
+};
+
+/**
+ * Update segment status for granular resource tracking
+ * Allows tracking audio/video generation progress per segment
+ */
+export const updateSegmentStatus = async (
+  productionId: string,
+  segmentIndex: number,
+  updates: {
+    audio?: 'pending' | 'generating' | 'done' | 'failed';
+    video?: 'pending' | 'generating' | 'done' | 'failed';
+    audioUrl?: string;
+    videoUrl?: string;
+    error?: string;
+  }
+): Promise<boolean> => {
+  if (!supabase) return false;
+
+  try {
+    // Get current segment_status
+    const { data: production, error: fetchError } = await supabase
+      .from('productions')
+      .select('segment_status')
+      .eq('id', productionId)
+      .single();
+
+    if (fetchError) {
+      console.error("Error fetching production:", fetchError);
+      return false;
+    }
+
+    // Merge updates with existing status
+    const currentStatus = production?.segment_status || {};
+    const segmentStatus = currentStatus[segmentIndex] || { audio: 'pending', video: 'pending' };
+    
+    const updatedSegmentStatus = {
+      ...segmentStatus,
+      ...updates,
+      lastUpdated: new Date().toISOString()
+    };
+
+    const newSegmentStatus = {
+      ...currentStatus,
+      [segmentIndex]: updatedSegmentStatus
+    };
+
+    // Save updated status
+    const { error: updateError } = await supabase
+      .from('productions')
+      .update({ segment_status: newSegmentStatus })
+      .eq('id', productionId);
+
+    if (updateError) {
+      console.error("Error updating segment status:", updateError);
+      return false;
+    }
+
+    return true;
+  } catch (e) {
+    console.error("Error in updateSegmentStatus:", e);
+    return false;
+  }
+};
+
+/**
+ * Get segments that need regeneration based on their status
+ */
+export const getSegmentsNeedingRegeneration = async (
+  productionId: string
+): Promise<{ audioNeeded: number[]; videoNeeded: number[] }> => {
+  if (!supabase) return { audioNeeded: [], videoNeeded: [] };
+
+  try {
+    const { data: production, error } = await supabase
+      .from('productions')
+      .select('segment_status, segments')
+      .eq('id', productionId)
+      .single();
+
+    if (error || !production) {
+      return { audioNeeded: [], videoNeeded: [] };
+    }
+
+    const segmentStatus = production.segment_status || {};
+    const segmentCount = production.segments?.length || 0;
+    
+    const audioNeeded: number[] = [];
+    const videoNeeded: number[] = [];
+
+    for (let i = 0; i < segmentCount; i++) {
+      const status = segmentStatus[i];
+      if (!status || status.audio !== 'done') {
+        audioNeeded.push(i);
+      }
+      if (!status || status.video !== 'done') {
+        videoNeeded.push(i);
+      }
+    }
+
+    return { audioNeeded, videoNeeded };
+  } catch (e) {
+    console.error("Error in getSegmentsNeedingRegeneration:", e);
+    return { audioNeeded: [], videoNeeded: [] };
+  }
 };
 
 export const deleteProduction = async (id: string): Promise<boolean> => {
