@@ -10,14 +10,15 @@ export interface ScenePrompt {
   expressionHint: string;
 }
 
-// Professional studio seed images following spec
-const DEFAULT_SEED_IMAGES = {
+// Fallback studio seed images (used only if channel config doesn't have them)
+// These should match the values in system_defaults.default_channel_config in Supabase
+const FALLBACK_SEED_IMAGES = {
   hostASolo: "Ultra-detailed 3D render of a male chimpanzee podcaster wearing a dark hoodie, at a modern podcast desk. Sarcastic expression, relaxed posture. Warm tungsten key light + purple/blue LED accents. Acoustic foam panels, Shure SM7B microphone. Medium shot, eye-level.",
   hostBSolo: "Ultra-detailed 3D render of a female chimpanzee podcaster wearing a teal blazer and white shirt. Playful, expressive look. Warm tungsten lighting + purple/blue LEDs. Acoustic foam panels. Medium shot, eye-level.",
   twoShot: "Ultra-detailed 3D render of hostA and hostB at a sleek podcast desk. hostA in dark hoodie, hostB in teal blazer. Warm tungsten key light, purple/blue LEDs, Shure SM7B mics. Medium two-shot, eye-level."
 };
 
-const DEFAULT_STUDIO = "modern podcast room, warm tungsten key light, purple/blue LED accents, acoustic foam panels, Shure SM7B microphones, camera: eye-level, shallow depth of field";
+const FALLBACK_STUDIO = "modern podcast room, warm tungsten key light, purple/blue LED accents, acoustic foam panels, Shure SM7B microphones, camera: eye-level, shallow depth of field";
 
 // Scene type detection based on narrative structure and position
 interface SceneTypeInfo {
@@ -232,12 +233,14 @@ export const generateScenePrompts = (
   script: ScriptWithScenes,
   config: ChannelConfig
 ): ScenePrompt[] => {
+  // Use channel config seed images, fall back to defaults if not configured
   const seedImages = {
-    ...DEFAULT_SEED_IMAGES,
+    ...FALLBACK_SEED_IMAGES,
     ...(config.seedImages || {})
   };
 
-  const studioSetup = config.studioSetup || DEFAULT_STUDIO;
+  // Use channel config studio setup, fall back to default if not configured
+  const studioSetup = config.studioSetup || FALLBACK_STUDIO;
   const totalScenes = Object.keys(script.scenes).length;
   const narrativeType = script.narrative_used;
 
@@ -368,9 +371,11 @@ export const getScenePromptByIndex = (
 };
 
 /**
- * Export defaults for use in other services
+ * Export fallback defaults for use in other services
+ * Note: These are fallbacks only. The actual defaults should come from 
+ * channel config which is loaded from Supabase channels table.
  */
 export const SCENE_BUILDER_DEFAULTS = {
-  seedImages: DEFAULT_SEED_IMAGES,
-  studioSetup: DEFAULT_STUDIO
+  seedImages: FALLBACK_SEED_IMAGES,
+  studioSetup: FALLBACK_STUDIO
 };

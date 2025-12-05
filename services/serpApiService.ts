@@ -3,11 +3,13 @@
  * 
  * Fetches news from Google News using SerpAPI.
  * Uses the /api/serpapi proxy for all requests.
+ * Country config loaded from Supabase (locale_config table)
  */
 
 import { NewsItem, ChannelConfig } from "../types";
 import { ContentCache } from "./ContentCache";
 import { CostTracker } from "./CostTracker";
+import { supabase } from "./supabaseService";
 import { calculateViralScoresBatch, calculateViralScoreWithGPT } from "./openaiService";
 
 // Get proxy URL (auto-detect in production)
@@ -24,8 +26,8 @@ const getProxyUrl = (): string => {
   return "";
 };
 
-// Country to language/region mapping
-const COUNTRY_CONFIG: Record<string, { gl: string; hl: string }> = {
+// Fallback country config (used if Supabase table doesn't exist)
+const FALLBACK_COUNTRY_CONFIG: Record<string, { gl: string; hl: string }> = {
   'Argentina': { gl: 'ar', hl: 'es' },
   'México': { gl: 'mx', hl: 'es' },
   'Mexico': { gl: 'mx', hl: 'es' },
@@ -43,8 +45,104 @@ const COUNTRY_CONFIG: Record<string, { gl: string; hl: string }> = {
   'Perú': { gl: 'pe', hl: 'es' },
 };
 
-// Default topic token (Business US/en) - used if channel doesn't have one configured
-const DEFAULT_TOPIC_TOKEN = 'CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx6TVdZU0FtVnVHZ0pWVXlnQVAB';
+// In-memory cache for locale config (loaded once from Supabase)
+let localeConfigCache: Record<string, { gl: string; hl: string }> | null = null;
+let localeConfigLoaded = false;
+
+/**
+ * Load locale configuration from Supabase
+ */
+const loadLocaleConfig = async (): Promise<Record<string, { gl: string; hl: string }>> => {
+  if (localeConfigLoaded && localeConfigCache) {
+    return localeConfigCache;
+  }
+
+  if (!supabase) {
+    localeConfigLoaded = true;
+    localeConfigCache = FALLBACK_COUNTRY_CONFIG;
+    return FALLBACK_COUNTRY_CONFIG;
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('locale_config')
+      .select('country, google_gl, google_hl');
+
+    if (error) {
+      // Table might not exist
+      if (error.code === '42P01' || error.message?.includes('locale_config')) {
+        console.warn('⚠️ locale_config table not found - using fallback config');
+      } else {
+        console.error('Error loading locale config:', error);
+      }
+      localeConfigLoaded = true;
+      localeConfigCache = FALLBACK_COUNTRY_CONFIG;
+      return FALLBACK_COUNTRY_CONFIG;
+    }
+
+    // Convert to expected format
+    const config: Record<string, { gl: string; hl: string }> = {};
+    for (const row of data || []) {
+      config[row.country] = { gl: row.google_gl, hl: row.google_hl };
+    }
+
+    // Merge with fallback to ensure all countries are covered
+    localeConfigCache = { ...FALLBACK_COUNTRY_CONFIG, ...config };
+    localeConfigLoaded = true;
+    console.log(`🌍 Loaded ${Object.keys(config).length} locale configs from Supabase`);
+    return localeConfigCache;
+  } catch (e) {
+    console.warn('Failed to load locale config:', e);
+    localeConfigLoaded = true;
+    localeConfigCache = FALLBACK_COUNTRY_CONFIG;
+    return FALLBACK_COUNTRY_CONFIG;
+  }
+};
+
+/**
+ * Get country config (sync version with fallback)
+ */
+const getCountryConfig = (country: string): { gl: string; hl: string } => {
+  // Use cache if available, otherwise fallback
+  const config = localeConfigCache || FALLBACK_COUNTRY_CONFIG;
+  return config[country] || { gl: 'us', hl: 'en' };
+};
+
+// Default topic token - loaded from system_defaults or fallback
+const DEFAULT_TOPIC_TOKEN_FALLBACK = 'CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx6TVdZU0FtVnVHZ0pWVXlnQVAB';
+let defaultTopicToken: string | null = null;
+
+/**
+ * Get default topic token (from Supabase or fallback)
+ */
+const getDefaultTopicToken = async (): Promise<string> => {
+  if (defaultTopicToken) return defaultTopicToken;
+
+  if (!supabase) {
+    return DEFAULT_TOPIC_TOKEN_FALLBACK;
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('system_defaults')
+      .select('value')
+      .eq('key', 'default_topic_token')
+      .maybeSingle();
+
+    if (error || !data) {
+      return DEFAULT_TOPIC_TOKEN_FALLBACK;
+    }
+
+    // Value is stored as JSON string
+    defaultTopicToken = typeof data.value === 'string' 
+      ? data.value.replace(/^"|"$/g, '') // Remove quotes if stored as JSON string
+      : data.value;
+    return defaultTopicToken || DEFAULT_TOPIC_TOKEN_FALLBACK;
+  } catch (e) {
+    console.warn('Failed to load default topic token:', e);
+    return DEFAULT_TOPIC_TOKEN_FALLBACK;
+  }
+};
 
 /**
  * Make a request to SerpAPI via proxy
@@ -194,11 +292,15 @@ export const fetchNewsWithSerpAPI = async (
   targetDate: Date | undefined,
   config: ChannelConfig
 ): Promise<NewsItem[]> => {
-  // Get country config for language/region
-  const countryConfig = COUNTRY_CONFIG[config.country] || { gl: 'us', hl: 'en' };
+  // Load locale config from Supabase (or fallback)
+  await loadLocaleConfig();
   
-  // Use channel's topic token, or fall back to default (Business US/en)
-  const topicToken = config.topicToken || DEFAULT_TOPIC_TOKEN;
+  // Get country config for language/region
+  const countryConfig = getCountryConfig(config.country);
+  
+  // Use channel's topic token, or fall back to default from Supabase/fallback
+  const defaultToken = await getDefaultTopicToken();
+  const topicToken = config.topicToken || defaultToken;
   
   // Cache key based on channel name (each channel has its own topic)
   const cacheKey = `serpapi_topic_news_${config.channelName}_${new Date().toISOString().split('T')[0]}_v3`;
@@ -356,7 +458,9 @@ export const fetchTrendingWithSerpAPI = async (country: string): Promise<string[
   return ContentCache.getOrGenerate(
     cacheKey,
     async () => {
-      const countryConfig = COUNTRY_CONFIG[country] || { gl: 'us', hl: 'en' };
+      // Load locale config if not already loaded
+      await loadLocaleConfig();
+      const countryConfig = getCountryConfig(country);
       
       // Search for trending topics
       const data = await serpApiRequest({

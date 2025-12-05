@@ -23,6 +23,9 @@ export type VideoMode = "hostA" | "hostB" | "both";
 export type ShotType = "medium" | "closeup" | "wide";
 
 export interface Scene {
+  // Scene title for lower-third overlay (e.g., "Market Outlook Explained")
+  title?: string;
+  
   // For single host scenes (video_mode: hostA or hostB)
   text: string;
   
@@ -48,7 +51,11 @@ export interface BroadcastSegment {
   speaker: string;
   text: string;
   audioBase64: string;
-  videoUrl?: string; // NEW: Specific video for this segment
+  videoUrl?: string; // Specific video for this segment
+  audioUrl?: string; // URL to stored audio in Supabase storage
+  audioDuration?: number; // Duration in seconds (from TTS or cache)
+  sceneTitle?: string; // Title for lower-third overlay (from Narrative Engine)
+  sceneIndex?: number; // Index of the scene (for ordering)
 }
 
 export interface VideoAssets {

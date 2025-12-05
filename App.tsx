@@ -1,22 +1,32 @@
 import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { AppState, ChannelConfig, NewsItem, BroadcastSegment, VideoAssets, ViralMetadata, UserProfile, Channel, ScriptLine, StoredVideo, ScriptWithScenes, NarrativeType } from './types';
-import { signInWithGoogle, getSession, signOut, getAllChannels, saveChannel, getChannelById, saveVideoToDB, getNewsByDate, saveNewsToDB, markNewsAsSelected, deleteVideoFromDB, supabase, fetchVideosFromDB, saveProduction, getIncompleteProductions, getProductionById, updateProductionStatus, uploadAudioToStorage, uploadImageToStorage, getAudioFromStorage, findCachedScript, findCachedScriptWithScenes, findCachedAudio, getAllProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction, verifyStorageBucket, getCompletedProductionsWithVideoInfo, ProductionWithVideoInfo, getUsedNewsIdsForDate, saveCheckpoint, getLastCheckpoint, markStepFailed, saveCachedAudio, updateSegmentStatus, getSegmentsNeedingRegeneration } from './services/supabaseService';
+import { signInWithGoogle, getSession, signOut, getAllChannels, saveChannel, getChannelById, saveVideoToDB, getNewsByDate, saveNewsToDB, markNewsAsSelected, deleteVideoFromDB, supabase, fetchVideosFromDB, saveProduction, getIncompleteProductions, getProductionById, updateProductionStatus, uploadAudioToStorage, uploadImageToStorage, getAudioFromStorage, findCachedScript, findCachedScriptWithScenes, findCachedAudio, getAllProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction, verifyStorageBucket, getCompletedProductionsWithVideoInfo, ProductionWithVideoInfo, getUsedNewsIdsForDate, saveCheckpoint, getLastCheckpoint, markStepFailed, saveCachedAudio, updateSegmentStatus, getSegmentsNeedingRegeneration, getDefaultChannelConfig } from './services/supabaseService';
 import { fetchEconomicNews, generateScript, generateScriptWithScenes, convertScenesToScriptLines, generateSegmentedAudio, generateSegmentedAudioWithCache, generateAudioFromScenes, ExtendedBroadcastSegment, setFindCachedAudioFunction, generateBroadcastVisuals, generateViralMetadata, generateThumbnail, generateThumbnailVariants, generateViralHook, generateVideoSegmentsWithInfiniteTalk, composeVideoWithShotstack, isCompositionAvailable, getCompositionStatus } from './services/geminiService';
 import { uploadVideoToYouTube, deleteVideoFromYouTube } from './services/youtubeService';
 import { ContentCache } from './services/ContentCache';
 import { CostTracker } from './services/CostTracker';
 import { retryVideoGeneration, retryBatch } from './services/retryUtils';
 import { analyzeSegmentResources, SegmentResourceStatus } from './services/storageManager';
+import { logger } from './services/logger';
 import { NewsSelector } from './components/NewsSelector';
 import { BroadcastPlayer } from './components/BroadcastPlayer';
 import { AdminDashboard } from './components/AdminDashboard';
+import { LoginScreen } from './components/LoginScreen';
+import { Header } from './components/Header';
+import { IdleState } from './components/IdleState';
+import { ErrorState } from './components/ErrorState';
+import { ProductionStatus } from './components/ProductionStatus';
+// Shared utilities
+import { EMPTY_VIDEO_ASSETS, normalizeVideoAssets, hasVideoAssets } from './utils/videoAssets';
+import { parseLocalDate, getYesterdayString } from './utils/dateUtils';
 
 // Runtime configuration access
 const getAdminEmail = () => import.meta.env.VITE_ADMIN_EMAIL || window.env?.ADMIN_EMAIL || process.env.ADMIN_EMAIL || "";
 
-// Default Configuration (ChimpNews) - v2.0 Narrative Engine compatible
-const DEFAULT_CONFIG: ChannelConfig = {
+// Fallback Default Configuration (used if system_defaults table doesn't exist)
+// The actual default is loaded from Supabase system_defaults table
+const FALLBACK_DEFAULT_CONFIG: ChannelConfig = {
   channelName: "ChimpNews",
   tagline: "Investing is Bananas",
   country: "USA",
@@ -56,24 +66,7 @@ const DEFAULT_CONFIG: ChannelConfig = {
   studioSetup: "modern podcast room, warm tungsten key light, purple/blue LED accents, acoustic foam panels, Shure SM7B microphones"
 };
 
-const EMPTY_VIDEO_ASSETS: VideoAssets = {
-  intro: null,
-  outro: null,
-  wide: null,
-  hostA: [],
-  hostB: []
-};
-
-const normalizeVideoAssets = (assets?: VideoAssets | null): VideoAssets => ({
-  intro: assets?.intro ?? null,
-  outro: assets?.outro ?? null,
-  wide: assets?.wide ?? null,
-  hostA: assets?.hostA ?? [],
-  hostB: assets?.hostB ?? []
-});
-
-const hasVideoAssets = (assets: VideoAssets): boolean =>
-  Boolean(assets.intro || assets.outro || assets.wide || assets.hostA.length || assets.hostB.length);
+// Note: EMPTY_VIDEO_ASSETS, normalizeVideoAssets, hasVideoAssets are now imported from utils/videoAssets
 
 const App: React.FC = () => {
   // Start at LOGIN state
@@ -85,7 +78,7 @@ const App: React.FC = () => {
 
   // Data State
   const [user, setUser] = useState<UserProfile | null>(null);
-  const [config, setConfig] = useState<ChannelConfig>(DEFAULT_CONFIG);
+  const [config, setConfig] = useState<ChannelConfig>(FALLBACK_DEFAULT_CONFIG);
   const [activeChannel, setActiveChannel] = useState<Channel | null>(null);
   const [channels, setChannels] = useState<Channel[]>([]);
 
@@ -113,25 +106,15 @@ const App: React.FC = () => {
   const [compositionError, setCompositionError] = useState<string | null>(null);
 
   // UI State
-  const getYesterday = () => {
-    const d = new Date();
-    d.setDate(d.getDate() - 1);
-    return d.toISOString().split('T')[0];
-  };
-  const [selectedDate, setSelectedDate] = useState<string>(getYesterday());
+  // Note: getYesterdayString and parseLocalDate are imported from utils/dateUtils
+  const [selectedDate, setSelectedDate] = useState<string>(getYesterdayString());
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
-
-  // Helper function to parse selectedDate consistently (fixes timezone issues)
-  const parseSelectedDate = (dateString: string): Date => {
-    const [year, month, day] = dateString.split('-').map(Number);
-    return new Date(year, month - 1, day, 12, 0, 0); // Noon local time to avoid timezone issues
-  };
 
   // Connect audio cache function on mount
   useEffect(() => {
     // This enables audio caching across the app
     setFindCachedAudioFunction(findCachedAudio);
-    console.log("✅ Audio cache function connected");
+    logger.info('cache', 'Audio cache function connected');
   }, []);
 
   // Fetch stored videos for home page sidebar
@@ -158,6 +141,18 @@ const App: React.FC = () => {
 
   const addLog = (msg: string) => setLogs(prev => [...prev, msg]);
 
+  // Load default channel config from Supabase system_defaults (for new channels)
+  useEffect(() => {
+    const loadDefaultConfig = async () => {
+      const dbDefault = await getDefaultChannelConfig();
+      if (dbDefault) {
+        logger.info('config', 'Default channel config loaded from Supabase');
+        // Note: This is used when creating new channels, not for overriding active channel config
+      }
+    };
+    loadDefaultConfig();
+  }, []);
+
   // Load Channels from DB on mount (channels table is the single source of truth)
   useEffect(() => {
     const loadChannels = async () => {
@@ -166,7 +161,7 @@ const App: React.FC = () => {
       if (allChannels.length > 0) {
         setActiveChannel(allChannels[0]);
         setConfig(allChannels[0].config);
-        console.log("Configuration loaded from channels table", allChannels[0].config);
+        logger.info('channel', 'Configuration loaded from channels table', { channel: allChannels[0].name });
       }
     };
     loadChannels();
@@ -175,7 +170,7 @@ const App: React.FC = () => {
     const verifyStorage = async () => {
       const bucketExists = await verifyStorageBucket();
       if (!bucketExists) {
-        console.warn("⚠️ Storage bucket verification failed. Audio/video uploads may fail.");
+        logger.warn('storage', 'Storage bucket verification failed - uploads may fail');
         addLog("⚠️ Storage bucket 'channel-assets' not found. Please create it in Supabase Dashboard.");
       }
     };
@@ -210,83 +205,21 @@ const App: React.FC = () => {
     };
   }, []);
 
-  // Save Progress to LocalStorage (optimized to avoid quota exceeded)
+  // Set context for CostTracker and ContentCache when channel changes
   useEffect(() => {
-    if (state === AppState.READY || state === AppState.SELECTING_NEWS || state === AppState.PREVIEW || state === AppState.GENERATING_MEDIA || state === AppState.ADMIN_DASHBOARD) {
-      try {
-        // Optimize data before saving: remove large video blobs, limit logs
-        const optimizedVideos = {
-          intro: videos.intro ? (typeof videos.intro === 'string' ? videos.intro : 'url') : null,
-          outro: videos.outro ? (typeof videos.outro === 'string' ? videos.outro : 'url') : null,
-          wide: videos.wide ? (typeof videos.wide === 'string' ? videos.wide : 'url') : null,
-          hostA: videos.hostA.map(v => typeof v === 'string' ? v : 'url'),
-          hostB: videos.hostB.map(v => typeof v === 'string' ? v : 'url')
-        };
-        
-        // Limit logs to last 50 entries to save space
-        const limitedLogs = logs.slice(-50);
-        
-        const progress = {
-          state,
-          allNews: allNews.slice(0, 20), // Limit to 20 news items
-          selectedNews: selectedNews.slice(0, 15), // Limit to 15 selected
-          segments: segments.slice(0, 20), // Limit segments
-          videos: optimizedVideos,
-          viralMeta,
-          selectedDate,
-          logs: limitedLogs
-        };
-        
-        const progressString = JSON.stringify(progress);
-        
-        // Check if data is too large (localStorage limit is ~5-10MB)
-        if (progressString.length > 4 * 1024 * 1024) { // 4MB threshold
-          console.warn('⚠️ Progress data too large, saving minimal state only');
-          const minimalProgress = {
-            state,
-            selectedDate,
-            selectedNews: selectedNews.slice(0, 5).map(n => ({ id: n.id, headline: n.headline }))
-          };
-          localStorage.setItem('chimpNewsProgress', JSON.stringify(minimalProgress));
-        } else {
-          localStorage.setItem('chimpNewsProgress', progressString);
-        }
-      } catch (e: any) {
-        // Handle QuotaExceededError gracefully
-        if (e.name === 'QuotaExceededError' || e.message?.includes('quota')) {
-          console.warn('⚠️ localStorage quota exceeded, clearing old data and saving minimal state');
-          try {
-            // Clear old cache data
-            localStorage.removeItem('chimpnews_cache');
-            // Save minimal state only
-            const minimalProgress = {
-              state,
-              selectedDate,
-              selectedNews: selectedNews.slice(0, 5).map(n => ({ id: n.id, headline: n.headline }))
-            };
-            localStorage.setItem('chimpNewsProgress', JSON.stringify(minimalProgress));
-          } catch (clearError) {
-            console.error('Failed to save even minimal progress:', clearError);
-          }
-        } else {
-          console.error('Error saving progress to localStorage:', e);
-        }
-      }
+    if (activeChannel && user) {
+      CostTracker.setContext(activeChannel.id, user.email);
+      ContentCache.setContext(activeChannel.id);
+      // Preload cache for faster access
+      ContentCache.preload().catch(() => {});
     }
-  }, [state, allNews, selectedNews, segments, videos, viralMeta, selectedDate, logs]);
+  }, [activeChannel, user]);
 
-  // Load Progress
-  useEffect(() => {
-    const saved = localStorage.getItem('chimpNewsProgress');
-    // This effect only runs once on mount, so we check state directly
-    // We need to wait for user to be logged in before restoring.
-  }, []);
-
-  // Restore progress after login and check for abandoned productions
+  // Restore progress after login - check for abandoned productions in Supabase
   // Only run once when user first logs in, not on every state change
   useEffect(() => {
     if (user && state === AppState.IDLE && activeChannel) {
-      // First check for abandoned productions in DB
+      // Check for abandoned productions in DB (Supabase is the source of truth)
       const checkAbandonedProductions = async () => {
         const incomplete = await getIncompleteProductions(activeChannel.id, user.email);
         if (incomplete.length > 0) {
@@ -297,30 +230,6 @@ const App: React.FC = () => {
         }
       };
       checkAbandonedProductions();
-
-      // Also restore from localStorage as fallback
-      // Only restore if we're truly at IDLE (not in the middle of something)
-      const saved = localStorage.getItem('chimpNewsProgress');
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          // Only restore if the saved state indicates work was in progress
-          if (parsed.state === AppState.READY || parsed.state === AppState.SELECTING_NEWS || 
-              parsed.state === AppState.PREVIEW || parsed.state === AppState.GENERATING_MEDIA) {
-            setAllNews(parsed.allNews || []);
-            setSelectedNews(parsed.selectedNews || []);
-            setSegments(parsed.segments || []);
-            setVideos(normalizeVideoAssets(parsed.videos));
-            setViralMeta(parsed.viralMeta || null);
-            setSelectedDate(parsed.selectedDate || getYesterday());
-            setLogs(parsed.logs || []);
-            setState(parsed.state as AppState);
-            addLog("🔄 Restored previous session.");
-          }
-        } catch (e) {
-          console.error("Failed to restore progress", e);
-        }
-      }
     }
   }, [user, activeChannel]); // Only depend on user and activeChannel, not state
 
@@ -332,36 +241,20 @@ const App: React.FC = () => {
     // Note: wasInAdminRef flag is cleared when user explicitly exits admin dashboard via onExit callback
   }, [state]);
 
-  // Persist state when tab becomes hidden (visibility change)
+  // Persist production state to Supabase when tab becomes hidden
   useEffect(() => {
     const handleVisibilityChange = async () => {
       if (document.hidden && activeChannel && user) {
-        // Save ADMIN_DASHBOARD state to localStorage
+        // Track admin dashboard state in memory ref (no localStorage needed)
         if (state === AppState.ADMIN_DASHBOARD) {
           wasInAdminRef.current = true;
-          try {
-            // Save minimal state for admin dashboard
-            const progress = {
-              state,
-              selectedDate,
-              // Don't save large data for admin dashboard
-            };
-            localStorage.setItem('chimpNewsProgress', JSON.stringify(progress));
-            localStorage.setItem('wasInAdmin', 'true');
-            console.log("💾 Saved ADMIN_DASHBOARD state before tab hidden");
-          } catch (e: any) {
-            if (e.name === 'QuotaExceededError' || e.message?.includes('quota')) {
-              console.warn('⚠️ localStorage quota exceeded, skipping save');
-            } else {
-              console.error('Error saving admin state:', e);
-            }
-          }
-          return; // Don't save production state for admin dashboard
+          logger.debug('ui', 'Admin dashboard state tracked in memory');
+          return;
         }
-        // Save current production state to DB before losing it (only if not IDLE or LOGIN)
+        // Save current production state to Supabase before losing it (only if not IDLE or LOGIN)
         if (state !== AppState.IDLE && state !== AppState.LOGIN && 
             (currentProductionId || (state !== AppState.SELECTING_NEWS && selectedNews.length > 0))) {
-          const dateObj = parseSelectedDate(selectedDate);
+          const dateObj = parseLocalDate(selectedDate);
           // Use actual news item IDs (UUIDs) if available, otherwise fall back to empty array
           const newsIds = selectedNews
             .map(n => n.id)
@@ -372,7 +265,7 @@ const App: React.FC = () => {
             channel_id: activeChannel.id,
             news_date: dateObj.toISOString().split('T')[0],
             status: 'in_progress' as const,
-            selected_news_ids: newsIds.length > 0 ? newsIds : [], // Store UUIDs, empty array if no IDs available
+            selected_news_ids: newsIds.length > 0 ? newsIds : [],
             progress_step: productionProgress.current,
             user_id: user.email,
             script: previewScript.length > 0 ? previewScript : undefined,
@@ -384,52 +277,22 @@ const App: React.FC = () => {
           const saved = await saveProduction(productionData, user.email);
           if (saved) {
             setCurrentProductionId(saved.id);
-            console.log("💾 Production state saved before tab hidden");
-            // Silent save - no toast to avoid interrupting user
+            logger.info('production', 'Production state saved before tab hidden', { id: saved.id });
           }
         }
       }
-      // When tab becomes visible again, restore state from localStorage if needed
-      // This prevents the app from switching to home when user returns
+      // When tab becomes visible again, restore admin dashboard state from memory ref
       if (!document.hidden && user && activeChannel) {
-        const saved = localStorage.getItem('chimpNewsProgress');
-        const wasInAdmin = localStorage.getItem('wasInAdmin') === 'true';
-        
-        if (saved) {
-          try {
-            const parsed = JSON.parse(saved);
-            // Always restore ADMIN_DASHBOARD if it was saved, regardless of current state
-            if (parsed.state === AppState.ADMIN_DASHBOARD || wasInAdmin) {
-              // Force restore ADMIN_DASHBOARD state immediately
-              setState(AppState.ADMIN_DASHBOARD);
-              wasInAdminRef.current = true;
-              console.log("🔄 Restored ADMIN_DASHBOARD state when tab became visible");
-              // Don't clear wasInAdmin flag here - only clear when user explicitly exits
-            } else if (state === AppState.IDLE && parsed.state && 
-                       parsed.state !== AppState.IDLE && 
-                       parsed.state !== AppState.LOGIN &&
-                       parsed.state !== AppState.ADMIN_DASHBOARD) {
-              // Only restore other states if we're currently at IDLE
-              setAllNews(parsed.allNews || []);
-              setSelectedNews(parsed.selectedNews || []);
-              setSegments(parsed.segments || []);
-              setVideos(normalizeVideoAssets(parsed.videos));
-              setViralMeta(parsed.viralMeta || null);
-              setSelectedDate(parsed.selectedDate || getYesterday());
-              setLogs(parsed.logs || []);
-              setState(parsed.state as AppState);
-              console.log("🔄 Restored state when tab became visible");
-            }
-          } catch (e) {
-            console.error("Failed to restore state on visibility change", e);
-          }
+        if (wasInAdminRef.current && state !== AppState.ADMIN_DASHBOARD) {
+          setState(AppState.ADMIN_DASHBOARD);
+          logger.debug('ui', 'Restored admin dashboard state on tab visible');
         }
       }
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [state, currentProductionId, activeChannel, user, selectedNews, selectedDate, productionProgress, previewScript, viralMeta, videos, thumbnailDataUrl, thumbnailVariant, allNews, segments, logs]); // Run when user logs in
+  }, [state, currentProductionId, activeChannel, user, selectedNews, selectedDate, productionProgress, previewScript, viralMeta, videos, thumbnailDataUrl, thumbnailVariant]);
 
   // LOGIN LOGIC
   const handleLogin = async () => {
@@ -476,7 +339,7 @@ const App: React.FC = () => {
 
     try {
       // Fix timezone issue: Parse as local date, not UTC
-      const dateObj = parseSelectedDate(selectedDate);
+      const dateObj = parseLocalDate(selectedDate);
       addLog(`📡 ${forceRefresh ? 'Refreshing' : 'Checking for cached'} news for ${dateObj.toLocaleDateString()}...`);
 
       if (!activeChannel) {
@@ -492,16 +355,16 @@ const App: React.FC = () => {
       if (!forceRefresh) {
         // Check if news already exists in database
         fetchedNews = await getNewsByDate(dateObj, activeChannel.id);
-        console.log(`🔍 Database query returned ${fetchedNews.length} news items`);
+        logger.debug('news', `Database query returned ${fetchedNews.length} news items`);
       }
 
       if (fetchedNews.length > 0 && !forceRefresh) {
         addLog(`✅ Found ${fetchedNews.length} cached stories.`);
-        console.log(`📊 News items from DB:`, fetchedNews.map(n => ({ headline: n.headline, hasImage: !!n.imageUrl })));
+        logger.debug('news', 'News items from DB', { count: fetchedNews.length });
       } else {
         addLog(`📡 Scanning financial markets for ${dateObj.toLocaleDateString()} in ${config.country}...`);
         fetchedNews = await fetchEconomicNews(dateObj, config);
-        console.log(`🔍 API returned ${fetchedNews.length} news items`);
+        logger.info('news', `API returned ${fetchedNews.length} news items`);
         addLog(`✅ Found ${fetchedNews.length} potential stories.`);
 
         // Save news to database
@@ -510,9 +373,9 @@ const App: React.FC = () => {
         
         // Verify what was saved
         const verifyNews = await getNewsByDate(dateObj, activeChannel.id);
-        console.log(`✅ Verification: ${verifyNews.length} news items now in database`);
+        logger.debug('news', `Verification: ${verifyNews.length} items in database`);
         if (verifyNews.length !== fetchedNews.length) {
-          console.warn(`⚠️ Mismatch: API returned ${fetchedNews.length} but DB has ${verifyNews.length}`);
+          logger.warn('news', `Mismatch: API=${fetchedNews.length}, DB=${verifyNews.length}`);
         }
         fetchedNews = verifyNews; // Use what's actually in DB
       }
@@ -525,11 +388,11 @@ const App: React.FC = () => {
         addLog(`⚠️ ${usedIds.length} stories already used in other productions (will be shown as unavailable).`);
       }
 
-      console.log(`📰 Final news count to display: ${fetchedNews.length}`);
+      logger.info('news', `Final news count: ${fetchedNews.length}`);
       setAllNews(fetchedNews);
       setState(AppState.SELECTING_NEWS);
     } catch (error) {
-      console.error(error);
+      logger.error('news', 'News fetch failed', { error: (error as Error).message });
       setState(AppState.ERROR);
       addLog("💥 Scraper failure: " + (error as Error).message);
     }
@@ -542,7 +405,7 @@ const App: React.FC = () => {
     if (!activeChannel) return;
 
     // Mark selected news in database
-    const dateObj = parseSelectedDate(selectedDate);
+    const dateObj = parseLocalDate(selectedDate);
     await markNewsAsSelected(dateObj, selection, activeChannel.id);
     addLog(`📌 Marked ${selection.length} stories as selected.`);
 
@@ -567,7 +430,7 @@ const App: React.FC = () => {
   ): Promise<string | null> => {
     if (!activeChannel || !user) return null;
 
-    const dateObj = parseSelectedDate(selectedDate);
+    const dateObj = parseLocalDate(selectedDate);
     // Use actual news item IDs (UUIDs) if available, otherwise fall back to empty array to avoid UUID type errors
     const newsIds = selectedNews
       .map(n => n.id)
@@ -672,11 +535,10 @@ const App: React.FC = () => {
     setConfig(currentConfig);
     setActiveChannel(freshChannel);
     
-    console.log(`🔄 [Production] Loaded fresh config from Supabase:`);
-    console.log(`🔄 [Production] Host A voice: "${currentConfig?.characters?.hostA?.voiceName}"`);
-    console.log(`🔄 [Production] Host B voice: "${currentConfig?.characters?.hostB?.voiceName}"`);
-    console.log(`🔄 [Production] Host A image: "${currentConfig?.seedImages?.hostASoloUrl || 'not set'}"`);
-    console.log(`🔄 [Production] Host B image: "${currentConfig?.seedImages?.hostBSoloUrl || 'not set'}"`);
+    logger.info('production', 'Fresh config loaded from Supabase', {
+      hostAVoice: currentConfig?.characters?.hostA?.voiceName,
+      hostBVoice: currentConfig?.characters?.hostB?.voiceName
+    });
 
     // Clear logs when starting a new production
     setLogs([]);
@@ -1028,7 +890,7 @@ const App: React.FC = () => {
                         seg.text,
                         voiceName,
                         (seg as any).audioUrl,
-                        undefined,
+                        seg.audioDuration, // Include duration for video timing
                         productionId
                       );
                     }
@@ -1036,6 +898,9 @@ const App: React.FC = () => {
                       speaker: seg.speaker,
                       text: seg.text,
                       audioUrl: (seg as any).audioUrl,
+                      audioDuration: seg.audioDuration, // Pass duration to segment
+                      sceneTitle: seg.sceneTitle, // Title for lower-third overlay
+                      sceneIndex: seg.sceneIndex, // Scene index for ordering
                       hostA_audioUrl: extSeg.hostA_audioUrl,
                       hostB_audioUrl: extSeg.hostB_audioUrl,
                       order: extSeg.order,
@@ -1055,7 +920,8 @@ const App: React.FC = () => {
                     {
                       text: seg.text,
                       voiceName,
-                      channelId: activeChannel.id
+                      channelId: activeChannel.id,
+                      durationSeconds: seg.audioDuration // Include duration for video timing
                     }
                   );
                   
@@ -1064,6 +930,12 @@ const App: React.FC = () => {
                   let hostB_audioUrl: string | undefined;
                   
                   if (isBothScene) {
+                    // Estimate duration for each host based on text length (~2.5 words/sec)
+                    const hostAWordCount = (extSeg.hostA_text || '').split(/\s+/).length;
+                    const hostBWordCount = (extSeg.hostB_text || '').split(/\s+/).length;
+                    const hostADuration = Math.max(1, hostAWordCount / 2.5);
+                    const hostBDuration = Math.max(1, hostBWordCount / 2.5);
+                    
                     // Upload Host A audio
                     if (extSeg.hostA_audioBase64) {
                       hostA_audioUrl = await uploadAudioToStorage(
@@ -1073,7 +945,8 @@ const App: React.FC = () => {
                         {
                           text: extSeg.hostA_text || '',
                           voiceName: currentConfig.characters.hostA.voiceName,
-                          channelId: activeChannel.id
+                          channelId: activeChannel.id,
+                          durationSeconds: hostADuration // Include duration for video timing
                         }
                       ) || undefined;
                       
@@ -1084,7 +957,7 @@ const App: React.FC = () => {
                           extSeg.hostA_text,
                           currentConfig.characters.hostA.voiceName,
                           hostA_audioUrl,
-                          undefined,
+                          hostADuration, // Include duration for video timing
                           productionId
                         );
                       }
@@ -1099,7 +972,8 @@ const App: React.FC = () => {
                         {
                           text: extSeg.hostB_text || '',
                           voiceName: currentConfig.characters.hostB.voiceName,
-                          channelId: activeChannel.id
+                          channelId: activeChannel.id,
+                          durationSeconds: hostBDuration // Include duration for video timing
                         }
                       ) || undefined;
                       
@@ -1110,19 +984,22 @@ const App: React.FC = () => {
                           extSeg.hostB_text,
                           currentConfig.characters.hostB.voiceName,
                           hostB_audioUrl,
-                          undefined,
+                          hostBDuration, // Include duration for video timing
                           productionId
                         );
                       }
                     }
                     
-                    console.log(`✅ [Audio] Scene ${idx}: Uploaded both host audios (A: ${hostA_audioUrl ? 'OK' : 'FAIL'}, B: ${hostB_audioUrl ? 'OK' : 'FAIL'})`);
+                    logger.debug('audio', `Scene ${idx}: Host audios uploaded`, { hostA: !!hostA_audioUrl, hostB: !!hostB_audioUrl });
                   }
                   
                   return {
                     speaker: seg.speaker,
                     text: seg.text,
                     audioUrl,
+                    audioDuration: seg.audioDuration, // Include duration for video timing
+                    sceneTitle: seg.sceneTitle, // Title for lower-third overlay (from Narrative Engine)
+                    sceneIndex: seg.sceneIndex, // Scene index for ordering
                     hostA_audioUrl,
                     hostB_audioUrl,
                     hostA_text: extSeg.hostA_text,
@@ -1175,7 +1052,7 @@ const App: React.FC = () => {
       // Generate SEO metadata in parallel while we prepare for video generation
       const mainContext = finalNews[0]?.headline || "News";
       
-      const metaTask = generateViralMetadata(finalNews, currentConfig, parseSelectedDate(selectedDate))
+      const metaTask = generateViralMetadata(finalNews, currentConfig, parseLocalDate(selectedDate))
         .then(async (meta) => {
           setViralMeta(meta);
           addLog("✅ SEO Metadata generated.");
@@ -1478,7 +1355,7 @@ const App: React.FC = () => {
       
       // Check if this was an intentional abort
       if (errorMessage === 'PRODUCTION_ABORTED') {
-        console.log('🛑 Production was aborted by user');
+        logger.info('production', 'Production aborted by user');
         setState(AppState.IDLE);
         addLog("🛑 Production aborted successfully.");
         
@@ -1489,7 +1366,7 @@ const App: React.FC = () => {
         return;
       }
       
-      console.error(error);
+      logger.error('production', 'Production failure', { error: errorMessage });
       setState(AppState.ERROR);
       addLog("💥 Production failure: " + errorMessage);
       
@@ -1519,7 +1396,7 @@ const App: React.FC = () => {
       setCurrentProductionId(fullProduction.id);
 
       // Restore news selection (we need to fetch news items by IDs)
-      const dateObj = parseSelectedDate(fullProduction.news_date);
+      const dateObj = parseLocalDate(fullProduction.news_date);
       setSelectedDate(fullProduction.news_date);
       const allNewsItems = await getNewsByDate(dateObj, activeChannel.id);
       
@@ -1530,7 +1407,7 @@ const App: React.FC = () => {
       // Restore checkpoint data if available
       const checkpoint = await getLastCheckpoint(fullProduction.id);
       if (checkpoint) {
-        console.log('📋 Restored checkpoint data:', Object.keys(checkpoint));
+        logger.debug('production', 'Restored checkpoint data', { keys: Object.keys(checkpoint) });
       }
       
       // Match selected news by IDs (UUIDs) if available, otherwise fall back to headlines for backward compatibility
@@ -1550,7 +1427,7 @@ const App: React.FC = () => {
       
       toast.success('Production resumed!');
     } catch (error) {
-      console.error('Error resuming production:', error);
+      logger.error('production', 'Error resuming production', { error: (error as Error).message });
       toast.error('Failed to resume production');
     }
   };
@@ -1576,7 +1453,7 @@ const App: React.FC = () => {
           const response = await fetch(thumbnailDataUrl);
           thumbnailBlob = await response.blob();
         } catch (e) {
-          console.warn('Failed to convert thumbnail to blob:', e);
+          logger.warn('upload', 'Failed to convert thumbnail to blob', { error: (e as Error).message });
           // Continue without thumbnail
         }
       }
@@ -1602,7 +1479,7 @@ const App: React.FC = () => {
             thumbnailDataUrl || undefined
           );
         } catch (e) {
-          console.error('Failed to save video to database:', e);
+          logger.error('db', 'Failed to save video to database', { error: (e as Error).message });
           // Don't fail the upload if DB save fails
         }
       }
@@ -1627,19 +1504,17 @@ const App: React.FC = () => {
       return;
     }
 
-    console.log(`[APP] Delete requested for video: ${videoId}, YouTube ID: ${youtubeId}`);
+    logger.info('video', 'Delete requested', { videoId, youtubeId });
     try {
       // Delete from YouTube if it was uploaded
       if (youtubeId && user?.accessToken) {
-        console.log(`[APP] Deleting from YouTube: ${youtubeId}`);
+        logger.debug('youtube', 'Deleting from YouTube', { youtubeId });
         try {
           await deleteVideoFromYouTube(youtubeId, user.accessToken);
-          console.log(`[APP] YouTube deletion successful`);
+          logger.info('youtube', 'YouTube deletion successful');
         } catch (ytError) {
-          console.warn(`[APP] YouTube deletion failed:`, ytError);
+          logger.warn('youtube', 'YouTube deletion failed', { error: (ytError as Error).message });
           // If it's a 404 (Not Found) or 403 (Forbidden - maybe lost access), we should probably still delete from DB
-          // For now, we'll assume any error means we can't delete it there, but we SHOULD delete it here to clean up "ghost" records.
-          // We'll notify the user but proceed.
           const msg = (ytError as Error).message;
           if (msg.includes('404') || msg.includes('not found')) {
             toast.error('Video not found on YouTube (already deleted?), removing from database...');
@@ -1650,15 +1525,15 @@ const App: React.FC = () => {
       }
 
       // Delete from database
-      console.log(`[APP] Deleting from database: ${videoId}`);
+      logger.debug('db', 'Deleting from database', { videoId });
       await deleteVideoFromDB(videoId);
-      console.log(`[APP] Database deletion successful`);
+      logger.info('db', 'Database deletion successful');
 
       // Show success message
       toast.success('Video deleted successfully!');
 
     } catch (e) {
-      console.error("[APP] Delete failed:", e);
+      logger.error('video', 'Delete failed', { error: (e as Error).message });
       const errorMsg = (e as Error).message || "Unknown error";
       toast.error(`Failed to delete video: ${errorMsg}`);
       throw e; // Re-throw to ensure AdminDashboard knows it failed
@@ -1668,12 +1543,7 @@ const App: React.FC = () => {
   const handleChannelSwitch = async (channel: Channel) => {
     if (!channel) return;
     
-    // DEBUG: Log the config being loaded from channel
-    console.log(`📥 [Load DEBUG] Loading channel "${channel.name}" config:`);
-    console.log(`📥 [Load DEBUG] Host A (${channel.config?.characters?.hostA?.name}): voiceName = "${channel.config?.characters?.hostA?.voiceName}"`);
-    console.log(`📥 [Load DEBUG] Host B (${channel.config?.characters?.hostB?.name}): voiceName = "${channel.config?.characters?.hostB?.voiceName}"`);
-    console.log(`📥 [Load DEBUG] Host A seedImage URL: ${channel.config?.seedImages?.hostASoloUrl || 'not set'}`);
-    console.log(`📥 [Load DEBUG] Host B seedImage URL: ${channel.config?.seedImages?.hostBSoloUrl || 'not set'}`);
+    logger.info('channel', `Switching to "${channel.name}"`);
     
     // Reset all state when switching channels (including logs to avoid showing logs from deleted productions)
     setActiveChannel(channel);
@@ -1691,16 +1561,13 @@ const App: React.FC = () => {
     setCurrentScriptWithScenes(null); // v2.0 Narrative Engine
     setUploadStatus(null);
     setCurrentProductionId(null); // Clear production ID when switching channels
-    
-    // Clear localStorage to avoid restoring stale state
-    localStorage.removeItem('chimpNewsProgress');
 
     // Fetch videos for new channel
     try {
       const vids = await fetchVideosFromDB(channel.id);
       setStoredVideos(vids.slice(0, 4));
     } catch (error) {
-      console.error('Error fetching videos for channel:', error);
+      logger.error('channel', 'Error fetching videos', { error: (error as Error).message });
       setStoredVideos([]);
     }
 
@@ -1710,7 +1577,7 @@ const App: React.FC = () => {
         const prods = await getCompletedProductionsWithVideoInfo(channel.id, user.email, 10);
         setCompletedProductions(prods.slice(0, 4));
       } catch (error) {
-        console.error('Error fetching productions for channel:', error);
+        logger.error('channel', 'Error fetching productions', { error: (error as Error).message });
         setCompletedProductions([]);
       }
     }
@@ -1796,7 +1663,7 @@ const App: React.FC = () => {
 
       toast.success('Production loaded. Click PUBLISH in the player to upload to YouTube.');
     } catch (error) {
-      console.error('Error loading production for publish:', error);
+      logger.error('production', 'Error loading production for publish', { error: (error as Error).message });
       toast.error(`Failed to load production: ${(error as Error).message}`);
     }
   };
@@ -1893,33 +1760,7 @@ const App: React.FC = () => {
   // LOGIN SCREEN
   // --------------------------------------------------------------------------------
   if (state === AppState.LOGIN) {
-    return (
-      <div className="min-h-screen bg-[#0f0f0f] text-white flex flex-col items-center justify-center font-sans relative overflow-hidden">
-        <div className="absolute inset-0 bg-[url('https://image.pollinations.ai/prompt/jungle%20news%20studio%20cyberpunk?nologo=true')] bg-cover opacity-20"></div>
-        <div className="z-10 bg-black/80 p-12 rounded-2xl border border-yellow-600/30 backdrop-blur-md shadow-2xl flex flex-col items-center max-w-md w-full text-center">
-          <div className="w-24 h-24 bg-gradient-to-br from-yellow-500 to-red-600 rounded-full flex items-center justify-center shadow-[0_0_30px_rgba(250,204,21,0.5)] mb-6 animate-pulse">
-            <span className="text-5xl">🐵</span>
-          </div>
-          <h1 className="text-4xl font-headline text-white mb-2">CHIMP<span className="text-yellow-500">NEWS</span></h1>
-          <p className="text-gray-400 mb-8 font-mono text-sm tracking-widest uppercase">Restricted Access // Admin Only</p>
-
-          {loginError && (
-            <div className="bg-red-900/50 border border-red-500 text-red-200 text-xs p-3 rounded mb-4 w-full">
-              {loginError}
-            </div>
-          )}
-
-          <button
-            onClick={handleLogin}
-            className="bg-white text-black font-bold py-3 px-8 rounded-full flex items-center gap-3 hover:bg-gray-200 transition-transform hover:scale-105"
-          >
-            <svg className="w-5 h-5" viewBox="0 0 24 24"><path fill="currentColor" d="M21.35 11.1h-9.17v2.73h6.51c-.33 3.81-3.5 5.44-6.5 5.44C8.51 19.27 5 15.68 5 11.23S8.51 3.18 12.18 3.18c2.69 0 4.28 1.29 5.3 2.29l2.2-2.2c-1.99-1.89-4.83-2.93-7.5-2.93C4.94.34 0 5.23 0 11.23s4.94 10.89 12.18 10.89c6.05 0 10.18-4.27 10.18-10.18 0-.57-.06-1.13-.13-1.66h-.88z" /></svg>
-            Sign in with Google
-          </button>
-          <p className="mt-4 text-xs text-gray-500">Authorized: {getAdminEmail()}</p>
-        </div>
-      </div>
-    );
+    return <LoginScreen onLogin={handleLogin} error={loginError} />;
   }
 
   // --------------------------------------------------------------------------------
@@ -1933,7 +1774,6 @@ const App: React.FC = () => {
         onUpdateConfig={handleConfigUpdate}
         onExit={() => {
           wasInAdminRef.current = false;
-          localStorage.removeItem('wasInAdmin');
           setState(AppState.IDLE);
         }}
         activeChannel={activeChannel}
@@ -1944,7 +1784,10 @@ const App: React.FC = () => {
           setConfig(channel.config);
           // Also update the channel in the channels array
           setChannels(prev => prev.map(c => c.id === channel.id ? channel : c));
-          console.log(`📥 [Channel Update] Config loaded from Supabase: Host A voice = "${channel.config?.characters?.hostA?.voiceName}", Host B voice = "${channel.config?.characters?.hostB?.voiceName}"`);
+          logger.info('channel', 'Config loaded from Supabase', {
+            hostAVoice: channel.config?.characters?.hostA?.voiceName,
+            hostBVoice: channel.config?.characters?.hostB?.voiceName
+          });
         }}
         onDeleteVideo={handleDeleteVideo}
         onResumeProduction={resumeProduction}
@@ -2074,7 +1917,7 @@ const App: React.FC = () => {
               <div className="p-4 bg-[#0a0a0a] h-full overflow-y-auto">
                 <NewsSelector
                   news={allNews}
-                  date={parseSelectedDate(selectedDate)}
+                  date={parseLocalDate(selectedDate)}
                   onConfirmSelection={handleNewsSelection}
                   usedNewsIds={usedNewsIds}
                   isRefreshing={isRefreshingNews}
@@ -2128,7 +1971,7 @@ const App: React.FC = () => {
                 segments={segments}
                 videos={videos}
                 news={allNews}
-                displayDate={parseSelectedDate(selectedDate)}
+                displayDate={parseLocalDate(selectedDate)}
                 onUploadToYouTube={handleYouTubeUpload}
                 config={config}
               />
@@ -2225,7 +2068,7 @@ const App: React.FC = () => {
 
             <div className="bg-[#272727] rounded-xl p-4 text-sm hover:bg-[#3f3f3f] transition cursor-pointer">
               <div className="font-bold mb-2">
-                {new Number(Math.floor(Math.random() * 50000) + 1000).toLocaleString()} views • {parseSelectedDate(selectedDate).toLocaleDateString()}
+                {new Number(Math.floor(Math.random() * 50000) + 1000).toLocaleString()} views • {parseLocalDate(selectedDate).toLocaleDateString()}
               </div>
               {viralMeta ? (
                 <>

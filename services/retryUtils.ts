@@ -1,38 +1,77 @@
+/**
+ * Retry Utilities
+ * 
+ * Provides retry logic with exponential backoff for API calls
+ * and batch operations that may fail intermittently.
+ */
+
+import { RETRY, LIMITS, ERRORS } from '../constants';
+
 export interface RetryOptions {
     maxRetries?: number;
     baseDelay?: number;
     maxDelay?: number;
-    onRetry?: (attempt: number, error: any) => void;
-    shouldRetry?: (error: any) => boolean; // Custom retry condition
+    onRetry?: (attempt: number, error: Error) => void;
+    shouldRetry?: (error: Error) => boolean;
 }
 
+export interface BatchResult<T, R> {
+    item: T;
+    result: R | null;
+    error: Error | null;
+}
+
+/**
+ * Check if an error message contains non-retryable error indicators
+ */
+const isNonRetryableError = (error: Error): boolean => {
+    const message = error.message?.toLowerCase() || '';
+    return message.includes(ERRORS.UNAUTHORIZED) ||
+           message.includes(ERRORS.INVALID_KEY) ||
+           message.includes(ERRORS.PERMISSION_DENIED) ||
+           message.includes(ERRORS.NOT_FOUND);
+};
+
+/**
+ * Check if an error message indicates a retryable condition
+ */
+const isRetryableError = (error: Error): boolean => {
+    const message = error.message?.toLowerCase() || '';
+    return message.includes(ERRORS.TIMEOUT) ||
+           message.includes(ERRORS.NETWORK) ||
+           message.includes(ERRORS.RATE_LIMIT) ||
+           message.includes('503') ||
+           message.includes('502') ||
+           message.includes('500');
+};
+
+/**
+ * Retry an async function with exponential backoff
+ */
 export async function retryWithBackoff<T>(
     fn: () => Promise<T>,
     options: RetryOptions = {}
 ): Promise<T> {
     const {
-        maxRetries = 3,
-        baseDelay = 1000,
-        maxDelay = 10000,
+        maxRetries = LIMITS.MAX_RETRIES,
+        baseDelay = RETRY.BASE_DELAY_MS,
+        maxDelay = RETRY.MAX_DELAY_MS,
         onRetry,
         shouldRetry
     } = options;
 
-    let lastError: any;
+    let lastError: Error = new Error('Unknown error');
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
         try {
             return await fn();
-        } catch (error: any) {
-            lastError = error;
+        } catch (error) {
+            const err = error instanceof Error ? error : new Error(String(error));
+            lastError = err;
 
             // Don't retry on certain errors
-            if (error.message?.includes('unauthorized') ||
-                error.message?.includes('invalid key') ||
-                error.message?.includes('permission denied') ||
-                error.message?.includes('not found') ||
-                (shouldRetry && !shouldRetry(error))) {
-                throw error;
+            if (isNonRetryableError(err) || (shouldRetry && !shouldRetry(err))) {
+                throw err;
             }
 
             if (attempt < maxRetries - 1) {
@@ -43,10 +82,10 @@ export async function retryWithBackoff<T>(
 
                 console.log(
                     `⚠️ Retry ${attempt + 1}/${maxRetries} after ${delay}ms:`,
-                    error.message?.substring(0, 100)
+                    err.message?.substring(0, 100)
                 );
 
-                onRetry?.(attempt + 1, error);
+                onRetry?.(attempt + 1, err);
                 await new Promise(resolve => setTimeout(resolve, delay));
             }
         }
@@ -63,57 +102,51 @@ export async function retryVideoGeneration<T>(
     fn: () => Promise<T>,
     options: {
         maxRetries?: number;
-        onFailure?: (error: any, attempt: number) => void;
-        continueOnError?: boolean; // If true, return null on final failure instead of throwing
+        onFailure?: (error: Error, attempt: number) => void;
+        continueOnError?: boolean;
     } = {}
 ): Promise<T | null> {
     const {
-        maxRetries = 3,
+        maxRetries = LIMITS.MAX_VIDEO_RETRIES,
         onFailure,
         continueOnError = false
     } = options;
 
-    let lastError: any;
+    let lastError: Error = new Error('Unknown error');
+    
     for (let attempt = 0; attempt < maxRetries; attempt++) {
         try {
             return await fn();
-        } catch (error: any) {
-            lastError = error;
+        } catch (error) {
+            const err = error instanceof Error ? error : new Error(String(error));
+            lastError = err;
             
             // Don't retry on certain errors
-            if (error.message?.includes('unauthorized') ||
-                error.message?.includes('invalid key') ||
-                error.message?.includes('permission denied') ||
-                error.message?.includes('not found')) {
+            if (isNonRetryableError(err)) {
                 if (continueOnError) {
-                    onFailure?.(error, attempt + 1);
+                    onFailure?.(err, attempt + 1);
                     return null;
                 }
-                throw error;
+                throw err;
             }
 
             // Check if should retry
-            const message = error.message?.toLowerCase() || '';
-            const shouldRetry = message.includes('timeout') ||
-                               message.includes('network') ||
-                               message.includes('rate limit') ||
-                               message.includes('503') ||
-                               message.includes('502') ||
-                               message.includes('500');
-
-            if (attempt < maxRetries - 1 && shouldRetry) {
-                const delay = Math.min(2000 * Math.pow(2, attempt), 30000);
+            if (attempt < maxRetries - 1 && isRetryableError(err)) {
+                const delay = Math.min(
+                    RETRY.VIDEO_BASE_DELAY_MS * Math.pow(2, attempt), 
+                    RETRY.VIDEO_MAX_DELAY_MS
+                );
                 console.log(`🔄 Retrying video generation (attempt ${attempt + 1}/${maxRetries}) after ${delay}ms...`);
-                onFailure?.(error, attempt + 1);
+                onFailure?.(err, attempt + 1);
                 await new Promise(resolve => setTimeout(resolve, delay));
             } else {
                 // No more retries
                 if (continueOnError) {
                     console.warn(`⚠️ Video generation failed after ${attempt + 1} attempts, continuing...`);
-                    onFailure?.(error, attempt + 1);
+                    onFailure?.(err, attempt + 1);
                     return null;
                 }
-                throw error;
+                throw err;
             }
         }
     }
@@ -129,22 +162,22 @@ export async function retryVideoGeneration<T>(
  * Execute multiple operations with retry, continuing even if some fail
  * Returns array of results with null for failed items
  */
-export async function retryBatch<T>(
+export async function retryBatch<T, R>(
     items: T[],
-    fn: (item: T, index: number) => Promise<any>,
+    fn: (item: T, index: number) => Promise<R>,
     options: {
         maxRetries?: number;
-        onItemFailure?: (item: T, index: number, error: any) => void;
-        concurrency?: number; // Process N items at a time
+        onItemFailure?: (item: T, index: number, error: Error) => void;
+        concurrency?: number;
     } = {}
-): Promise<Array<{ item: T; result: any | null; error: any | null }>> {
+): Promise<BatchResult<T, R>[]> {
     const {
         maxRetries = 2,
         onItemFailure,
-        concurrency = 3
+        concurrency = LIMITS.BATCH_CONCURRENCY
     } = options;
 
-    const results: Array<{ item: T; result: any | null; error: any | null }> = [];
+    const results: BatchResult<T, R>[] = [];
     
     // Process in batches
     for (let i = 0; i < items.length; i += concurrency) {
@@ -158,20 +191,23 @@ export async function retryBatch<T>(
                         () => fn(item, globalIndex),
                         {
                             maxRetries,
-                            baseDelay: 1000,
-                            maxDelay: 10000
+                            baseDelay: RETRY.BASE_DELAY_MS,
+                            maxDelay: RETRY.MAX_DELAY_MS
                         }
                     );
                     return { item, result, error: null };
                 } catch (error) {
-                    onItemFailure?.(item, globalIndex, error);
-                    return { item, result: null, error };
+                    const err = error instanceof Error ? error : new Error(String(error));
+                    onItemFailure?.(item, globalIndex, err);
+                    return { item, result: null, error: err };
                 }
             })
         );
 
         results.push(...batchResults.map((r, idx) => 
-            r.status === 'fulfilled' ? r.value : { item: batch[idx], result: null, error: r.reason }
+            r.status === 'fulfilled' 
+                ? r.value 
+                : { item: batch[idx], result: null, error: r.reason instanceof Error ? r.reason : new Error(String(r.reason)) }
         ));
     }
 

@@ -1451,23 +1451,32 @@ const createTextHash = (text: string): string => {
 };
 
 /**
+ * Cached audio result with duration
+ */
+export interface CachedAudioResult {
+  audioBase64: string;
+  durationSeconds: number | null;
+}
+
+/**
  * Find cached audio using dedicated audio_cache table (fast lookup)
+ * Returns both the audio data and duration for accurate video timing
  */
 export const findCachedAudio = async (
   text: string,
   voiceName: string,
   channelId: string
-): Promise<string | null> => {
+): Promise<CachedAudioResult | null> => {
   if (!supabase) return null;
 
   try {
     const textHash = createTextHash(text);
 
     // First try dedicated audio_cache table (fast)
-    // Use maybeSingle() instead of single() to avoid 406 error when no results found
+    // Include duration_seconds for accurate video timing!
     const { data: cached, error: cacheError } = await supabase
       .from('audio_cache')
-      .select('audio_url, use_count')
+      .select('audio_url, use_count, duration_seconds')
       .eq('channel_id', channelId)
       .eq('text_hash', textHash)
       .eq('voice_name', voiceName)
@@ -1490,8 +1499,11 @@ export const findCachedAudio = async (
       // Load audio from storage
       const audioBase64 = await getAudioFromStorage(cached.audio_url);
       if (audioBase64) {
-        console.log(`✅ Found cached audio in audio_cache table (used ${cached.use_count + 1} times)`);
-        return audioBase64;
+        console.log(`✅ Found cached audio in audio_cache table (used ${cached.use_count + 1} times, duration: ${cached.duration_seconds}s)`);
+        return {
+          audioBase64,
+          durationSeconds: cached.duration_seconds || null
+        };
       }
     }
 
@@ -1520,8 +1532,11 @@ export const findCachedAudio = async (
             const audioBase64 = await getAudioFromStorage(segment.audioUrl);
             if (audioBase64) {
               console.log("✅ Found cached audio in productions (legacy)");
-              // Optionally migrate to audio_cache table
-              return audioBase64;
+              // Legacy productions don't have duration, return null for duration
+              return {
+                audioBase64,
+                durationSeconds: (segment as any).audioDuration || null
+              };
             }
           }
         }
@@ -2584,6 +2599,77 @@ export const saveThumbnailToCache = async (
     return true;
   } catch (e) {
     console.error("Error in saveThumbnailToCache:", e);
+    return false;
+  }
+};
+
+// =============================================================================================
+// SYSTEM DEFAULTS
+// =============================================================================================
+
+/**
+ * Get a system default value from the system_defaults table
+ */
+export const getSystemDefault = async <T>(key: string): Promise<T | null> => {
+  if (!supabase) return null;
+
+  try {
+    const { data, error } = await supabase
+      .from('system_defaults')
+      .select('value')
+      .eq('key', key)
+      .maybeSingle();
+
+    if (error) {
+      // Table might not exist
+      if (error.code === '42P01' || error.message?.includes('system_defaults')) {
+        console.warn('⚠️ system_defaults table not found');
+        return null;
+      }
+      console.error('Error fetching system default:', error);
+      return null;
+    }
+
+    return data?.value as T || null;
+  } catch (e) {
+    console.error('Error in getSystemDefault:', e);
+    return null;
+  }
+};
+
+/**
+ * Get the default channel configuration from system_defaults
+ */
+export const getDefaultChannelConfig = async (): Promise<ChannelConfig | null> => {
+  return getSystemDefault<ChannelConfig>('default_channel_config');
+};
+
+/**
+ * Set a system default value
+ */
+export const setSystemDefault = async <T>(key: string, value: T, description?: string): Promise<boolean> => {
+  if (!supabase) return false;
+
+  try {
+    const { error } = await supabase
+      .from('system_defaults')
+      .upsert({
+        key,
+        value,
+        description: description || null,
+        updated_at: new Date().toISOString()
+      }, {
+        onConflict: 'key'
+      });
+
+    if (error) {
+      console.error('Error setting system default:', error);
+      return false;
+    }
+
+    return true;
+  } catch (e) {
+    console.error('Error in setSystemDefault:', e);
     return false;
   }
 };

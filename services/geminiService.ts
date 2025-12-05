@@ -172,6 +172,8 @@ interface InfiniteTalkVideoOptions {
     shot: ShotType;
     scenePrompt?: string; // Prompt from Scene Builder
   };
+  // Duration from audio for accurate video timing
+  audioDuration?: number; // Duration in seconds
 }
 
 /**
@@ -185,7 +187,7 @@ interface InfiniteTalkVideoOptions {
  */
 const generateInfiniteTalkVideo = async (
   options: InfiniteTalkVideoOptions
-): Promise<{ url: string | null; fromCache: boolean }> => {
+): Promise<{ url: string | null; fromCache: boolean; durationSeconds?: number }> => {
   const { 
     channelId, 
     productionId, 
@@ -202,7 +204,8 @@ const generateInfiniteTalkVideo = async (
     hostA_audioUrl,  // Separate audio for Host A (for "both" scenes)
     hostB_audioUrl,  // Separate audio for Host B (for "both" scenes)
     order: providedOrder,  // Who speaks first
-    sceneMetadata
+    sceneMetadata,
+    audioDuration  // Duration from audio for accurate timing
   } = options;
 
   // Determine video type and model based on scene metadata or speaker
@@ -253,15 +256,15 @@ const generateInfiniteTalkVideo = async (
     try {
       const videoUrl = await pollInfiniteTalkTask(pendingTask.taskId);
       if (videoUrl) {
-        // Update task to completed
-        await updateVideoTaskCompleted(pendingTask.taskId, videoUrl);
+        // Update task to completed with duration from audio
+        await updateVideoTaskCompleted(pendingTask.taskId, videoUrl, audioDuration);
         
         // Track cost (estimate based on typical segment)
         const baseCost = resolution === '720p' ? INFINITETALK_COST_720P : INFINITETALK_COST_480P;
         CostTracker.track('video', 'infinitetalk-resumed', baseCost);
         
-        console.log(`✅ [InfiniteTalk] Resumed task completed for segment ${segmentIndex}`);
-        return { url: videoUrl, fromCache: false };
+        console.log(`✅ [InfiniteTalk] Resumed task completed for segment ${segmentIndex} (duration: ${audioDuration}s)`);
+        return { url: videoUrl, fromCache: false, durationSeconds: audioDuration };
       }
     } catch (resumeError) {
       console.warn(`⚠️ [InfiniteTalk] Failed to resume task ${pendingTask.taskId}:`, (resumeError as Error).message);
@@ -406,11 +409,12 @@ CRITICAL: This is NOT a human being. This is an animated/CGI character as descri
       const cost = useMultiModel ? baseCost * 1.2 : baseCost; // Multi is ~20% more
       CostTracker.track('video', useMultiModel ? 'infinitetalk-multi' : 'infinitetalk-single', cost);
 
-      // Update task to completed (instead of inserting new record)
-      await updateVideoTaskCompleted(taskId, videoUrl);
+      // Update task to completed with duration from audio
+      // Video duration = audio duration (InfiniteTalk syncs to audio)
+      await updateVideoTaskCompleted(taskId, videoUrl, audioDuration);
 
-      console.log(`✅ [${modelName}] Video generated and cached for segment ${segmentIndex}`);
-      return { url: videoUrl, fromCache: false };
+      console.log(`✅ [${modelName}] Video generated and cached for segment ${segmentIndex} (duration: ${audioDuration}s)`);
+      return { url: videoUrl, fromCache: false, durationSeconds: audioDuration };
     } else {
       // Polling completed but no URL - mark as failed
       await updateVideoTaskFailed(taskId, 'Polling completed but no video URL returned');
@@ -565,9 +569,15 @@ export const generateViralMetadata = async (news: NewsItem[], config: ChannelCon
 };
 
 // Helper function to import findCachedAudio dynamically to avoid circular dependency
-let findCachedAudioFn: ((text: string, voiceName: string, channelId: string) => Promise<string | null>) | null = null;
+// Now returns { audioBase64, durationSeconds } for accurate video timing
+interface CachedAudioResult {
+  audioBase64: string;
+  durationSeconds: number | null;
+}
 
-export const setFindCachedAudioFunction = (fn: (text: string, voiceName: string, channelId: string) => Promise<string | null>) => {
+let findCachedAudioFn: ((text: string, voiceName: string, channelId: string) => Promise<CachedAudioResult | null>) | null = null;
+
+export const setFindCachedAudioFunction = (fn: (text: string, voiceName: string, channelId: string) => Promise<CachedAudioResult | null>) => {
   findCachedAudioFn = fn;
 };
 
@@ -597,13 +607,14 @@ export interface ExtendedBroadcastSegment extends BroadcastSegment {
 
 /**
  * Generate a single audio file for a text using TTS
+ * Returns audio data AND duration for accurate video timing
  */
 const generateSingleAudio = async (
   text: string,
   voiceName: string,
   channelId: string,
   label: string
-): Promise<{ audioBase64: string; fromCache: boolean; audioUrl?: string }> => {
+): Promise<{ audioBase64: string; fromCache: boolean; audioUrl?: string; durationSeconds?: number }> => {
   // Validate input text before processing
   const trimmedText = text?.trim() || '';
   if (!trimmedText) {
@@ -613,17 +624,28 @@ const generateSingleAudio = async (
   
   // Check cache first
   if (findCachedAudioFn && channelId) {
-    const cachedAudio = await findCachedAudioFn(trimmedText, voiceName, channelId);
-    if (cachedAudio) {
-      console.log(`✅ Cache hit for audio (${label}): "${trimmedText.substring(0, 30)}..."`);
-      return { audioBase64: cachedAudio, fromCache: true, audioUrl: cachedAudio };
+    const cachedResult = await findCachedAudioFn(trimmedText, voiceName, channelId);
+    if (cachedResult) {
+      console.log(`✅ Cache hit for audio (${label}): "${trimmedText.substring(0, 30)}..." (duration: ${cachedResult.durationSeconds}s)`);
+      return { 
+        audioBase64: cachedResult.audioBase64, 
+        fromCache: true, 
+        audioUrl: cachedResult.audioBase64,
+        durationSeconds: cachedResult.durationSeconds || undefined
+      };
     }
   }
 
   // Generate new audio
   const audioBase64 = await generateTTSAudio(trimmedText, voiceName);
-  console.log(`✅ [Audio] Generated (${label}): "${trimmedText.substring(0, 30)}..."`);
-  return { audioBase64, fromCache: false };
+  
+  // Estimate duration from text (150 words/min = 2.5 words/sec)
+  // This will be updated with actual duration when saved to cache
+  const wordCount = trimmedText.split(/\s+/).length;
+  const estimatedDuration = Math.max(1, wordCount / 2.5);
+  
+  console.log(`✅ [Audio] Generated (${label}): "${trimmedText.substring(0, 30)}..." (estimated: ${estimatedDuration.toFixed(1)}s)`);
+  return { audioBase64, fromCache: false, durationSeconds: estimatedDuration };
 };
 
 export const generateSegmentedAudio = async (script: ScriptLine[], config: ChannelConfig): Promise<BroadcastSegment[]> => {
@@ -639,9 +661,10 @@ export const generateSegmentedAudioWithCache = async (
   config: ChannelConfig,
   channelId: string = ''
 ): Promise<BroadcastSegment[]> => {
-  console.log(`🔍 [Audio DEBUG] Config received for audio generation:`);
-  console.log(`🔍 [Audio DEBUG] Host A (${config.characters.hostA.name}): voiceName = "${config.characters.hostA.voiceName}"`);
-  console.log(`🔍 [Audio DEBUG] Host B (${config.characters.hostB.name}): voiceName = "${config.characters.hostB.voiceName}"`);
+  // Log config details only in development
+  if (import.meta.env.DEV) {
+    console.log(`🔊 [Audio] Config: hostA=${config.characters.hostA.voiceName}, hostB=${config.characters.hostB.voiceName}`);
+  }
   
   console.log(`🎙️ [Audio] Generating ${script.length} audio segments using OpenAI TTS...`);
 
@@ -660,7 +683,8 @@ export const generateSegmentedAudioWithCache = async (
         text: line.text,
         audioBase64: result.audioBase64,
         fromCache: result.fromCache,
-        audioUrl: result.audioUrl
+        audioUrl: result.audioUrl,
+        audioDuration: result.durationSeconds // Include duration for video timing
       } as any;
     } catch (error) {
       console.error(`❌ [Audio] Failed for "${line.text.substring(0, 30)}...":`, (error as Error).message);
@@ -735,6 +759,14 @@ export const generateAudioFromScenes = async (
         generateSingleAudio(hostBText, hostB.voiceName, channelId, `Scene ${sceneNum} - ${hostB.name}`)
       ]);
       
+      // Calculate total duration for "both" scenes (sum of both audios or max if simultaneous)
+      const hostADuration = hostAAudio.durationSeconds || 0;
+      const hostBDuration = hostBAudio.durationSeconds || 0;
+      // For sequential order, sum durations; for 'meanwhile', use max
+      const totalDuration = scene.order === 'meanwhile' 
+        ? Math.max(hostADuration, hostBDuration)
+        : hostADuration + hostBDuration;
+      
       // Create segment with BOTH audios
       segments.push({
         speaker: 'Both',
@@ -749,10 +781,12 @@ export const generateAudioFromScenes = async (
         model: scene.model,
         shot: scene.shot,
         sceneIndex,
-        fromCache: hostAAudio.fromCache && hostBAudio.fromCache
+        sceneTitle: scene.title, // Title for lower-third overlay
+        fromCache: hostAAudio.fromCache && hostBAudio.fromCache,
+        audioDuration: totalDuration // Combined duration for video timing
       });
       
-      console.log(`✅ [Audio v2.0] Scene ${sceneNum}: Generated ${hostA.name} + ${hostB.name} audios`);
+      console.log(`✅ [Audio v2.0] Scene ${sceneNum}: "${scene.title || 'No title'}" - ${hostA.name} (${hostADuration.toFixed(1)}s) + ${hostB.name} (${hostBDuration.toFixed(1)}s), total: ${totalDuration.toFixed(1)}s`);
       
     } else {
       // SINGLE HOST SCENE: Generate 1 audio
@@ -778,10 +812,12 @@ export const generateAudioFromScenes = async (
         model: scene.model,
         shot: scene.shot,
         sceneIndex,
-        fromCache: audio.fromCache
+        sceneTitle: scene.title, // Title for lower-third overlay
+        fromCache: audio.fromCache,
+        audioDuration: audio.durationSeconds // Include duration for video timing
       });
       
-      console.log(`✅ [Audio v2.0] Scene ${sceneNum}: Generated ${speaker} audio`);
+      console.log(`✅ [Audio v2.0] Scene ${sceneNum}: "${scene.title || 'No title'}" - ${speaker} (${audio.durationSeconds?.toFixed(1) || '?'}s)`);
     }
   }
   
@@ -1030,6 +1066,8 @@ export const generateVideoSegmentsWithInfiniteTalk = async (
         const hostA_audioUrl = extSegment.hostA_audioUrl;
         const hostB_audioUrl = extSegment.hostB_audioUrl;
         const order = extSegment.order;
+        // Get audio duration for accurate video timing
+        const segmentDuration = segment.audioDuration;
 
         // Use retry logic for video generation
         const { retryVideoGeneration } = await import('./retryUtils');
@@ -1052,7 +1090,9 @@ export const generateVideoSegmentsWithInfiniteTalk = async (
               hostA_audioUrl,
               hostB_audioUrl,
               order,
-              sceneMetadata
+              sceneMetadata,
+              // Pass audio duration for accurate video timing
+              audioDuration: segmentDuration
             });
             return videoResult.url;
           },
@@ -1641,27 +1681,39 @@ export const composeVideoWithShotstack = async (
     // Convert segments to PodcastScene format
     // CRITICAL: Each scene needs a duration so we can calculate start times
     const podcastScenes: PodcastScene[] = validSegments.map(({ segment, videoUrl, index }) => {
-      // Estimate duration from audio duration or text length
-      // InfiniteTalk videos match audio duration, which is ~150 words/minute
-      const wordCount = segment.text.split(/\s+/).length;
-      const estimatedDuration = Math.max(3, Math.ceil(wordCount / 2.5)); // ~150 wpm = 2.5 words/sec
+      // Use actual audio duration from segment (set during audio generation)
+      // This is the REAL duration, not an estimate
+      const audioDuration = segment.audioDuration;
       
-      // Use actual audio duration if available
-      const audioDuration = (segment as any).audioDuration;
-      const duration = audioDuration || estimatedDuration;
+      // Fallback: Estimate duration from text length (only if audioDuration not available)
+      let duration: number;
+      if (audioDuration && audioDuration > 0) {
+        duration = audioDuration;
+        console.log(`🎙️ [Podcast Scene ${index}] Using REAL duration: ${duration.toFixed(1)}s`);
+      } else {
+        // Estimate: ~150 words/minute = 2.5 words/sec
+        const wordCount = segment.text.split(/\s+/).length;
+        duration = Math.max(3, Math.ceil(wordCount / 2.5));
+        console.log(`🎙️ [Podcast Scene ${index}] Using ESTIMATED duration: ${duration.toFixed(1)}s (no audioDuration available)`);
+      }
 
       // Get title for lower third
-      // Priority: sceneTitles > headlines > first words of text
+      // Priority: segment.sceneTitle (from Supabase/Narrative Engine) > sceneTitles > headlines > text
       let title = '';
-      if (options.sceneTitles && options.sceneTitles[index]) {
+      if (segment.sceneTitle) {
+        // Best: Use title generated by Narrative Engine and stored in Supabase
+        title = segment.sceneTitle;
+        console.log(`🎙️ [Podcast Scene ${index}] Using scene title from Supabase: "${title}"`);
+      } else if (options.sceneTitles && options.sceneTitles[index]) {
         title = options.sceneTitles[index];
       } else if (options.headlines && options.headlines[index]) {
         title = options.headlines[index];
       } else {
-        // Use first 50 chars of segment text as title
+        // Fallback: Use first 50 chars of segment text as title
         title = segment.text.length > 50 
           ? segment.text.substring(0, 47) + '...'
           : segment.text;
+        console.log(`🎙️ [Podcast Scene ${index}] No sceneTitle found, using text fallback`);
       }
 
       // Get speaker name

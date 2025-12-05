@@ -147,6 +147,9 @@ Dialogue Rules:
 
   const metadataRules = `
 For EACH scene provide:
+- title: Short, catchy title for the lower-third overlay (e.g., "Market Outlook Explained", "Why Tech Is Surging", "The Bitcoin Debate")
+  - Keep it 3-6 words, punchy and descriptive
+  - Should summarize what THIS scene is about
 - video_mode: "hostA" | "hostB" | "both"
 - model: "infinite_talk" for solo, "infinite_talk_multi" for both
 - shot: default "medium", "closeup" for Hook/Conflict, "wide" for Payoff
@@ -161,16 +164,18 @@ IMPORTANT - Dialogue format depends on video_mode:
   const outputFormat = `
 Return STRICT JSON (no markdown) with this exact format:
 {
-  "title": "",
+  "title": "Episode title",
   "narrative_used": "classic | double_conflict | hot_take | perspective_clash",
   "scenes": {
     "1": {
+      "title": "Scene Title Here",
       "text": "dialogue for single host scene",
       "video_mode": "hostA | hostB",
       "model": "infinite_talk",
       "shot": "medium | closeup | wide"
     },
     "2": {
+      "title": "Another Scene Title",
       "hostA_text": "${hostA.name}'s dialogue (40-65 words)",
       "hostB_text": "${hostB.name}'s dialogue (40-65 words)",
       "order": "left_first | right_first",
@@ -184,6 +189,7 @@ Return STRICT JSON (no markdown) with this exact format:
 
 NOTE: For "both" scenes, hostA_text and hostB_text are REQUIRED and must be DIFFERENT dialogues.
 The "text" field should be empty or a combination for backwards compatibility.
+IMPORTANT: Each scene MUST have a unique "title" for the lower-third overlay.
 `.trim();
 
   const systemPrompt = `
