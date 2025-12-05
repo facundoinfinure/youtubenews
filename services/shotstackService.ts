@@ -896,8 +896,8 @@ export const createCompositionFromSegments = (
     dateFormat: 'short',
     channelName: config.channelName,
     showHostNames: true,
-    hostAName: config.hostAName || 'RUSTY',
-    hostBName: config.hostBName || 'DANI',
+    hostAName: config.characters?.hostA?.name || 'RUSTY',
+    hostBName: config.characters?.hostB?.name || 'DANI',
     headlines: options.headlines
   };
   
