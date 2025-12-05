@@ -304,9 +304,9 @@ const validateScriptWithScenes = (script: ScriptWithScenes) => {
       }
     } else {
       // For single host scenes, text is required
-      if (!scene.text || typeof scene.text !== 'string') {
-        throw new Error(`Scene ${sceneId} missing text`);
-      }
+    if (!scene.text || typeof scene.text !== 'string') {
+      throw new Error(`Scene ${sceneId} missing text`);
+    }
     }
     
     if (!scene.model || (scene.model !== 'infinite_talk' && scene.model !== 'infinite_talk_multi')) {

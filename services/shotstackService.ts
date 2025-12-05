@@ -132,6 +132,8 @@ const shotstackRequest = async (
     throw new Error('Shotstack not configured. Set VITE_SHOTSTACK_API_KEY');
   }
   
+  console.log(`[Shotstack] ${method} ${config.baseUrl}${endpoint}`);
+  
   const response = await fetch(`${config.baseUrl}${endpoint}`, {
     method,
     headers: {
@@ -142,8 +144,16 @@ const shotstackRequest = async (
   });
   
   if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.message || `Shotstack API error: ${response.status}`);
+    const errorText = await response.text();
+    let errorDetails = errorText;
+    try {
+      const errorJson = JSON.parse(errorText);
+      errorDetails = JSON.stringify(errorJson, null, 2);
+      console.error(`❌ [Shotstack] API Error (${response.status}):`, errorDetails);
+    } catch {
+      console.error(`❌ [Shotstack] API Error (${response.status}):`, errorText);
+    }
+    throw new Error(`Shotstack API error: ${response.status} - ${errorText.substring(0, 200)}`);
   }
   
   return response.json();

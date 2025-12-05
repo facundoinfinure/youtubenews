@@ -248,8 +248,8 @@ const generateInfiniteTalkVideo = async (
     if (useMultiModel) {
       // ===== INFINITETALK MULTI (Two characters in frame) =====
       modelName = 'InfiniteTalk Multi';
-      const silentAudioUrl = getSilentAudioUrl();
-      
+  const silentAudioUrl = getSilentAudioUrl();
+  
       // For "both" scenes, use the SEPARATE audios if provided
       // Host A = left, Host B = right
       let leftAudio: string;
@@ -268,23 +268,23 @@ const generateInfiniteTalkVideo = async (
         const isHostBSpeaking = speaker === hostBName;
 
         if (isHostASpeaking) {
-          leftAudio = audioUrl;
+    leftAudio = audioUrl;
           rightAudio = silentAudioUrl;
-          order = 'left_first';
+    order = 'left_first';
         } else if (isHostBSpeaking) {
           leftAudio = silentAudioUrl;
-          rightAudio = audioUrl;
-          order = 'right_first';
-        } else {
+    rightAudio = audioUrl;
+    order = 'right_first';
+  } else {
           // Unknown speaker - default to left
-          leftAudio = audioUrl;
+    leftAudio = audioUrl;
           rightAudio = silentAudioUrl;
           order = 'left_first';
           console.warn(`⚠️ [${modelName}] Segment ${segmentIndex}: Unknown speaker '${speaker}', defaulting to left`);
         }
       }
 
-      const characterPrompt = sceneMetadata?.scenePrompt || `
+  const characterPrompt = sceneMetadata?.scenePrompt || `
 STRICT CHARACTER REQUIREMENTS - DO NOT DEVIATE:
 - LEFT CHARACTER: ${hostAName} - ${hostAVisualPrompt}
 - RIGHT CHARACTER: ${hostBName} - ${hostBVisualPrompt}
@@ -303,13 +303,13 @@ Keep character consistency with the reference image at all times.
       console.log(`🎙️ [${modelName}] Order: ${order}, Left audio: ${leftAudio !== silentAudioUrl ? 'ACTIVE' : 'silent'}, Right audio: ${rightAudio !== silentAudioUrl ? 'ACTIVE' : 'silent'}`);
       
       taskId = await createInfiniteTalkMultiTask({
-        leftAudioUrl: leftAudio,
-        rightAudioUrl: rightAudio,
-        imageUrl: referenceImageUrl,
-        order,
-        resolution,
-        prompt: characterPrompt
-      });
+      leftAudioUrl: leftAudio,
+      rightAudioUrl: rightAudio,
+      imageUrl: referenceImageUrl,
+      order,
+      resolution,
+      prompt: characterPrompt
+    });
       
     } else {
       // ===== INFINITETALK SINGLE (One character in frame) =====
@@ -895,7 +895,7 @@ export const generateVideoSegmentsWithInfiniteTalk = async (
         
         // Get scene metadata if available (now includes Scene Builder visual prompts)
         const sceneMetadata = sceneMetadataMap.get(globalIndex);
-        
+
         // Determine which model to use based on scene metadata
         // This affects which image we need (single host vs two-shot)
         const useMultiModel = sceneMetadata?.model === 'infinite_talk_multi' || sceneMetadata?.video_mode === 'both';
@@ -919,7 +919,7 @@ export const generateVideoSegmentsWithInfiniteTalk = async (
           const videoMode = sceneMetadata?.video_mode || (segment.speaker === hostAName ? 'hostA' : 'hostB');
           
           if (videoMode === 'hostA' && hostASoloUrl) {
-            imageUrlForSegment = hostASoloUrl;
+          imageUrlForSegment = hostASoloUrl;
             console.log(`🖼️ [InfiniteTalk Single] Segment ${globalIndex}: Using Host A solo image`);
           } else if (videoMode === 'hostB' && hostBSoloUrl) {
             imageUrlForSegment = hostBSoloUrl;
@@ -927,10 +927,10 @@ export const generateVideoSegmentsWithInfiniteTalk = async (
           } else if (segment.speaker === hostAName && hostASoloUrl) {
             imageUrlForSegment = hostASoloUrl;
             console.log(`🖼️ [InfiniteTalk Single] Segment ${globalIndex}: Using Host A solo image (by speaker)`);
-          } else if (segment.speaker === hostBName && hostBSoloUrl) {
-            imageUrlForSegment = hostBSoloUrl;
+        } else if (segment.speaker === hostBName && hostBSoloUrl) {
+          imageUrlForSegment = hostBSoloUrl;
             console.log(`🖼️ [InfiniteTalk Single] Segment ${globalIndex}: Using Host B solo image (by speaker)`);
-          } else {
+        } else {
             // Fallback: use any available solo image or two-shot
             imageUrlForSegment = hostASoloUrl || hostBSoloUrl || twoShotUrl || config.referenceImageUrl || '';
             console.warn(`⚠️ [InfiniteTalk Single] Segment ${globalIndex}: Using fallback image`);
@@ -1041,7 +1041,14 @@ export const generateVideoSegments = async (
 
 /**
  * Generate or retrieve intro/outro for a channel
- * For InfiniteTalk, we just use the reference image as static intro/outro frames
+ * 
+ * CURRENT STATUS: Intro/outro are disabled (always null)
+ * The composition will start directly with the first video segment
+ * 
+ * To enable intro/outro in the future:
+ * 1. Generate intro/outro videos separately using InfiniteTalk or another tool
+ * 2. Upload them to Supabase Storage
+ * 3. Update this function to load and return the video URLs
  */
 export const generateBroadcastVisuals = async (
   newsContext: string,
@@ -1050,23 +1057,14 @@ export const generateBroadcastVisuals = async (
   channelId: string,
   productionId?: string
 ): Promise<VideoAssets> => {
-  console.log(`[Broadcast Visuals] Setting up intro/outro for channel ${channelId}`);
+  console.log(`[Broadcast Visuals] Skipping intro/outro - videos will start directly with scenes`);
   
-  const normalizedChannel = normalizeChannelKey(config.channelName);
-  const override = CHANNEL_BRANDING_OVERRIDES[normalizedChannel];
-  const referenceImage = config.referenceImageUrl || null;
-
-  if (override) {
-    console.log(`✅ [Broadcast Visuals] Using fixed intro/outro for ${config.channelName}`);
-  } else if (referenceImage) {
-    console.log(`✅ [Broadcast Visuals] Using reference image for intro/outro`);
-  } else {
-    console.log(`⚠️ [Broadcast Visuals] No reference image - intro/outro will be empty`);
-  }
+  // Reference image for other purposes (thumbnail generation, etc.)
+  const referenceImage = config.referenceImageUrl || config.seedImages?.twoShotUrl || null;
 
   return {
-    intro: override?.intro || referenceImage,
-    outro: override?.outro || referenceImage,
+    intro: null,
+    outro: null,
     wide: referenceImage,
     hostA: [],
     hostB: []

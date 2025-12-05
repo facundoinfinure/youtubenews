@@ -408,11 +408,11 @@ const createNanoBananaEditTask = async (
   console.log(`[Wavespeed NanoBanana] 🎨 Creating edit task`);
   console.log(`[Wavespeed NanoBanana] 📝 Prompt: ${prompt.substring(0, 100)}...`);
   console.log(`[Wavespeed NanoBanana] 🖼️ Input image: ${inputImageUrl.substring(0, 60)}...`);
-
-  const response = await wavespeedRequest(endpoint, {
-    method: 'POST',
-    body: requestBody
-  });
+      
+      const response = await wavespeedRequest(endpoint, {
+        method: 'POST',
+        body: requestBody
+      });
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -420,9 +420,9 @@ const createNanoBananaEditTask = async (
     throw new Error(`NanoBanana Edit API error: ${response.status} - ${errorText.substring(0, 200)}`);
   }
 
-  const data = await response.json();
-  const taskId = data.data?.id || data.id;
-  
+        const data = await response.json();
+        const taskId = data.data?.id || data.id;
+        
   if (!taskId) {
     throw new Error(`NanoBanana Edit API did not return a task ID. Response: ${JSON.stringify(data)}`);
   }
