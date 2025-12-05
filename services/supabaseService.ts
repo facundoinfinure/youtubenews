@@ -817,12 +817,26 @@ export const saveProduction = async (
 
   if (production.id) {
     // Update existing
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('productions')
       .update(productionData)
       .eq('id', production.id)
       .select()
       .single();
+
+    // If segment_status column doesn't exist, retry without it
+    if (error && error.code === 'PGRST204' && error.message?.includes('segment_status')) {
+      console.warn("⚠️ segment_status column not found, retrying without it. Run migration: supabase_segment_status_migration.sql");
+      const { segment_status, ...dataWithoutSegmentStatus } = productionData;
+      const retryResult = await supabase
+        .from('productions')
+        .update(dataWithoutSegmentStatus)
+        .eq('id', production.id)
+        .select()
+        .single();
+      data = retryResult.data;
+      error = retryResult.error;
+    }
 
     if (error) {
       console.error("Error updating production:", error);
@@ -831,11 +845,24 @@ export const saveProduction = async (
     return normalizeProduction(data);
   } else {
     // Create new
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('productions')
       .insert(productionData)
       .select()
       .single();
+
+    // If segment_status column doesn't exist, retry without it
+    if (error && error.code === 'PGRST204' && error.message?.includes('segment_status')) {
+      console.warn("⚠️ segment_status column not found, retrying without it. Run migration: supabase_segment_status_migration.sql");
+      const { segment_status, ...dataWithoutSegmentStatus } = productionData;
+      const retryResult = await supabase
+        .from('productions')
+        .insert(dataWithoutSegmentStatus)
+        .select()
+        .single();
+      data = retryResult.data;
+      error = retryResult.error;
+    }
 
     if (error) {
       console.error("Error creating production:", error);
@@ -1120,6 +1147,11 @@ export const updateSegmentStatus = async (
       .single();
 
     if (fetchError) {
+      // If column doesn't exist (PGRST204), log warning but don't fail
+      if (fetchError.code === 'PGRST204') {
+        console.warn("⚠️ segment_status column not found - run migration: supabase_segment_status_migration.sql");
+        return false;
+      }
       console.error("Error fetching production:", fetchError);
       return false;
     }
@@ -1146,6 +1178,11 @@ export const updateSegmentStatus = async (
       .eq('id', productionId);
 
     if (updateError) {
+      // If column doesn't exist, log warning but don't fail the production
+      if (updateError.code === 'PGRST204') {
+        console.warn("⚠️ segment_status column not found - run migration: supabase_segment_status_migration.sql");
+        return false;
+      }
       console.error("Error updating segment status:", updateError);
       return false;
     }
@@ -1172,7 +1209,15 @@ export const getSegmentsNeedingRegeneration = async (
       .eq('id', productionId)
       .single();
 
-    if (error || !production) {
+    if (error) {
+      // If column doesn't exist, log warning and return empty (will regenerate all)
+      if (error.code === 'PGRST204') {
+        console.warn("⚠️ segment_status column not found - run migration: supabase_segment_status_migration.sql");
+      }
+      return { audioNeeded: [], videoNeeded: [] };
+    }
+    
+    if (!production) {
       return { audioNeeded: [], videoNeeded: [] };
     }
 

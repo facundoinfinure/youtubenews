@@ -551,18 +551,25 @@ const generateSingleAudio = async (
   channelId: string,
   label: string
 ): Promise<{ audioBase64: string; fromCache: boolean; audioUrl?: string }> => {
+  // Validate input text before processing
+  const trimmedText = text?.trim() || '';
+  if (!trimmedText) {
+    console.error(`❌ [Audio] Empty text for ${label}, skipping TTS generation`);
+    throw new Error(`Empty text provided for audio generation (${label})`);
+  }
+  
   // Check cache first
   if (findCachedAudioFn && channelId) {
-    const cachedAudio = await findCachedAudioFn(text, voiceName, channelId);
+    const cachedAudio = await findCachedAudioFn(trimmedText, voiceName, channelId);
     if (cachedAudio) {
-      console.log(`✅ Cache hit for audio (${label}): "${text.substring(0, 30)}..."`);
+      console.log(`✅ Cache hit for audio (${label}): "${trimmedText.substring(0, 30)}..."`);
       return { audioBase64: cachedAudio, fromCache: true, audioUrl: cachedAudio };
     }
   }
 
   // Generate new audio
-  const audioBase64 = await generateTTSAudio(text, voiceName);
-  console.log(`✅ [Audio] Generated (${label}): "${text.substring(0, 30)}..."`);
+  const audioBase64 = await generateTTSAudio(trimmedText, voiceName);
+  console.log(`✅ [Audio] Generated (${label}): "${trimmedText.substring(0, 30)}..."`);
   return { audioBase64, fromCache: false };
 };
 
@@ -640,18 +647,34 @@ export const generateAudioFromScenes = async (
       console.log(`🎬 [Audio v2.0] Scene ${sceneNum}: BOTH hosts - generating 2 audios`);
       
       // Get separate dialogues (or fallback to splitting text)
-      let hostAText = scene.hostA_text;
-      let hostBText = scene.hostB_text;
+      let hostAText = (scene.hostA_text || '').trim();
+      let hostBText = (scene.hostB_text || '').trim();
       
       // Fallback: if separate texts not provided, split the main text
       if (!hostAText || !hostBText) {
         console.warn(`⚠️ [Audio v2.0] Scene ${sceneNum}: Missing separate dialogues, splitting text`);
-        const text = scene.text.trim();
+        const text = (scene.text || '').trim();
+        if (!text) {
+          console.error(`❌ [Audio v2.0] Scene ${sceneNum}: No text available for BOTH mode`);
+          throw new Error(`Scene ${sceneNum} has no text content for audio generation`);
+        }
         const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
         const midpoint = Math.ceil(sentences.length / 2);
-        hostAText = sentences.slice(0, midpoint).join(' ').trim();
-        hostBText = sentences.slice(midpoint).join(' ').trim();
+        hostAText = hostAText || sentences.slice(0, midpoint).join(' ').trim();
+        hostBText = hostBText || sentences.slice(midpoint).join(' ').trim();
       }
+      
+      // Final validation - ensure both have content
+      if (!hostAText) {
+        console.error(`❌ [Audio v2.0] Scene ${sceneNum}: hostA_text is empty`);
+        throw new Error(`Scene ${sceneNum}: Host A text is empty after processing`);
+      }
+      if (!hostBText) {
+        console.error(`❌ [Audio v2.0] Scene ${sceneNum}: hostB_text is empty`);
+        throw new Error(`Scene ${sceneNum}: Host B text is empty after processing`);
+      }
+      
+      console.log(`📝 [Audio v2.0] Scene ${sceneNum} texts - ${hostA.name}: "${hostAText.substring(0, 40)}..." | ${hostB.name}: "${hostBText.substring(0, 40)}..."`);
       
       // Generate both audios in parallel
       const [hostAAudio, hostBAudio] = await Promise.all([
@@ -682,14 +705,21 @@ export const generateAudioFromScenes = async (
       // SINGLE HOST SCENE: Generate 1 audio
       const speaker = scene.video_mode === 'hostA' ? hostA.name : hostB.name;
       const character = scene.video_mode === 'hostA' ? hostA : hostB;
+      const sceneText = (scene.text || '').trim();
       
-      console.log(`🎬 [Audio v2.0] Scene ${sceneNum}: ${speaker} solo`);
+      // Validate text exists
+      if (!sceneText) {
+        console.error(`❌ [Audio v2.0] Scene ${sceneNum}: No text for ${speaker}`);
+        throw new Error(`Scene ${sceneNum}: Text is empty for ${speaker}`);
+      }
       
-      const audio = await generateSingleAudio(scene.text, character.voiceName, channelId, `Scene ${sceneNum} - ${speaker}`);
+      console.log(`🎬 [Audio v2.0] Scene ${sceneNum}: ${speaker} solo - "${sceneText.substring(0, 40)}..."`);
+      
+      const audio = await generateSingleAudio(sceneText, character.voiceName, channelId, `Scene ${sceneNum} - ${speaker}`);
       
       segments.push({
         speaker,
-        text: scene.text,
+        text: sceneText,
         audioBase64: audio.audioBase64,
         video_mode: scene.video_mode,
         model: scene.model,

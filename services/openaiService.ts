@@ -552,6 +552,41 @@ const getOpenAIVoice = (voiceName: string): OpenAIVoice => {
 };
 
 /**
+ * Sanitize text for TTS - remove problematic characters and validate
+ */
+const sanitizeTextForTTS = (text: string): string => {
+  if (!text || typeof text !== 'string') {
+    throw new Error('TTS input text is empty or invalid');
+  }
+  
+  // Trim and normalize whitespace
+  let sanitized = text.trim().replace(/\s+/g, ' ');
+  
+  // Remove or replace problematic characters
+  sanitized = sanitized
+    .replace(/[\u0000-\u001F\u007F-\u009F]/g, '') // Remove control characters
+    .replace(/[""]/g, '"') // Normalize smart quotes
+    .replace(/['']/g, "'") // Normalize smart apostrophes
+    .replace(/[–—]/g, '-') // Normalize dashes
+    .replace(/…/g, '...') // Normalize ellipsis
+    .replace(/\s+/g, ' ') // Collapse multiple spaces
+    .trim();
+  
+  // Validate minimum content
+  if (sanitized.length === 0) {
+    throw new Error('TTS input text is empty after sanitization');
+  }
+  
+  // OpenAI TTS has a character limit (4096 characters)
+  if (sanitized.length > 4096) {
+    console.warn(`[OpenAI TTS] ⚠️ Text truncated from ${sanitized.length} to 4096 characters`);
+    sanitized = sanitized.substring(0, 4096);
+  }
+  
+  return sanitized;
+};
+
+/**
  * Generate TTS audio for a single line
  * Returns base64-encoded MP3
  * 
@@ -563,24 +598,47 @@ export const generateTTSAudio = async (
   text: string,
   voiceName: string
 ): Promise<string> => {
+  // Validate and sanitize input text
+  let sanitizedText: string;
+  try {
+    sanitizedText = sanitizeTextForTTS(text);
+  } catch (error) {
+    console.error(`[OpenAI TTS] ❌ Invalid input text: "${text?.substring(0, 50)}..."`, (error as Error).message);
+    throw new Error(`TTS failed: ${(error as Error).message}`);
+  }
+  
   const voice = getOpenAIVoice(voiceName);
   
   console.log(`[OpenAI TTS] 🎙️ Generating audio with voice: ${voice}${voice !== voiceName.toLowerCase() ? ` (from ${voiceName})` : ''}`);
   
-  const response = await openaiRequest('audio/speech', {
-    model: 'tts-1',
-    input: text,
-    voice: voice,
-    response_format: 'mp3'
-  });
-  
-  // Cost: ~$0.015 per 1000 characters
-  const charCount = text.length;
-  const cost = (charCount / 1000) * 0.015;
-  CostTracker.track('audio', 'openai-tts-1', cost);
-  
-  // The proxy returns { audio: base64, format: 'mp3' }
-  return response.audio;
+  try {
+    const response = await openaiRequest('audio/speech', {
+      model: 'tts-1',
+      input: sanitizedText,
+      voice: voice,
+      response_format: 'mp3'
+    });
+    
+    // Cost: ~$0.015 per 1000 characters
+    const charCount = sanitizedText.length;
+    const cost = (charCount / 1000) * 0.015;
+    CostTracker.track('audio', 'openai-tts-1', cost);
+    
+    // The proxy returns { audio: base64, format: 'mp3' }
+    if (!response.audio) {
+      throw new Error('TTS response missing audio data');
+    }
+    
+    return response.audio;
+  } catch (error) {
+    const errorMsg = (error as Error).message;
+    // Provide more context for 400 errors
+    if (errorMsg.includes('400')) {
+      console.error(`[OpenAI TTS] ❌ 400 error - Input text (${sanitizedText.length} chars): "${sanitizedText.substring(0, 100)}..."`);
+      throw new Error(`TTS API rejected the input (400). Text length: ${sanitizedText.length}. First 50 chars: "${sanitizedText.substring(0, 50)}"`);
+    }
+    throw error;
+  }
 };
 
 /**
