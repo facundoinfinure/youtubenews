@@ -1310,7 +1310,7 @@ const App: React.FC = () => {
       }
 
       // Calculate actual cost from CostTracker
-      const costStats = CostTracker.getStats(1); // Last 1 day
+      const costStats = CostTracker.getStatsSync(1); // Last 1 day
       const actualCost = costStats.totalCost;
       const costBreakdown = costStats.breakdown.reduce((acc: Record<string, number>, item: any) => {
         acc[item.task] = item.cost;

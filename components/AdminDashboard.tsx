@@ -1387,7 +1387,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
             <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
               <h2 className="text-xl font-bold mb-4">Cost Analytics</h2>
               {(() => {
-                const costStats = CostTracker.getStats(30);
+                const costStats = CostTracker.getStatsSync(30);
                 const cacheStats = ContentCache.getStats();
                 return (
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -1414,7 +1414,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
             <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
               <h3 className="text-lg font-bold mb-4">Cost Breakdown by Task</h3>
               {(() => {
-                const costStats = CostTracker.getStats(30);
+                const costStats = CostTracker.getStatsSync(30);
                 return (
                   <div className="space-y-2">
                     {costStats.breakdown.map((item: any) => (
@@ -1458,7 +1458,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
               <h2 className="text-xl font-bold mb-4">Cache Statistics</h2>
               {(() => {
                 const cacheStats = ContentCache.getStats();
-                const costStats = CostTracker.getStats(30);
+                const costStats = CostTracker.getStatsSync(30);
                 return (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="bg-black/30 p-4 rounded-lg">
