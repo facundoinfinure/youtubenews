@@ -637,9 +637,188 @@ export const createTickerOverlay = (
   color: '#ffffff'
 });
 
+// =============================================================================================
+// NEWS BROADCAST OVERLAYS - Professional TV-style graphics
+// =============================================================================================
+
+/**
+ * News overlay configuration for professional broadcast look
+ */
+export interface NewsOverlayConfig {
+  // Breaking news banner
+  showBreakingNews?: boolean;
+  breakingNewsText?: string;
+  breakingNewsDuration?: number;
+  
+  // Date/time display
+  showDate?: boolean;
+  dateFormat?: 'full' | 'short' | 'time';
+  
+  // Channel branding
+  channelName?: string;
+  showChannelLogo?: boolean;
+  
+  // Headlines ticker
+  headlines?: string[];
+  tickerSpeed?: 'slow' | 'normal' | 'fast';
+  
+  // Host lower thirds
+  hostAName?: string;
+  hostBName?: string;
+  showHostNames?: boolean;
+}
+
+/**
+ * Format date for news overlay
+ */
+const formatNewsDate = (format: 'full' | 'short' | 'time' = 'full'): string => {
+  const now = new Date();
+  const options: Intl.DateTimeFormatOptions = format === 'full' 
+    ? { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }
+    : format === 'short'
+    ? { month: 'short', day: 'numeric', year: 'numeric' }
+    : { hour: '2-digit', minute: '2-digit' };
+  
+  return now.toLocaleDateString('en-US', options).toUpperCase();
+};
+
+/**
+ * Create professional news broadcast overlays
+ * Returns an array of TextOverlay objects for the timeline
+ */
+export const createNewsOverlays = (
+  totalDuration: number,
+  config: NewsOverlayConfig,
+  segments?: BroadcastSegment[]
+): TextOverlay[] => {
+  const overlays: TextOverlay[] = [];
+  let currentTime = 0;
+  
+  // === BREAKING NEWS BANNER ===
+  // Appears at the start, typical TV-style "BREAKING NEWS" flash
+  if (config.showBreakingNews) {
+    const breakingText = config.breakingNewsText || '🔴 BREAKING NEWS';
+    overlays.push({
+      text: breakingText,
+      start: 0,
+      length: config.breakingNewsDuration || 4,
+      position: 'top',
+      style: 'blockbuster',
+      size: 'large',
+      color: '#ff0000'
+    });
+    currentTime = config.breakingNewsDuration || 4;
+  }
+  
+  // === DATE DISPLAY ===
+  // Shows date in corner, typical news channel style
+  if (config.showDate) {
+    const dateText = formatNewsDate(config.dateFormat);
+    overlays.push({
+      text: dateText,
+      start: currentTime,
+      length: totalDuration - currentTime,
+      position: 'top',
+      style: 'minimal',
+      size: 'small',
+      color: '#ffffff'
+    });
+  }
+  
+  // === CHANNEL NAME/BRANDING ===
+  if (config.channelName) {
+    overlays.push({
+      text: config.channelName.toUpperCase(),
+      start: 0,
+      length: totalDuration,
+      position: 'bottom',
+      style: 'minimal',
+      size: 'small',
+      color: '#ffcc00'
+    });
+  }
+  
+  // === HOST NAME LOWER THIRDS ===
+  // Shows presenter names when they speak (professional broadcast style)
+  if (config.showHostNames && segments && segments.length > 0) {
+    let segmentTime = currentTime;
+    const introOffset = 3; // Assume 3s intro
+    segmentTime = introOffset;
+    
+    segments.forEach((segment, index) => {
+      // Determine which host is speaking
+      const speaker = segment.speaker;
+      let hostName = '';
+      
+      if (speaker === 'host_a' || speaker?.toLowerCase().includes('rusty')) {
+        hostName = config.hostAName || 'RUSTY';
+      } else if (speaker === 'host_b' || speaker?.toLowerCase().includes('dani')) {
+        hostName = config.hostBName || 'DANI';
+      }
+      
+      if (hostName) {
+        // Show host name for first 3 seconds of their segment
+        overlays.push({
+          text: `🎙️ ${hostName}`,
+          start: segmentTime + 0.5, // Slight delay after segment starts
+          length: 3,
+          position: 'bottom',
+          style: 'minimal',
+          size: 'medium',
+          color: '#ffffff'
+        });
+      }
+      
+      // Estimate segment duration (use audio duration or default)
+      const segmentDuration = (segment as any).audioDuration || 8;
+      segmentTime += segmentDuration;
+    });
+  }
+  
+  // === HEADLINES TICKER ===
+  // Scrolling ticker at bottom (news channel style)
+  if (config.headlines && config.headlines.length > 0) {
+    const tickerText = config.headlines.join('  •  ');
+    const tickerDuration = totalDuration - (currentTime + 5); // Leave some margin
+    
+    if (tickerDuration > 5) {
+      overlays.push({
+        text: `📰 ${tickerText}`,
+        start: currentTime + 5, // Start after breaking news settles
+        length: tickerDuration,
+        position: 'bottom',
+        style: 'minimal',
+        size: 'small',
+        color: '#ffffff'
+      });
+    }
+  }
+  
+  return overlays;
+};
+
+/**
+ * Create a "LIVE" indicator overlay
+ */
+export const createLiveIndicator = (
+  startTime: number,
+  duration: number
+): TextOverlay => ({
+  text: '🔴 LIVE',
+  start: startTime,
+  length: duration,
+  position: 'top',
+  style: 'minimal',
+  size: 'small',
+  color: '#ff0000'
+});
+
 /**
  * Create a Shotstack composition config from production data
  * with professional effects and overlays
+ * 
+ * IMPORTANT: Video clips from InfiniteTalk already contain embedded audio.
+ * We do NOT add any separate audio track to avoid duplication.
  */
 export const createCompositionFromSegments = (
   segments: BroadcastSegment[],
@@ -653,6 +832,12 @@ export const createCompositionFromSegments = (
     callbackUrl?: string;
     enableOverlays?: boolean;
     transitionStyle?: 'smooth' | 'dynamic' | 'professional' | 'energetic';
+    // News overlay options
+    newsOverlays?: NewsOverlayConfig;
+    // Headlines for ticker
+    headlines?: string[];
+    // Title for breaking news
+    breakingNewsTitle?: string;
   } = {}
 ): CompositionConfig => {
   // Effect rotation for Ken Burns style variety
@@ -662,6 +847,7 @@ export const createCompositionFromSegments = (
   ];
   
   // Build clips from segments with their video URLs and professional effects
+  // NOTE: We use volume: 1 because the audio is embedded in the video from InfiniteTalk
   const clips: VideoClip[] = segments
     .map((segment, index): VideoClip | null => {
       const videoUrl = videoUrls[index] || segment.videoUrl;
@@ -674,8 +860,9 @@ export const createCompositionFromSegments = (
       
       return {
         url: videoUrl,
-        start: 0, // Will be calculated by Shotstack
-        volume: 1,
+        start: 0, // Will be calculated by Shotstack sequentially
+        // Video clips have embedded audio - DO NOT add separate audio track
+        volume: 1, // Use embedded audio at full volume
         effect: autoEffect,
         filter: sceneEffect.filter
       };
@@ -687,44 +874,58 @@ export const createCompositionFromSegments = (
     ? TRANSITION_PRESETS[options.transitionStyle] 
     : 'fade';
   
-  // Build text overlays for lower-thirds if enabled
-  const textOverlays: TextOverlay[] = [];
-  if (options.enableOverlays) {
-    let currentTime = videos.intro ? 3 : 0; // Start after intro
-    
-    segments.forEach((segment, index) => {
-      const videoUrl = videoUrls[index] || segment.videoUrl;
-      if (!videoUrl) return;
-      
-      // Add speaker name overlay at the start of each segment
-      const speakerName = segment.speaker === 'host_a' ? 'RUSTY' : 'DANI';
-      textOverlays.push(createLowerThirdOverlay(
-        speakerName,
-        currentTime + 0.5,
-        2,
-        'minimal'
-      ));
-      
-      // Estimate segment duration (use audio duration if available)
-      const segmentDuration = (segment as any).audioDuration || 8;
-      currentTime += segmentDuration;
-    });
+  // Calculate estimated total duration for overlays
+  const introDuration = videos.intro ? 3 : 0;
+  const outroDuration = videos.outro ? 3 : 0;
+  const segmentsDuration = segments.reduce((acc, seg) => {
+    return acc + ((seg as any).audioDuration || 8);
+  }, 0);
+  const estimatedTotalDuration = introDuration + segmentsDuration + outroDuration;
+  
+  // Build text overlays - NEWS BROADCAST STYLE
+  let textOverlays: TextOverlay[] = [];
+  
+  // Default news overlays configuration
+  const defaultNewsConfig: NewsOverlayConfig = {
+    showBreakingNews: true,
+    breakingNewsText: options.breakingNewsTitle 
+      ? `🔴 BREAKING: ${options.breakingNewsTitle.toUpperCase()}`
+      : '🔴 BREAKING NEWS',
+    breakingNewsDuration: 4,
+    showDate: true,
+    dateFormat: 'short',
+    channelName: config.channelName,
+    showHostNames: true,
+    hostAName: config.hostAName || 'RUSTY',
+    hostBName: config.hostBName || 'DANI',
+    headlines: options.headlines
+  };
+  
+  // Use provided news overlays or defaults if overlays enabled
+  if (options.enableOverlays !== false) {
+    const newsConfig = options.newsOverlays || defaultNewsConfig;
+    textOverlays = createNewsOverlays(estimatedTotalDuration, newsConfig, segments);
   }
   
+  // NOTE: We do NOT include audioTrack - videos have embedded audio from InfiniteTalk
   return {
     clips,
     intro: videos.intro ? { 
       url: videos.intro, 
       start: 0, 
       length: 3,
+      volume: 1, // Intro may have its own audio
       effect: 'zoomIn' // Professional intro zoom
     } : undefined,
     outro: videos.outro ? { 
       url: videos.outro, 
       start: 0, 
       length: 3,
+      volume: 1, // Outro may have its own audio
       effect: 'zoomOutSlow' // Smooth outro
     } : undefined,
+    // NO audioTrack - videos already have embedded audio from InfiniteTalk lip-sync
+    audioTrack: undefined, // EXPLICITLY undefined to avoid any audio duplication
     resolution: options.resolution || '1080',
     aspectRatio: config.format,
     fps: 30,

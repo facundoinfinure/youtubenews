@@ -1568,15 +1568,18 @@ export const isCompositionAvailable = (): boolean => {
 
 /**
  * Compose final video from segments using Shotstack
- * This creates a professional video with transitions, normalized audio, etc.
+ * This creates a professional video with transitions, news overlays, etc.
  * 
  * Call this AFTER generateVideoSegmentsWithInfiniteTalk to combine all clips
+ * 
+ * IMPORTANT: Video clips from InfiniteTalk already contain embedded audio (lip-sync).
+ * We do NOT add any separate audio track to avoid duplication.
  * 
  * @param segments - Broadcast segments with video URLs
  * @param videoUrls - Array of video URLs (from InfiniteTalk)
  * @param videos - Video assets (intro/outro)
  * @param config - Channel config
- * @param options - Composition options
+ * @param options - Composition options including news overlays
  */
 export const composeVideoWithShotstack = async (
   segments: BroadcastSegment[],
@@ -1589,6 +1592,10 @@ export const composeVideoWithShotstack = async (
     transitionDuration?: number;
     watermarkUrl?: string;
     callbackUrl?: string;
+    // News broadcast overlays
+    enableOverlays?: boolean;
+    breakingNewsTitle?: string;
+    headlines?: string[];
   } = {}
 ): Promise<RenderResult> => {
   // Check if Shotstack is configured
@@ -1615,9 +1622,12 @@ export const composeVideoWithShotstack = async (
   console.log(`🎬 [Composition] Starting video composition with Shotstack...`);
   console.log(`🎬 [Composition] ${validVideoCount}/${videoUrls.length} valid video segments`);
   console.log(`🎬 [Composition] Intro: ${videos.intro ? 'Yes' : 'No'}, Outro: ${videos.outro ? 'Yes' : 'No'}`);
+  console.log(`🎬 [Composition] News overlays: ${options.enableOverlays !== false ? 'Enabled' : 'Disabled'}`);
+  console.log(`🎬 [Composition] NOTE: Using embedded audio from video clips (no separate audio track)`);
 
   try {
-    // Create composition config
+    // Create composition config with news overlays
+    // NOTE: Videos already have embedded audio - we do NOT add audioTrack
     const compositionConfig = createCompositionFromSegments(
       segments,
       videoUrls,
@@ -1630,7 +1640,11 @@ export const composeVideoWithShotstack = async (
           duration: options.transitionDuration || 0.5
         } : { type: 'fade', duration: 0.5 },
         watermarkUrl: options.watermarkUrl,
-        callbackUrl: options.callbackUrl
+        callbackUrl: options.callbackUrl,
+        // News broadcast overlays (enabled by default)
+        enableOverlays: options.enableOverlays !== false,
+        breakingNewsTitle: options.breakingNewsTitle,
+        headlines: options.headlines
       }
     );
 

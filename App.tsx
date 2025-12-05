@@ -1829,11 +1829,18 @@ const App: React.FC = () => {
     setCompositionError(null);
     setComposedVideoUrl(null);
     addLog('🎬 Starting video composition with Shotstack...');
+    addLog('📺 Adding news broadcast overlays (Breaking News, date, host names)...');
 
     try {
       // Extract video URLs from segments
       const videoUrls = segments.map(seg => seg.videoUrl || null);
       
+      // Get headlines from selected news for ticker
+      const headlines = selectedNews.map(news => news.headline).slice(0, 5);
+      
+      // Get breaking news title from viral metadata
+      const breakingTitle = viralMeta?.title || selectedNews[0]?.headline || 'Latest News Update';
+
       const result = await composeVideoWithShotstack(
         segments,
         videoUrls,
@@ -1842,7 +1849,11 @@ const App: React.FC = () => {
         {
           resolution: '1080',
           transition: 'fade',  // Professional fade transitions
-          transitionDuration: 0.5
+          transitionDuration: 0.5,
+          // News broadcast overlays
+          enableOverlays: true,
+          breakingNewsTitle: breakingTitle,
+          headlines: headlines
         }
       );
 
@@ -2311,7 +2322,20 @@ const App: React.FC = () => {
                       >
                         <span>📋</span> Copy URL
                       </button>
+                      <button
+                        onClick={() => {
+                          setCompositionStatus('idle');
+                          setComposedVideoUrl(null);
+                          toast('Ready to re-compose with updated settings', { icon: '🔄' });
+                        }}
+                        className="flex items-center gap-2 px-4 py-2 bg-yellow-600 hover:bg-yellow-500 text-white rounded-lg font-bold transition"
+                      >
+                        <span>🔄</span> Re-compose
+                      </button>
                     </div>
+                    <p className="text-xs text-gray-500">
+                      💡 Use "Re-compose" to apply new overlays or settings without regenerating videos
+                    </p>
                   </div>
                 )}
 
