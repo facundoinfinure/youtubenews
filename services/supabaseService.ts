@@ -902,8 +902,9 @@ export const getIncompleteProductions = async (
     .in('status', ['draft', 'in_progress'])
     .order('updated_at', { ascending: false });
 
+  // Show productions that match user_id OR have null user_id (legacy/orphaned productions)
   if (userId) {
-    query = query.eq('user_id', userId);
+    query = query.or(`user_id.eq.${userId},user_id.is.null`);
   }
 
   const { data, error } = await query;
@@ -930,8 +931,9 @@ export const getAllProductions = async (
     .order('updated_at', { ascending: false })
     .limit(limit);
 
+  // Show productions that match user_id OR have null user_id (legacy/orphaned productions)
   if (userId) {
-    query = query.eq('user_id', userId);
+    query = query.or(`user_id.eq.${userId},user_id.is.null`);
   }
 
   const { data, error } = await query;
@@ -963,8 +965,9 @@ export const getPublishedProductions = async (
     .order('updated_at', { ascending: false })
     .limit(limit);
 
+  // Show productions that match user_id OR have null user_id (legacy/orphaned productions)
   if (userId) {
-    query = query.eq('user_id', userId);
+    query = query.or(`user_id.eq.${userId},user_id.is.null`);
   }
 
   const { data: productions, error } = await query;
@@ -1041,8 +1044,9 @@ export const getCompletedProductionsWithVideoInfo = async (
     .order('updated_at', { ascending: false })
     .limit(limit);
 
+  // Show productions that match user_id OR have null user_id (legacy/orphaned productions)
   if (userId) {
-    query = query.eq('user_id', userId);
+    query = query.or(`user_id.eq.${userId},user_id.is.null`);
   }
 
   const { data: productions, error } = await query;
