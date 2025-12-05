@@ -86,7 +86,7 @@ Nuevo servicio para composición profesional de video **en la nube** - funciona 
 
 **Características:**
 - Renderizado en la nube (1080p, HD, 4K)
-- Transiciones: `fade`, `dissolve`, `wipeLeft`, `slideLeft`
+- Transiciones: `fade`, `wipeLeft`, `slideLeft`, `slideRight`, `zoom` (+ variantes Slow/Fast)
 - Intro/Outro automático
 - Watermark opcional
 - Genera poster/thumbnail del video
@@ -103,7 +103,7 @@ const result = await composeVideoWithShotstack(
   config,
   {
     resolution: '1080',
-    transition: 'dissolve',
+    transition: 'fade',
     transitionDuration: 0.3
   }
 );

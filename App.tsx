@@ -1667,8 +1667,8 @@ const App: React.FC = () => {
         config,
         {
           resolution: '1080',
-          transition: 'dissolve',
-          transitionDuration: 0.3
+          transition: 'fade',  // Professional fade transitions
+          transitionDuration: 0.5
         }
       );
 

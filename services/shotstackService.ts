@@ -19,12 +19,54 @@ import { CostTracker } from "./CostTracker";
 // TYPES
 // =============================================================================================
 
+/**
+ * Valid Shotstack transition types
+ * See: https://shotstack.io/docs/api/#tocs_transition
+ */
+export type ShotstackTransition = 
+  | 'fade' | 'fadeSlow' | 'fadeFast'
+  | 'reveal' | 'revealSlow' | 'revealFast'
+  | 'wipeLeft' | 'wipeLeftSlow' | 'wipeLeftFast'
+  | 'wipeRight' | 'wipeRightSlow' | 'wipeRightFast'
+  | 'slideLeft' | 'slideLeftSlow' | 'slideLeftFast'
+  | 'slideRight' | 'slideRightSlow' | 'slideRightFast'
+  | 'slideUp' | 'slideUpSlow' | 'slideUpFast'
+  | 'slideDown' | 'slideDownSlow' | 'slideDownFast'
+  | 'carouselLeft' | 'carouselLeftSlow' | 'carouselLeftFast'
+  | 'carouselRight' | 'carouselRightSlow' | 'carouselRightFast'
+  | 'carouselUp' | 'carouselUpSlow' | 'carouselUpFast'
+  | 'carouselDown' | 'carouselDownSlow' | 'carouselDownFast'
+  | 'shuffleTopRight' | 'shuffleRightTop' | 'shuffleRightBottom'
+  | 'shuffleBottomRight' | 'shuffleBottomLeft' | 'shuffleLeftBottom'
+  | 'shuffleLeftTop' | 'shuffleTopLeft'
+  | 'zoom';
+
+/**
+ * Valid Shotstack motion effects
+ */
+export type ShotstackEffect = 
+  | 'zoomIn' | 'zoomInSlow' | 'zoomInFast'
+  | 'zoomOut' | 'zoomOutSlow' | 'zoomOutFast'
+  | 'slideLeft' | 'slideLeftSlow' | 'slideLeftFast'
+  | 'slideRight' | 'slideRightSlow' | 'slideRightFast'
+  | 'slideUp' | 'slideUpSlow' | 'slideUpFast'
+  | 'slideDown' | 'slideDownSlow' | 'slideDownFast';
+
+/**
+ * Valid Shotstack filters
+ */
+export type ShotstackFilter = 
+  | 'blur' | 'boost' | 'contrast' | 'darken' 
+  | 'greyscale' | 'lighten' | 'muted' | 'negative';
+
 export interface VideoClip {
   url: string;
   start: number;      // Start time in seconds
   length?: number;    // Duration in seconds (auto-detect if not provided)
   fit?: 'cover' | 'contain' | 'crop' | 'none';
   volume?: number;    // 0-1
+  effect?: ShotstackEffect;   // Motion effect (zoom, slide, etc)
+  filter?: ShotstackFilter;   // Visual filter (boost, contrast, etc)
 }
 
 export interface AudioClip {
@@ -71,10 +113,17 @@ export interface CompositionConfig {
   aspectRatio: '16:9' | '9:16' | '1:1' | '4:5';
   fps?: number;
   
-  // Transitions between clips
+  // Transitions between clips (Shotstack valid values)
+  // See: https://shotstack.io/docs/api/#tocs_transition
   transition?: {
-    type: 'fade' | 'dissolve' | 'wipeLeft' | 'wipeRight' | 'slideLeft' | 'slideRight' | 'zoom';
+    type: ShotstackTransition;
     duration: number; // seconds
+  };
+  
+  // Visual effects for clips
+  effects?: {
+    zoom?: 'zoomIn' | 'zoomOut' | 'zoomInSlow' | 'zoomOutSlow';
+    filter?: 'boost' | 'contrast' | 'darken' | 'greyscale' | 'lighten' | 'muted';
   };
   
   // Callback URL for webhook (optional)
@@ -203,9 +252,12 @@ const buildShotstackEdit = (config: CompositionConfig): any => {
       start: currentTime,
       length: config.intro.length || 3,
       fit: config.intro.fit || 'cover',
-      transition: config.transition ? {
-        out: config.transition.type
-      } : undefined
+      // Professional intro with zoom in and fade transition
+      effect: config.intro.effect || 'zoomIn',
+      transition: {
+        in: 'fade',
+        out: config.transition?.type || 'fade'
+      }
     });
     currentTime += (config.intro.length || 3) - transitionDuration;
   } else if (config.intro) {
@@ -220,8 +272,25 @@ const buildShotstackEdit = (config: CompositionConfig): any => {
     console.warn(`⚠️ [Shotstack] Skipping ${skippedClips} clips without valid public URLs`);
   }
   
+  // Professional effect rotation for dynamic visuals
+  const effectRotation: ShotstackEffect[] = [
+    'zoomInSlow', 'slideRightSlow', 'zoomOutSlow', 'slideLeftSlow'
+  ];
+  
+  // Transition rotation for variety
+  const transitionRotation: ShotstackTransition[] = [
+    'fade', 'slideRight', 'fade', 'wipeLeft', 'fade', 'slideUp'
+  ];
+  
   validClips.forEach((clip, index) => {
     const isLast = index === validClips.length - 1 && (!config.outro || !isValidPublicUrl(config.outro.url));
+    const isFirst = index === 0 && (!config.intro || !isValidPublicUrl(config.intro.url));
+    
+    // Auto-assign effects for professional look (Ken Burns style)
+    const autoEffect = clip.effect || effectRotation[index % effectRotation.length];
+    
+    // Use configured transition or rotate through options
+    const transitionType = config.transition?.type || transitionRotation[index % transitionRotation.length];
     
     videoClips.push({
       asset: {
@@ -232,9 +301,21 @@ const buildShotstackEdit = (config: CompositionConfig): any => {
       start: currentTime,
       length: clip.length || 'auto',
       fit: clip.fit || 'cover',
-      transition: config.transition && !isLast ? {
-        out: config.transition.type
-      } : undefined
+      // Add motion effect for professional Ken Burns style
+      effect: autoEffect,
+      // Add filter if specified
+      filter: clip.filter || (config.effects?.filter),
+      // Transition to next clip (not on last clip)
+      transition: !isLast ? {
+        out: transitionType
+      } : undefined,
+      // Smooth fade in on first clip
+      ...(isFirst && { 
+        transition: { 
+          in: 'fade',
+          out: !isLast ? transitionType : undefined 
+        }
+      })
     });
     
     // Estimate clip duration if not provided (assume 5 seconds for auto)
@@ -252,7 +333,13 @@ const buildShotstackEdit = (config: CompositionConfig): any => {
       },
       start: currentTime,
       length: config.outro.length || 3,
-      fit: config.outro.fit || 'cover'
+      fit: config.outro.fit || 'cover',
+      // Professional outro with zoom out and fade out
+      effect: config.outro.effect || 'zoomOutSlow',
+      transition: {
+        in: config.transition?.type || 'fade',
+        out: 'fade'
+      }
     });
   } else if (config.outro) {
     console.warn(`⚠️ [Shotstack] Skipping outro - not a valid public URL: ${config.outro.url?.substring(0, 50)}...`);
@@ -496,7 +583,70 @@ export const renderVideo = async (
 import { BroadcastSegment, VideoAssets, ChannelConfig } from "../types";
 
 /**
+ * Professional effect presets for different scene types
+ */
+const SCENE_EFFECTS: Record<string, { effect: ShotstackEffect; filter?: ShotstackFilter }> = {
+  'hook': { effect: 'zoomInFast' },
+  'conflict': { effect: 'zoomIn', filter: 'contrast' },
+  'rising': { effect: 'slideRightSlow' },
+  'payoff': { effect: 'zoomOutSlow' },
+  'default': { effect: 'zoomInSlow' }
+};
+
+/**
+ * Professional transition presets
+ */
+const TRANSITION_PRESETS: Record<string, ShotstackTransition> = {
+  'smooth': 'fade',
+  'dynamic': 'slideRight',
+  'professional': 'wipeLeft',
+  'energetic': 'zoom'
+};
+
+/**
+ * Create lower-third text overlay for professional broadcasts
+ */
+export const createLowerThirdOverlay = (
+  text: string,
+  startTime: number,
+  duration: number,
+  style: 'minimal' | 'news' | 'bold' = 'minimal'
+): TextOverlay => {
+  const styleMap = {
+    minimal: { style: 'minimal' as const, size: 'medium' as const, color: '#ffffff' },
+    news: { style: 'blockbuster' as const, size: 'large' as const, color: '#ffffff' },
+    bold: { style: 'vogue' as const, size: 'large' as const, color: '#ffcc00' }
+  };
+  
+  return {
+    text,
+    start: startTime,
+    length: duration,
+    position: 'bottom',
+    ...styleMap[style]
+  };
+};
+
+/**
+ * Create a professional news ticker overlay
+ */
+export const createTickerOverlay = (
+  text: string,
+  startTime: number,
+  duration: number
+): TextOverlay => ({
+  text: `📰 ${text}`,
+  start: startTime,
+  length: duration,
+  position: 'bottom',
+  style: 'minimal',
+  size: 'small',
+  color: '#ffffff'
+});
+
+/**
  * Create a Shotstack composition config from production data
+ * with professional effects and overlays
  */
 export const createCompositionFromSegments = (
   segments: BroadcastSegment[],
@@ -508,29 +658,91 @@ export const createCompositionFromSegments = (
     transition?: CompositionConfig['transition'];
     watermarkUrl?: string;
     callbackUrl?: string;
+    enableOverlays?: boolean;
+    transitionStyle?: 'smooth' | 'dynamic' | 'professional' | 'energetic';
   } = {}
 ): CompositionConfig => {
-  // Build clips from segments with their video URLs
+  // Effect rotation for Ken Burns style variety
+  const effectRotation: ShotstackEffect[] = [
+    'zoomInSlow', 'slideRightSlow', 'zoomOutSlow', 'slideLeftSlow', 
+    'zoomIn', 'slideUpSlow', 'zoomOutSlow', 'slideDownSlow'
+  ];
+  
+  // Build clips from segments with their video URLs and professional effects
   const clips: VideoClip[] = segments
     .map((segment, index): VideoClip | null => {
       const videoUrl = videoUrls[index] || segment.videoUrl;
       if (!videoUrl) return null;
       
+      // Auto-assign Ken Burns effect based on scene type or rotation
+      const sceneType = (segment as any).sceneType?.toLowerCase() || 'default';
+      const sceneEffect = SCENE_EFFECTS[sceneType] || SCENE_EFFECTS.default;
+      const autoEffect = sceneEffect.effect || effectRotation[index % effectRotation.length];
+      
       return {
         url: videoUrl,
         start: 0, // Will be calculated by Shotstack
-        volume: 1
+        volume: 1,
+        effect: autoEffect,
+        filter: sceneEffect.filter
       };
     })
     .filter((clip): clip is VideoClip => clip !== null);
   
+  // Get transition type based on style preference
+  const transitionType = options.transitionStyle 
+    ? TRANSITION_PRESETS[options.transitionStyle] 
+    : 'fade';
+  
+  // Build text overlays for lower-thirds if enabled
+  const textOverlays: TextOverlay[] = [];
+  if (options.enableOverlays) {
+    let currentTime = videos.intro ? 3 : 0; // Start after intro
+    
+    segments.forEach((segment, index) => {
+      const videoUrl = videoUrls[index] || segment.videoUrl;
+      if (!videoUrl) return;
+      
+      // Add speaker name overlay at the start of each segment
+      const speakerName = segment.speaker === 'host_a' ? 'RUSTY' : 'DANI';
+      textOverlays.push(createLowerThirdOverlay(
+        speakerName,
+        currentTime + 0.5,
+        2,
+        'minimal'
+      ));
+      
+      // Estimate segment duration (use audio duration if available)
+      const segmentDuration = (segment as any).audioDuration || 8;
+      currentTime += segmentDuration;
+    });
+  }
+  
   return {
     clips,
-    intro: videos.intro ? { url: videos.intro, start: 0, length: 3 } : undefined,
-    outro: videos.outro ? { url: videos.outro, start: 0, length: 3 } : undefined,
+    intro: videos.intro ? { 
+      url: videos.intro, 
+      start: 0, 
+      length: 3,
+      effect: 'zoomIn' // Professional intro zoom
+    } : undefined,
+    outro: videos.outro ? { 
+      url: videos.outro, 
+      start: 0, 
+      length: 3,
+      effect: 'zoomOutSlow' // Smooth outro
+    } : undefined,
     resolution: options.resolution || '1080',
     aspectRatio: config.format,
-    transition: options.transition || { type: 'dissolve', duration: 0.3 },
+    fps: 30,
+    transition: options.transition || { 
+      type: transitionType, 
+      duration: 0.5 
+    },
+    effects: {
+      zoom: 'zoomInSlow' // Default Ken Burns effect
+    },
+    textOverlays: textOverlays.length > 0 ? textOverlays : undefined,
     watermark: options.watermarkUrl ? {
       url: options.watermarkUrl,
       position: 'bottomRight',
@@ -539,6 +751,44 @@ export const createCompositionFromSegments = (
     } : undefined,
     callbackUrl: options.callbackUrl
   };
+};
+
+/**
+ * Create a composition config with all professional features enabled
+ */
+export const createProfessionalComposition = (
+  segments: BroadcastSegment[],
+  videoUrls: (string | null)[],
+  videos: VideoAssets,
+  config: ChannelConfig,
+  title?: string
+): CompositionConfig => {
+  const composition = createCompositionFromSegments(
+    segments,
+    videoUrls,
+    videos,
+    config,
+    {
+      resolution: '1080',
+      transitionStyle: 'smooth',
+      enableOverlays: true
+    }
+  );
+  
+  // Add title card overlay at the beginning
+  if (title && composition.textOverlays) {
+    composition.textOverlays.unshift({
+      text: title,
+      start: 0.5,
+      length: 3,
+      position: 'center',
+      style: 'blockbuster',
+      size: 'large',
+      color: '#ffffff'
+    });
+  }
+  
+  return composition;
 };
 
 // =============================================================================================
@@ -551,5 +801,8 @@ export const ShotstackService = {
   checkStatus: checkRenderStatus,
   pollRender: pollRenderJob,
   render: renderVideo,
-  createFromSegments: createCompositionFromSegments
+  createFromSegments: createCompositionFromSegments,
+  createProfessionalComposition,
+  createLowerThirdOverlay,
+  createTickerOverlay
 };

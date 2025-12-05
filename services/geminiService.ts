@@ -1470,7 +1470,7 @@ export const composeVideoWithShotstack = async (
   config: ChannelConfig,
   options: {
     resolution?: '1080' | 'hd' | 'sd';
-    transition?: 'fade' | 'dissolve' | 'wipeLeft' | 'slideLeft';
+    transition?: 'fade' | 'wipeLeft' | 'slideLeft' | 'slideRight' | 'zoom';
     transitionDuration?: number;
     watermarkUrl?: string;
     callbackUrl?: string;
@@ -1512,8 +1512,8 @@ export const composeVideoWithShotstack = async (
         resolution: options.resolution || '1080',
         transition: options.transition ? {
           type: options.transition,
-          duration: options.transitionDuration || 0.3
-        } : { type: 'dissolve', duration: 0.3 },
+          duration: options.transitionDuration || 0.5
+        } : { type: 'fade', duration: 0.5 },
         watermarkUrl: options.watermarkUrl,
         callbackUrl: options.callbackUrl
       }
