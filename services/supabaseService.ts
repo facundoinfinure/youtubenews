@@ -778,7 +778,7 @@ export const saveProduction = async (
 ): Promise<Production | null> => {
   if (!supabase) return null;
 
-  // Prepare segments without audioBase64 for storage
+  // Prepare segments without audioBase64 for storage (only if segments were passed)
   const segmentsForStorage = production.segments?.map(seg => ({
     speaker: seg.speaker,
     text: seg.text,
@@ -786,48 +786,54 @@ export const saveProduction = async (
     // audioBase64 is NOT stored in DB, only in Storage
   }));
 
-  const productionData: any = {
-    channel_id: production.channel_id,
-    news_date: production.news_date,
-    status: production.status || 'draft',
-    selected_news_ids: production.selected_news_ids || [],
-    script: production.script || null,
-    viral_hook: production.viral_hook || null,
-    viral_metadata: production.viral_metadata || null,
-    segments: segmentsForStorage || null,
-    video_assets: production.video_assets || null,
-    thumbnail_urls: production.thumbnail_urls || null,
-    progress_step: production.progress_step || 0,
-    user_id: userId || null,
-    version: production.version || 1,
-    parent_production_id: production.parent_production_id || null,
-    // New fields for checkpoint and cost tracking
-    checkpoint_data: production.checkpoint_data || null,
-    last_checkpoint_at: production.last_checkpoint_at || null,
-    failed_steps: production.failed_steps || null,
-    estimated_cost: production.estimated_cost ?? null,
-    actual_cost: production.actual_cost ?? null,
-    cost_breakdown: production.cost_breakdown || null,
-    // v2.0 Narrative Engine fields
-    narrative_used: production.narrative_used || null,
-    scenes: production.scenes || null,
-    // v2.1 Granular segment tracking
-    segment_status: production.segment_status || null
-  };
-
   if (production.id) {
-    // Update existing
+    // === UPDATE EXISTING ===
+    // IMPORTANT: Only include fields that were explicitly passed in the update
+    // This prevents overwriting existing data with null/undefined
+    const updateData: any = {};
+    
+    // Always update these tracking fields
+    if (production.status !== undefined) updateData.status = production.status;
+    if (production.progress_step !== undefined) updateData.progress_step = production.progress_step;
+    updateData.updated_at = new Date().toISOString();
+    
+    // Only update optional fields if they were explicitly passed
+    if (production.channel_id !== undefined) updateData.channel_id = production.channel_id;
+    if (production.news_date !== undefined) updateData.news_date = production.news_date;
+    if (production.selected_news_ids !== undefined) updateData.selected_news_ids = production.selected_news_ids;
+    if (production.script !== undefined) updateData.script = production.script;
+    if (production.viral_hook !== undefined) updateData.viral_hook = production.viral_hook;
+    if (production.viral_metadata !== undefined) updateData.viral_metadata = production.viral_metadata;
+    if (production.segments !== undefined) updateData.segments = segmentsForStorage;
+    if (production.video_assets !== undefined) updateData.video_assets = production.video_assets;
+    if (production.thumbnail_urls !== undefined) updateData.thumbnail_urls = production.thumbnail_urls;
+    if (userId !== undefined) updateData.user_id = userId;
+    if (production.version !== undefined) updateData.version = production.version;
+    if (production.parent_production_id !== undefined) updateData.parent_production_id = production.parent_production_id;
+    if (production.checkpoint_data !== undefined) updateData.checkpoint_data = production.checkpoint_data;
+    if (production.last_checkpoint_at !== undefined) updateData.last_checkpoint_at = production.last_checkpoint_at;
+    if (production.failed_steps !== undefined) updateData.failed_steps = production.failed_steps;
+    if (production.estimated_cost !== undefined) updateData.estimated_cost = production.estimated_cost;
+    if (production.actual_cost !== undefined) updateData.actual_cost = production.actual_cost;
+    if (production.cost_breakdown !== undefined) updateData.cost_breakdown = production.cost_breakdown;
+    if (production.narrative_used !== undefined) updateData.narrative_used = production.narrative_used;
+    if (production.scenes !== undefined) updateData.scenes = production.scenes;
+    if (production.segment_status !== undefined) updateData.segment_status = production.segment_status;
+    if (production.completed_at !== undefined) updateData.completed_at = production.completed_at;
+
+    console.log(`💾 [Production] Updating ${production.id} with fields:`, Object.keys(updateData).join(', '));
+
     let { data, error } = await supabase
       .from('productions')
-      .update(productionData)
+      .update(updateData)
       .eq('id', production.id)
       .select()
       .single();
 
     // If segment_status column doesn't exist, retry without it
-    if (error && error.code === 'PGRST204' && error.message?.includes('segment_status')) {
+    if (error && (error.code === 'PGRST204' || error.message?.includes('segment_status'))) {
       console.warn("⚠️ segment_status column not found, retrying without it. Run migration: supabase_segment_status_migration.sql");
-      const { segment_status, ...dataWithoutSegmentStatus } = productionData;
+      const { segment_status, ...dataWithoutSegmentStatus } = updateData;
       const retryResult = await supabase
         .from('productions')
         .update(dataWithoutSegmentStatus)
@@ -842,9 +848,39 @@ export const saveProduction = async (
       console.error("Error updating production:", error);
       return null;
     }
+    console.log(`✅ [Production] Updated successfully`);
     return normalizeProduction(data);
   } else {
-    // Create new
+    // === CREATE NEW ===
+    // For new productions, include all fields with defaults
+    const productionData: any = {
+      channel_id: production.channel_id,
+      news_date: production.news_date,
+      status: production.status || 'draft',
+      selected_news_ids: production.selected_news_ids || [],
+      script: production.script || null,
+      viral_hook: production.viral_hook || null,
+      viral_metadata: production.viral_metadata || null,
+      segments: segmentsForStorage || null,
+      video_assets: production.video_assets || null,
+      thumbnail_urls: production.thumbnail_urls || null,
+      progress_step: production.progress_step || 0,
+      user_id: userId || null,
+      version: production.version || 1,
+      parent_production_id: production.parent_production_id || null,
+      checkpoint_data: production.checkpoint_data || null,
+      last_checkpoint_at: production.last_checkpoint_at || null,
+      failed_steps: production.failed_steps || null,
+      estimated_cost: production.estimated_cost ?? null,
+      actual_cost: production.actual_cost ?? null,
+      cost_breakdown: production.cost_breakdown || null,
+      narrative_used: production.narrative_used || null,
+      scenes: production.scenes || null,
+      segment_status: production.segment_status || null
+    };
+
+    console.log(`💾 [Production] Creating new production for channel ${production.channel_id}`);
+
     let { data, error } = await supabase
       .from('productions')
       .insert(productionData)
@@ -852,7 +888,7 @@ export const saveProduction = async (
       .single();
 
     // If segment_status column doesn't exist, retry without it
-    if (error && error.code === 'PGRST204' && error.message?.includes('segment_status')) {
+    if (error && (error.code === 'PGRST204' || error.message?.includes('segment_status'))) {
       console.warn("⚠️ segment_status column not found, retrying without it. Run migration: supabase_segment_status_migration.sql");
       const { segment_status, ...dataWithoutSegmentStatus } = productionData;
       const retryResult = await supabase
@@ -868,6 +904,7 @@ export const saveProduction = async (
       console.error("Error creating production:", error);
       return null;
     }
+    console.log(`✅ [Production] Created with ID: ${data.id}`);
     return normalizeProduction(data);
   }
 };
