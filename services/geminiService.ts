@@ -273,11 +273,12 @@ const generateInfiniteTalkVideo = async (
     : shotType === 'wide' ? 'Wide shot, showing full studio' 
     : 'Medium shot, standard framing';
 
+  // Declare outside try block so they're accessible in catch
+  let taskId: string | undefined;
+  let modelName: string = useMultiModel ? 'InfiniteTalk Multi' : 'InfiniteTalk Single';
+  let savedTaskId: string | null = null; // Track if we saved the pending task
+
   try {
-    let taskId: string;
-    let modelName: string;
-    let savedTaskId: string | null = null; // Track if we saved the pending task
-    
     if (useMultiModel) {
       // ===== INFINITETALK MULTI (Two characters in frame) =====
       modelName = 'InfiniteTalk Multi';
@@ -412,14 +413,13 @@ CRITICAL: This is NOT a human being. This is an animated/CGI character as descri
       await updateVideoTaskFailed(taskId, 'Polling completed but no video URL returned');
     }
   } catch (error) {
-    const modelName = useMultiModel ? 'InfiniteTalk Multi' : 'InfiniteTalk Single';
     const errorMsg = (error as Error).message;
     console.error(`❌ [${modelName}] Failed for segment ${segmentIndex}:`, errorMsg);
     
     // Update task to failed if we saved a pending task
     // Note: taskId is the WaveSpeed task ID, savedTaskId is the DB record ID
     // updateVideoTaskFailed uses task_id (WaveSpeed ID) to find the record
-    if (typeof taskId !== 'undefined' && taskId) {
+    if (taskId) {
       await updateVideoTaskFailed(taskId, errorMsg);
     }
   }
