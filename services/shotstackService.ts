@@ -399,22 +399,8 @@ const buildShotstackEdit = (config: CompositionConfig): any => {
     tracks.unshift({ clips: textClips });
   }
   
-  // === AUDIO TRACK (separate from video) ===
-  if (config.audioTrack && isValidPublicUrl(config.audioTrack.url)) {
-    tracks.push({
-      clips: [{
-        asset: {
-          type: 'audio',
-          src: config.audioTrack.url,
-          volume: config.audioTrack.volume ?? 1
-        },
-        start: config.audioTrack.start,
-        length: config.audioTrack.length || 'auto'
-      }]
-    });
-  } else if (config.audioTrack) {
-    console.warn(`⚠️ [Shotstack] Skipping audio track - not a valid public URL`);
-  }
+  // NOTE: We don't add a separate audio track since video clips already have their audio
+  // The soundtrack property (below) can be used for background music if needed
   
   // Build resolution
   const resolutionMap: Record<string, string> = {
@@ -424,16 +410,23 @@ const buildShotstackEdit = (config: CompositionConfig): any => {
     '4k': '4k'
   };
   
+  // Build timeline - no soundtrack needed since video clips have their own audio
+  const timeline: any = {
+    background: '#000000',
+    tracks
+  };
+  
+  // Only add soundtrack if we have a separate audio track
+  if (config.audioTrack && isValidPublicUrl(config.audioTrack.url)) {
+    timeline.soundtrack = {
+      src: config.audioTrack.url,
+      effect: 'fadeOut',
+      volume: config.audioTrack.volume ?? 0.3
+    };
+  }
+  
   return {
-    timeline: {
-      soundtrack: config.audioTrack ? undefined : {
-        src: 'https://shotstack-assets.s3.ap-southeast-2.amazonaws.com/music/freepd/silence.mp3',
-        effect: 'fadeOut',
-        volume: 0
-      },
-      background: '#000000',
-      tracks
-    },
+    timeline,
     output: {
       format: 'mp4',
       resolution: resolutionMap[config.resolution] || 'hd',
