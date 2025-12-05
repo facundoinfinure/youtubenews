@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { AppState, ChannelConfig, NewsItem, BroadcastSegment, VideoAssets, ViralMetadata, UserProfile, Channel, ScriptLine, StoredVideo, ScriptWithScenes, NarrativeType } from './types';
-import { signInWithGoogle, getSession, signOut, getAllChannels, saveChannel, getChannelById, saveVideoToDB, getNewsByDate, saveNewsToDB, markNewsAsSelected, deleteVideoFromDB, supabase, fetchVideosFromDB, saveProduction, getIncompleteProductions, getProductionById, updateProductionStatus, uploadAudioToStorage, uploadImageToStorage, getAudioFromStorage, findCachedScript, findCachedAudio, getAllProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction, verifyStorageBucket, getCompletedProductionsWithVideoInfo, ProductionWithVideoInfo, getUsedNewsIdsForDate, saveCheckpoint, getLastCheckpoint, markStepFailed, saveCachedAudio, updateSegmentStatus, getSegmentsNeedingRegeneration } from './services/supabaseService';
+import { signInWithGoogle, getSession, signOut, getAllChannels, saveChannel, getChannelById, saveVideoToDB, getNewsByDate, saveNewsToDB, markNewsAsSelected, deleteVideoFromDB, supabase, fetchVideosFromDB, saveProduction, getIncompleteProductions, getProductionById, updateProductionStatus, uploadAudioToStorage, uploadImageToStorage, getAudioFromStorage, findCachedScript, findCachedScriptWithScenes, findCachedAudio, getAllProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction, verifyStorageBucket, getCompletedProductionsWithVideoInfo, ProductionWithVideoInfo, getUsedNewsIdsForDate, saveCheckpoint, getLastCheckpoint, markStepFailed, saveCachedAudio, updateSegmentStatus, getSegmentsNeedingRegeneration } from './services/supabaseService';
 import { fetchEconomicNews, generateScript, generateScriptWithScenes, convertScenesToScriptLines, generateSegmentedAudio, generateSegmentedAudioWithCache, generateAudioFromScenes, ExtendedBroadcastSegment, setFindCachedAudioFunction, generateBroadcastVisuals, generateViralMetadata, generateThumbnail, generateThumbnailVariants, generateViralHook, generateVideoSegmentsWithInfiniteTalk, composeVideoWithShotstack, isCompositionAvailable, getCompositionStatus } from './services/geminiService';
 import { uploadVideoToYouTube, deleteVideoFromYouTube } from './services/youtubeService';
 import { ContentCache } from './services/ContentCache';
@@ -126,6 +126,13 @@ const App: React.FC = () => {
     const [year, month, day] = dateString.split('-').map(Number);
     return new Date(year, month - 1, day, 12, 0, 0); // Noon local time to avoid timezone issues
   };
+
+  // Connect audio cache function on mount
+  useEffect(() => {
+    // This enables audio caching across the app
+    setFindCachedAudioFunction(findCachedAudio);
+    console.log("✅ Audio cache function connected");
+  }, []);
 
   // Fetch stored videos for home page sidebar
   useEffect(() => {
@@ -741,14 +748,24 @@ const App: React.FC = () => {
 
       // 2. Generate Script (skip if resuming and script exists, or if cached)
       if (!genScript.length) {
-        // Check for cached script first
+        // Check for cached script first (searches in completed AND in_progress productions)
         if (activeChannel) {
           setProductionProgress({ current: 2, total: TOTAL_STEPS, step: 'Checking for cached script...' });
-          const cachedScript = await findCachedScript(finalNews, activeChannel.id, currentConfig);
+          const cachedResult = await findCachedScriptWithScenes(finalNews, activeChannel.id, currentConfig);
           
-          if (cachedScript && cachedScript.length > 0) {
-            genScript = cachedScript;
-            addLog("✅ Using cached script (same news items).");
+          if (cachedResult && cachedResult.script.length > 0) {
+            genScript = cachedResult.script;
+            
+            // Also use cached scenes if available (v2.0 Narrative Engine)
+            if (cachedResult.scenes) {
+              scriptWithScenes = cachedResult.scenes;
+              setCurrentScriptWithScenes(scriptWithScenes);
+              addLog(`✅ Using cached script + scenes from ${cachedResult.fromStatus} production.`);
+              addLog(`📝 Narrative: "${scriptWithScenes.narrative_used}" (${Object.keys(scriptWithScenes.scenes).length} scenes)`);
+            } else {
+              addLog(`✅ Using cached script (${cachedResult.fromStatus} production).`);
+            }
+            
             setProductionProgress({ current: 2, total: TOTAL_STEPS, step: 'Using cached script...' });
             
             // Still need to generate viral hook for consistency
@@ -756,9 +773,13 @@ const App: React.FC = () => {
             viralHook = await generateViralHook(finalNews, currentConfig);
             addLog(`🎣 Viral hook: "${viralHook.substring(0, 40)}..."`);
             
-            // Save viral hook and script
+            // Save viral hook and script (link to existing data)
             productionId = await saveProductionState(productionId, 1, 'in_progress', { viralHook }) || productionId;
-            productionId = await saveProductionState(productionId, 2, 'in_progress', { script: genScript }) || productionId;
+            productionId = await saveProductionState(productionId, 2, 'in_progress', { 
+              script: genScript,
+              scenes: scriptWithScenes || undefined,
+              narrative_used: scriptWithScenes?.narrative_used
+            }) || productionId;
           } else {
             // No cached script found, generate new one
             setState(AppState.GENERATING_SCRIPT);
@@ -1375,9 +1396,15 @@ const App: React.FC = () => {
         thumbnails.variant = resumeFromProduction.thumbnail_urls[1] || null;
       } else if (!thumbnails.primary) {
         setProductionProgress({ current: 5, total: TOTAL_STEPS, step: 'Creating thumbnails...' });
-        addLog("🎨 Creating thumbnail variants...");
-        // Generate thumbnails (can be done in parallel with other operations)
-        thumbnails = await generateThumbnailVariants(mainContext, currentConfig, metadata);
+        addLog("🎨 Creating thumbnail variants (checking cache first)...");
+        // Generate thumbnails with cache support - pass channelId and productionId
+        thumbnails = await generateThumbnailVariants(
+          mainContext, 
+          currentConfig, 
+          metadata,
+          activeChannel?.id,  // channelId for cache lookup
+          productionId || undefined  // productionId for cache association
+        );
         addLog(`✅ Thumbnails ready (${thumbnails.variant ? '2 variants for A/B testing' : '1 thumbnail'})`);
         
         // Save checkpoint after thumbnails

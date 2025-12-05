@@ -14,7 +14,15 @@ import {
   createPromptHash,
   VideoType,
   VideoProvider,
-  uploadAudioToStorage
+  uploadAudioToStorage,
+  // Pending video task management
+  findPendingVideoTask,
+  saveVideoTaskPending,
+  updateVideoTaskCompleted,
+  updateVideoTaskFailed,
+  // Thumbnail cache
+  findCachedThumbnail,
+  saveThumbnailToCache
 } from "./supabaseService";
 import { 
   createInfiniteTalkMultiTask,
@@ -228,11 +236,35 @@ const generateInfiniteTalkVideo = async (
     useMultiModel = sceneMetadata.model === 'infinite_talk_multi';
   }
 
-  // Check cache first
+  // Check cache first - look for completed videos
   const cachedVideo = await findCachedVideoByDialogue(channelId, videoType, dialogueText, '16:9');
   if (cachedVideo && cachedVideo.video_url) {
     console.log(`✅ [InfiniteTalk] Using cached video for segment ${segmentIndex}`);
     return { url: cachedVideo.video_url, fromCache: true };
+  }
+
+  // Check for pending tasks - resume polling if task was started but not completed
+  const pendingTask = await findPendingVideoTask(channelId, dialogueText, segmentIndex);
+  if (pendingTask) {
+    console.log(`🔄 [InfiniteTalk] Resuming pending task: ${pendingTask.taskId}`);
+    try {
+      const videoUrl = await pollInfiniteTalkTask(pendingTask.taskId);
+      if (videoUrl) {
+        // Update task to completed
+        await updateVideoTaskCompleted(pendingTask.taskId, videoUrl);
+        
+        // Track cost (estimate based on typical segment)
+        const baseCost = resolution === '720p' ? INFINITETALK_COST_720P : INFINITETALK_COST_480P;
+        CostTracker.track('video', 'infinitetalk-resumed', baseCost);
+        
+        console.log(`✅ [InfiniteTalk] Resumed task completed for segment ${segmentIndex}`);
+        return { url: videoUrl, fromCache: false };
+      }
+    } catch (resumeError) {
+      console.warn(`⚠️ [InfiniteTalk] Failed to resume task ${pendingTask.taskId}:`, (resumeError as Error).message);
+      await updateVideoTaskFailed(pendingTask.taskId, (resumeError as Error).message);
+      // Fall through to create new task
+    }
   }
 
   // Get shot type from scene metadata or default to medium
@@ -244,6 +276,7 @@ const generateInfiniteTalkVideo = async (
   try {
     let taskId: string;
     let modelName: string;
+    let savedTaskId: string | null = null; // Track if we saved the pending task
     
     if (useMultiModel) {
       // ===== INFINITETALK MULTI (Two characters in frame) =====
@@ -340,6 +373,27 @@ CRITICAL: This is NOT a human being. This is an animated/CGI character as descri
       );
     }
 
+    // ⭐ Save task as pending BEFORE polling - allows resume if interrupted
+    savedTaskId = await saveVideoTaskPending({
+      channel_id: channelId,
+      production_id: productionId || null,
+      video_type: videoType,
+      segment_index: segmentIndex,
+      prompt_hash: createPromptHash(dialogueText),
+      dialogue_text: dialogueText,
+      provider: 'wavespeed',
+      aspect_ratio: '16:9',
+      duration_seconds: null,
+      status: 'generating',
+      error_message: null,
+      reference_image_hash: createPromptHash(referenceImageUrl.substring(0, 100)),
+      expires_at: null,
+      task_id: taskId
+    });
+    
+    console.log(`💾 [${modelName}] Task ${taskId} saved as pending for segment ${segmentIndex}`);
+
+    // Now poll for completion
     const videoUrl = await pollInfiniteTalkTask(taskId);
 
     if (videoUrl) {
@@ -348,30 +402,26 @@ CRITICAL: This is NOT a human being. This is an animated/CGI character as descri
       const cost = useMultiModel ? baseCost * 1.2 : baseCost; // Multi is ~20% more
       CostTracker.track('video', useMultiModel ? 'infinitetalk-multi' : 'infinitetalk-single', cost);
 
-      // Save to cache
-      await saveGeneratedVideo({
-        channel_id: channelId,
-        production_id: productionId || null,
-        video_type: videoType,
-        segment_index: segmentIndex,
-        prompt_hash: createPromptHash(dialogueText),
-        dialogue_text: dialogueText,
-        video_url: videoUrl,
-        provider: 'wavespeed',
-        aspect_ratio: '16:9',
-        duration_seconds: null,
-        status: 'completed',
-        error_message: null,
-        reference_image_hash: createPromptHash(referenceImageUrl.substring(0, 100)),
-        expires_at: null
-      });
+      // Update task to completed (instead of inserting new record)
+      await updateVideoTaskCompleted(taskId, videoUrl);
 
       console.log(`✅ [${modelName}] Video generated and cached for segment ${segmentIndex}`);
       return { url: videoUrl, fromCache: false };
+    } else {
+      // Polling completed but no URL - mark as failed
+      await updateVideoTaskFailed(taskId, 'Polling completed but no video URL returned');
     }
   } catch (error) {
     const modelName = useMultiModel ? 'InfiniteTalk Multi' : 'InfiniteTalk Single';
-    console.error(`❌ [${modelName}] Failed for segment ${segmentIndex}:`, (error as Error).message);
+    const errorMsg = (error as Error).message;
+    console.error(`❌ [${modelName}] Failed for segment ${segmentIndex}:`, errorMsg);
+    
+    // Update task to failed if we saved a pending task
+    // Note: taskId is the WaveSpeed task ID, savedTaskId is the DB record ID
+    // updateVideoTaskFailed uses task_id (WaveSpeed ID) to find the record
+    if (typeof taskId !== 'undefined' && taskId) {
+      await updateVideoTaskFailed(taskId, errorMsg);
+    }
   }
 
   return { url: null, fromCache: false };
@@ -1337,8 +1387,22 @@ export const generateSeedImage = async (prompt: string, aspectRatio: '1:1' | '16
 export const generateThumbnailVariants = async (
   newsContext: string,
   config: ChannelConfig,
-  viralMeta: ViralMetadata
+  viralMeta: ViralMetadata,
+  channelId?: string,
+  productionId?: string
 ): Promise<{ primary: string | null; variant: string | null }> => {
+  // ⭐ Check cache first - avoid regenerating for same context
+  if (channelId) {
+    const cached = await findCachedThumbnail(channelId, newsContext, viralMeta.title);
+    if (cached) {
+      console.log(`✅ [Thumbnails] Using cached thumbnails (used ${cached.useCount} times before)`);
+      return { 
+        primary: cached.thumbnailUrl, 
+        variant: cached.variantUrl 
+      };
+    }
+  }
+
   // Define 3 proven thumbnail styles
   const styles = [
     {
@@ -1390,6 +1454,9 @@ TECHNICAL:
 Make it MAXIMUM CLICK-THROUGH RATE - this thumbnail needs to stand out in YouTube search results!
 `.trim();
 
+  // Track which provider we used for caching
+  let usedProvider = 'unknown';
+
   // Helper function to generate a single thumbnail with WaveSpeed + DALL-E fallback
   const generateSingleThumbnail = async (prompt: string): Promise<string | null> => {
     // Try WaveSpeed generation model first (no placeholder)
@@ -1401,6 +1468,7 @@ Make it MAXIMUM CLICK-THROUGH RATE - this thumbnail needs to stand out in YouTub
         const dataUri = await imageUrlToDataUri(imageUrl);
         CostTracker.track('thumbnail', 'wavespeed/nano-banana-pro', 0.14);
         console.log(`✅ [Thumbnail Variant] Generated via WaveSpeed`);
+        usedProvider = 'wavespeed';
         return dataUri;
       } catch (genError) {
         console.warn(`⚠️ WaveSpeed generation failed, trying edit model:`, (genError as Error).message);
@@ -1414,6 +1482,7 @@ Make it MAXIMUM CLICK-THROUGH RATE - this thumbnail needs to stand out in YouTub
           const dataUri = await imageUrlToDataUri(imageUrl);
           CostTracker.track('thumbnail', 'wavespeed/nano-banana-pro', 0.14);
           console.log(`✅ [Thumbnail Variant] Generated via WaveSpeed (edit)`);
+          usedProvider = 'wavespeed';
           return dataUri;
         } catch (editError) {
           console.warn(`⚠️ WaveSpeed edit model also failed, trying DALL-E:`, (editError as Error).message);
@@ -1427,6 +1496,7 @@ Make it MAXIMUM CLICK-THROUGH RATE - this thumbnail needs to stand out in YouTub
       const dalleImage = await generateImageWithDALLE(prompt, '1792x1024');
       if (dalleImage) {
         console.log(`✅ [Thumbnail Variant] Generated via DALL-E 3`);
+        usedProvider = 'dalle';
       }
       return dalleImage;
     } catch (e) {
@@ -1444,6 +1514,21 @@ Make it MAXIMUM CLICK-THROUGH RATE - this thumbnail needs to stand out in YouTub
     ]);
 
     console.log(`✅ [Thumbnails] Generated ${primary ? 1 : 0} primary + ${variant ? 1 : 0} variant`);
+    
+    // ⭐ Save to cache for future reuse
+    if (channelId && primary) {
+      await saveThumbnailToCache(
+        channelId,
+        productionId || null,
+        newsContext,
+        viralMeta.title,
+        primary,
+        variant || undefined,
+        primaryStyle.name,
+        usedProvider
+      );
+    }
+
     return { primary, variant };
   } catch (e) {
     console.error("Thumbnail variants generation failed", e);

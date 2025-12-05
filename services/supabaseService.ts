@@ -1570,57 +1570,111 @@ const createNewsHash = (newsItems: NewsItem[]): string => {
   return Math.abs(hash).toString();
 };
 
-// Find existing script for the same news items
+/**
+ * Find cached script result type
+ * Returns both script and scenes for v2.0 Narrative Engine compatibility
+ */
+export interface CachedScriptResult {
+  script: ScriptLine[];
+  scenes: ScriptWithScenes | null;
+  productionId: string;
+  fromStatus: ProductionStatus;
+}
+
+/**
+ * Find existing script for the same news items
+ * Searches in both 'completed' and 'in_progress' productions
+ * Returns script, scenes, and metadata for full recovery
+ */
 export const findCachedScript = async (
   newsItems: NewsItem[],
   channelId: string,
   config: ChannelConfig
 ): Promise<ScriptLine[] | null> => {
+  const result = await findCachedScriptWithScenes(newsItems, channelId, config);
+  return result?.script || null;
+};
+
+/**
+ * Enhanced version that returns script + scenes + metadata
+ * Searches in 'completed' AND 'in_progress' productions for better recovery
+ */
+export const findCachedScriptWithScenes = async (
+  newsItems: NewsItem[],
+  channelId: string,
+  config: ChannelConfig
+): Promise<CachedScriptResult | null> => {
   if (!supabase || newsItems.length === 0) return null;
 
   try {
-    // Create hash from news headlines
-    const newsHash = createNewsHash(newsItems);
-    
-    // Search for completed productions with the same news (by comparing selected_news_ids)
+    // Prepare matching criteria
+    // Use news IDs if available (more reliable), otherwise fall back to headlines
+    const newsIds = newsItems.map(n => n.id).filter(Boolean).sort();
     const newsHeadlines = newsItems.map(n => n.headline).sort();
+    const useIds = newsIds.length === newsItems.length;
     
-    // Get recent completed productions for this channel
+    console.log(`🔍 [Script Cache] Searching for cached script...`);
+    console.log(`🔍 [Script Cache] Matching by ${useIds ? 'news IDs' : 'headlines'} (${newsItems.length} items)`);
+    
+    // Search in BOTH completed and in_progress productions
+    // Prioritize completed, then in_progress
     const { data, error } = await supabase
       .from('productions')
       .select('*')
       .eq('channel_id', channelId)
-      .eq('status', 'completed')
+      .in('status', ['completed', 'in_progress'])
       .not('script', 'is', null)
+      .order('status', { ascending: true }) // 'completed' comes before 'in_progress'
       .order('updated_at', { ascending: false })
-      .limit(50);
+      .limit(100);
 
     if (error) {
       console.error("Error searching for cached script:", error);
       return null;
     }
 
-    if (!data || data.length === 0) return null;
+    if (!data || data.length === 0) {
+      console.log(`🔍 [Script Cache] No productions with scripts found`);
+      return null;
+    }
+
+    console.log(`🔍 [Script Cache] Found ${data.length} productions to check`);
 
     // Find a production with matching news
     for (const prod of data) {
-      if (prod.selected_news_ids && Array.isArray(prod.selected_news_ids)) {
+      if (!prod.selected_news_ids || !Array.isArray(prod.selected_news_ids)) continue;
+      
+      let isMatch = false;
+      
+      if (useIds) {
+        // Match by news IDs (preferred - more reliable)
+        const prodIds = [...prod.selected_news_ids].sort();
+        isMatch = prodIds.length === newsIds.length &&
+                  prodIds.every((id, i) => id === newsIds[i]);
+      } else {
+        // Fall back to matching by headlines
         const prodHeadlines = [...prod.selected_news_ids].sort();
-        // Check if the news items match (same headlines)
-        if (prodHeadlines.length === newsHeadlines.length &&
-            prodHeadlines.every((h, i) => h === newsHeadlines[i])) {
-          // Found a match! Return the script
-          if (prod.script && Array.isArray(prod.script) && prod.script.length > 0) {
-            console.log("✅ Found cached script for these news items");
-            return prod.script as ScriptLine[];
-          }
-        }
+        isMatch = prodHeadlines.length === newsHeadlines.length &&
+                  prodHeadlines.every((h, i) => h === newsHeadlines[i]);
+      }
+      
+      if (isMatch && prod.script && Array.isArray(prod.script) && prod.script.length > 0) {
+        console.log(`✅ [Script Cache] Found cached script in production ${prod.id} (status: ${prod.status})`);
+        console.log(`✅ [Script Cache] Script has ${prod.script.length} lines, scenes: ${prod.scenes ? 'yes' : 'no'}`);
+        
+        return {
+          script: prod.script as ScriptLine[],
+          scenes: prod.scenes as ScriptWithScenes | null,
+          productionId: prod.id,
+          fromStatus: prod.status as ProductionStatus
+        };
       }
     }
 
+    console.log(`🔍 [Script Cache] No matching script found`);
     return null;
   } catch (error) {
-    console.error("Error in findCachedScript:", error);
+    console.error("Error in findCachedScriptWithScenes:", error);
     return null;
   }
 };
@@ -2124,5 +2178,371 @@ export const cleanupOldVideos = async (
   } catch (e) {
     console.error("Error in cleanupOldVideos:", e);
     return 0;
+  }
+};
+
+// =============================================================================================
+// PENDING VIDEO TASK MANAGEMENT
+// =============================================================================================
+
+/**
+ * Result of finding a pending video task
+ */
+export interface PendingVideoTask {
+  id: string;
+  taskId: string;
+  provider: VideoProvider;
+  createdAt: string;
+  dialogueText: string | null;
+  segmentIndex: number | null;
+}
+
+/**
+ * Find a pending video task that was started but not completed
+ * This allows resuming polling instead of creating duplicate requests
+ */
+export const findPendingVideoTask = async (
+  channelId: string,
+  dialogueText: string,
+  segmentIndex?: number
+): Promise<PendingVideoTask | null> => {
+  if (!supabase) return null;
+
+  try {
+    let query = supabase
+      .from('generated_videos')
+      .select('*')
+      .eq('channel_id', channelId)
+      .eq('dialogue_text', dialogueText)
+      .in('status', ['pending', 'generating'])
+      .not('task_id', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    const { data, error } = await query;
+
+    if (error) {
+      // If task_id column doesn't exist, log warning but don't fail
+      if (error.message?.includes('task_id')) {
+        console.warn("⚠️ task_id column not found - run migration: supabase_video_taskid_thumbnail_cache_migration.sql");
+        return null;
+      }
+      console.error("Error finding pending video task:", error);
+      return null;
+    }
+
+    if (data && data.length > 0 && data[0].task_id) {
+      const task = data[0];
+      console.log(`🔄 [Video Cache] Found pending task: ${task.task_id} (status: ${task.status})`);
+      return {
+        id: task.id,
+        taskId: task.task_id,
+        provider: task.provider as VideoProvider,
+        createdAt: task.created_at || task.task_created_at,
+        dialogueText: task.dialogue_text,
+        segmentIndex: task.segment_index
+      };
+    }
+
+    return null;
+  } catch (e) {
+    console.error("Error in findPendingVideoTask:", e);
+    return null;
+  }
+};
+
+/**
+ * Save a video task as pending/generating before starting polling
+ * This allows resuming if the app is interrupted
+ */
+export const saveVideoTaskPending = async (
+  video: Omit<GeneratedVideo, 'id' | 'created_at' | 'video_url'> & { task_id: string }
+): Promise<string | null> => {
+  if (!supabase) return null;
+
+  try {
+    const { data, error } = await supabase
+      .from('generated_videos')
+      .insert({
+        channel_id: video.channel_id,
+        production_id: video.production_id,
+        video_type: video.video_type,
+        segment_index: video.segment_index,
+        prompt_hash: video.prompt_hash,
+        dialogue_text: video.dialogue_text,
+        video_url: '', // Will be updated when completed
+        provider: video.provider,
+        aspect_ratio: video.aspect_ratio || '16:9',
+        duration_seconds: null,
+        status: 'generating',
+        error_message: null,
+        reference_image_hash: video.reference_image_hash,
+        expires_at: null,
+        task_id: video.task_id,
+        task_created_at: new Date().toISOString()
+      })
+      .select('id')
+      .single();
+
+    if (error) {
+      // If task_id column doesn't exist, fall back to old behavior (no pending tracking)
+      if (error.message?.includes('task_id') || error.message?.includes('task_created_at')) {
+        console.warn("⚠️ task_id/task_created_at columns not found - run migration");
+        // Fall back to saving without task_id
+        const { data: fallbackData, error: fallbackError } = await supabase
+          .from('generated_videos')
+          .insert({
+            channel_id: video.channel_id,
+            production_id: video.production_id,
+            video_type: video.video_type,
+            segment_index: video.segment_index,
+            prompt_hash: video.prompt_hash,
+            dialogue_text: video.dialogue_text,
+            video_url: '',
+            provider: video.provider,
+            aspect_ratio: video.aspect_ratio || '16:9',
+            status: 'generating'
+          })
+          .select('id')
+          .single();
+        
+        if (fallbackError) {
+          console.error("Error saving video task (fallback):", fallbackError);
+          return null;
+        }
+        return fallbackData?.id || null;
+      }
+      console.error("Error saving video task pending:", error);
+      return null;
+    }
+
+    console.log(`✅ [Video Task] Saved pending task: ${video.task_id}`);
+    return data?.id || null;
+  } catch (e) {
+    console.error("Error in saveVideoTaskPending:", e);
+    return null;
+  }
+};
+
+/**
+ * Update a video task to completed status with the final URL
+ */
+export const updateVideoTaskCompleted = async (
+  taskId: string,
+  videoUrl: string,
+  durationSeconds?: number
+): Promise<boolean> => {
+  if (!supabase) return false;
+
+  try {
+    const { error } = await supabase
+      .from('generated_videos')
+      .update({
+        status: 'completed',
+        video_url: videoUrl,
+        duration_seconds: durationSeconds || null,
+        error_message: null
+      })
+      .eq('task_id', taskId);
+
+    if (error) {
+      console.error("Error updating video task to completed:", error);
+      return false;
+    }
+
+    console.log(`✅ [Video Task] Updated task ${taskId} to completed`);
+    return true;
+  } catch (e) {
+    console.error("Error in updateVideoTaskCompleted:", e);
+    return false;
+  }
+};
+
+/**
+ * Update a video task to failed status
+ */
+export const updateVideoTaskFailed = async (
+  taskId: string,
+  errorMessage: string
+): Promise<boolean> => {
+  if (!supabase) return false;
+
+  try {
+    const { error } = await supabase
+      .from('generated_videos')
+      .update({
+        status: 'failed',
+        error_message: errorMessage
+      })
+      .eq('task_id', taskId);
+
+    if (error) {
+      console.error("Error updating video task to failed:", error);
+      return false;
+    }
+
+    console.log(`❌ [Video Task] Updated task ${taskId} to failed: ${errorMessage}`);
+    return true;
+  } catch (e) {
+    console.error("Error in updateVideoTaskFailed:", e);
+    return false;
+  }
+};
+
+// =============================================================================================
+// THUMBNAIL CACHE
+// =============================================================================================
+
+/**
+ * Cached thumbnail result
+ */
+export interface CachedThumbnail {
+  id: string;
+  thumbnailUrl: string;
+  variantUrl: string | null;
+  style: string | null;
+  provider: string;
+  useCount: number;
+}
+
+/**
+ * Find a cached thumbnail by context hash
+ */
+export const findCachedThumbnail = async (
+  channelId: string,
+  newsContext: string,
+  viralTitle: string
+): Promise<CachedThumbnail | null> => {
+  if (!supabase) return null;
+
+  try {
+    const contextHash = createPromptHash(`${newsContext}_${viralTitle}`);
+
+    const { data, error } = await supabase
+      .from('thumbnail_cache')
+      .select('*')
+      .eq('channel_id', channelId)
+      .eq('context_hash', contextHash)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      // If table doesn't exist, log warning but don't fail
+      if (error.message?.includes('thumbnail_cache') || error.code === '42P01') {
+        console.warn("⚠️ thumbnail_cache table not found - run migration: supabase_video_taskid_thumbnail_cache_migration.sql");
+        return null;
+      }
+      console.error("Error finding cached thumbnail:", error);
+      return null;
+    }
+
+    if (data?.thumbnail_url) {
+      console.log(`✅ [Thumbnail Cache] Found cached thumbnail (used ${data.use_count} times)`);
+      
+      // Update use count
+      await supabase
+        .from('thumbnail_cache')
+        .update({
+          use_count: (data.use_count || 1) + 1,
+          last_used_at: new Date().toISOString()
+        })
+        .eq('id', data.id);
+
+      return {
+        id: data.id,
+        thumbnailUrl: data.thumbnail_url,
+        variantUrl: data.variant_url,
+        style: data.style,
+        provider: data.provider || 'unknown',
+        useCount: data.use_count || 1
+      };
+    }
+
+    return null;
+  } catch (e) {
+    console.error("Error in findCachedThumbnail:", e);
+    return null;
+  }
+};
+
+/**
+ * Save a thumbnail to cache
+ */
+export const saveThumbnailToCache = async (
+  channelId: string,
+  productionId: string | null,
+  newsContext: string,
+  viralTitle: string,
+  thumbnailUrl: string,
+  variantUrl?: string,
+  style?: string,
+  provider: string = 'wavespeed'
+): Promise<boolean> => {
+  if (!supabase) return false;
+
+  try {
+    const contextHash = createPromptHash(`${newsContext}_${viralTitle}`);
+
+    // Check if already exists
+    const { data: existing } = await supabase
+      .from('thumbnail_cache')
+      .select('id')
+      .eq('channel_id', channelId)
+      .eq('context_hash', contextHash)
+      .maybeSingle();
+
+    if (existing) {
+      // Update existing entry
+      const { error } = await supabase
+        .from('thumbnail_cache')
+        .update({
+          thumbnail_url: thumbnailUrl,
+          variant_url: variantUrl || null,
+          style: style || null,
+          provider,
+          last_used_at: new Date().toISOString()
+        })
+        .eq('id', existing.id);
+
+      if (error) {
+        console.error("Error updating cached thumbnail:", error);
+        return false;
+      }
+
+      console.log("✅ [Thumbnail Cache] Updated existing cache entry");
+      return true;
+    }
+
+    // Insert new entry
+    const { error } = await supabase
+      .from('thumbnail_cache')
+      .insert({
+        channel_id: channelId,
+        production_id: productionId,
+        context_hash: contextHash,
+        thumbnail_url: thumbnailUrl,
+        variant_url: variantUrl || null,
+        style: style || null,
+        provider,
+        use_count: 1,
+        last_used_at: new Date().toISOString()
+      });
+
+    if (error) {
+      // If table doesn't exist, log warning but don't fail the production
+      if (error.message?.includes('thumbnail_cache') || error.code === '42P01') {
+        console.warn("⚠️ thumbnail_cache table not found - thumbnails won't be cached");
+        return false;
+      }
+      console.error("Error saving thumbnail to cache:", error);
+      return false;
+    }
+
+    console.log("✅ [Thumbnail Cache] Saved new thumbnail to cache");
+    return true;
+  } catch (e) {
+    console.error("Error in saveThumbnailToCache:", e);
+    return false;
   }
 };
