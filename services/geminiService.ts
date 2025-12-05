@@ -59,7 +59,10 @@ import {
   checkShotstackConfig,
   createCompositionFromSegments,
   CompositionConfig,
-  RenderResult
+  RenderResult,
+  // Podcast-style composition (following shockstack.md guide)
+  renderPodcastVideo,
+  PodcastScene
 } from "./shotstackService";
 
 const getApiKey = () => import.meta.env.VITE_GEMINI_API_KEY || window.env?.API_KEY || process.env.API_KEY || "";
@@ -1568,18 +1571,20 @@ export const isCompositionAvailable = (): boolean => {
 
 /**
  * Compose final video from segments using Shotstack
- * This creates a professional video with transitions, news overlays, etc.
  * 
- * Call this AFTER generateVideoSegmentsWithInfiniteTalk to combine all clips
- * 
- * IMPORTANT: Video clips from InfiniteTalk already contain embedded audio (lip-sync).
- * We do NOT add any separate audio track to avoid duplication.
+ * Uses PODCAST-STYLE composition (following shockstack.md guide):
+ * - Videos play sequentially (NO overlaps)
+ * - Minimalist lower thirds with titles
+ * - Subtle frame/border
+ * - Soft vignette overlay
+ * - Fade transitions only
+ * - NO separate audio track (videos have embedded audio from InfiniteTalk)
  * 
  * @param segments - Broadcast segments with video URLs
  * @param videoUrls - Array of video URLs (from InfiniteTalk)
- * @param videos - Video assets (intro/outro)
+ * @param videos - Video assets (intro/outro) - currently not used in podcast style
  * @param config - Channel config
- * @param options - Composition options including news overlays
+ * @param options - Composition options
  */
 export const composeVideoWithShotstack = async (
   segments: BroadcastSegment[],
@@ -1592,10 +1597,11 @@ export const composeVideoWithShotstack = async (
     transitionDuration?: number;
     watermarkUrl?: string;
     callbackUrl?: string;
-    // News broadcast overlays
     enableOverlays?: boolean;
     breakingNewsTitle?: string;
     headlines?: string[];
+    // Scene titles for lower thirds (optional, will use headlines if not provided)
+    sceneTitles?: string[];
   } = {}
 ): Promise<RenderResult> => {
   // Check if Shotstack is configured
@@ -1609,9 +1615,16 @@ export const composeVideoWithShotstack = async (
     };
   }
 
-  // Filter out null video URLs
-  const validVideoCount = videoUrls.filter(url => url !== null).length;
-  if (validVideoCount === 0) {
+  // Filter out null video URLs and build scenes
+  const validSegments: { segment: BroadcastSegment; videoUrl: string; index: number }[] = [];
+  segments.forEach((segment, index) => {
+    const videoUrl = videoUrls[index] || segment.videoUrl;
+    if (videoUrl) {
+      validSegments.push({ segment, videoUrl, index });
+    }
+  });
+
+  if (validSegments.length === 0) {
     console.error('❌ [Composition] No valid video URLs to compose');
     return {
       success: false,
@@ -1619,51 +1632,83 @@ export const composeVideoWithShotstack = async (
     };
   }
 
-  console.log(`🎬 [Composition] Starting video composition with Shotstack...`);
-  console.log(`🎬 [Composition] ${validVideoCount}/${videoUrls.length} valid video segments`);
-  console.log(`🎬 [Composition] Intro: ${videos.intro ? 'Yes' : 'No'}, Outro: ${videos.outro ? 'Yes' : 'No'}`);
-  console.log(`🎬 [Composition] News overlays: ${options.enableOverlays !== false ? 'Enabled' : 'Disabled'}`);
-  console.log(`🎬 [Composition] NOTE: Using embedded audio from video clips (no separate audio track)`);
+  console.log(`🎙️ [Podcast Composition] Starting podcast-style video composition...`);
+  console.log(`🎙️ [Podcast Composition] ${validSegments.length}/${segments.length} valid video segments`);
+  console.log(`🎙️ [Podcast Composition] Style: Clean podcast aesthetic (no TV news overlays)`);
+  console.log(`🎙️ [Podcast Composition] NOTE: Videos play SEQUENTIALLY (no overlaps)`);
 
   try {
-    // Create composition config with news overlays
-    // NOTE: Videos already have embedded audio - we do NOT add audioTrack
-    const compositionConfig = createCompositionFromSegments(
-      segments,
-      videoUrls,
-      videos,
-      config,
-      {
-        resolution: options.resolution || '1080',
-        transition: options.transition ? {
-          type: options.transition,
-          duration: options.transitionDuration || 0.5
-        } : { type: 'fade', duration: 0.5 },
-        watermarkUrl: options.watermarkUrl,
-        callbackUrl: options.callbackUrl,
-        // News broadcast overlays (enabled by default)
-        enableOverlays: options.enableOverlays !== false,
-        breakingNewsTitle: options.breakingNewsTitle,
-        headlines: options.headlines
-      }
-    );
+    // Convert segments to PodcastScene format
+    // CRITICAL: Each scene needs a duration so we can calculate start times
+    const podcastScenes: PodcastScene[] = validSegments.map(({ segment, videoUrl, index }) => {
+      // Estimate duration from audio duration or text length
+      // InfiniteTalk videos match audio duration, which is ~150 words/minute
+      const wordCount = segment.text.split(/\s+/).length;
+      const estimatedDuration = Math.max(3, Math.ceil(wordCount / 2.5)); // ~150 wpm = 2.5 words/sec
+      
+      // Use actual audio duration if available
+      const audioDuration = (segment as any).audioDuration;
+      const duration = audioDuration || estimatedDuration;
 
-    // Submit render job
-    const result = await ShotstackService.render(compositionConfig);
+      // Get title for lower third
+      // Priority: sceneTitles > headlines > first words of text
+      let title = '';
+      if (options.sceneTitles && options.sceneTitles[index]) {
+        title = options.sceneTitles[index];
+      } else if (options.headlines && options.headlines[index]) {
+        title = options.headlines[index];
+      } else {
+        // Use first 50 chars of segment text as title
+        title = segment.text.length > 50 
+          ? segment.text.substring(0, 47) + '...'
+          : segment.text;
+      }
+
+      // Get speaker name
+      const speakerName = segment.speaker === 'host_a' 
+        ? (config.characters?.hostA?.name || 'Host A')
+        : segment.speaker === 'host_b'
+        ? (config.characters?.hostB?.name || 'Host B')
+        : segment.speaker;
+
+      return {
+        video_url: videoUrl,
+        title,
+        duration,
+        speaker: speakerName
+      };
+    });
+
+    console.log(`🎙️ [Podcast Composition] Built ${podcastScenes.length} scenes:`);
+    let totalDuration = 0;
+    podcastScenes.forEach((scene, i) => {
+      console.log(`  Scene ${i + 1}: ${scene.duration}s - "${scene.title.substring(0, 30)}..." (${scene.speaker})`);
+      totalDuration += scene.duration;
+    });
+    console.log(`🎙️ [Podcast Composition] Estimated total duration: ${totalDuration}s`);
+
+    // Render using podcast-style composition
+    const result = await renderPodcastVideo(podcastScenes, {
+      channelName: config.channelName,
+      episodeTitle: options.breakingNewsTitle,
+      showBorder: true,
+      showVignette: true,
+      resolution: options.resolution || '1080'
+    });
 
     if (result.success) {
-      console.log(`✅ [Composition] Video composed successfully!`);
-      console.log(`🎥 [Composition] URL: ${result.videoUrl}`);
-      console.log(`🖼️ [Composition] Poster: ${result.posterUrl}`);
-      console.log(`⏱️ [Composition] Duration: ${result.duration}s`);
-      console.log(`💰 [Composition] Cost: $${result.cost?.toFixed(4) || '?'}`);
+      console.log(`✅ [Podcast Composition] Video composed successfully!`);
+      console.log(`🎥 [Podcast Composition] URL: ${result.videoUrl}`);
+      console.log(`🖼️ [Podcast Composition] Poster: ${result.posterUrl}`);
+      console.log(`⏱️ [Podcast Composition] Duration: ${result.duration}s`);
+      console.log(`💰 [Podcast Composition] Cost: $${result.cost?.toFixed(4) || '?'}`);
     } else {
-      console.error(`❌ [Composition] Failed: ${result.error}`);
+      console.error(`❌ [Podcast Composition] Failed: ${result.error}`);
     }
 
     return result;
   } catch (error) {
-    console.error('❌ [Composition] Error:', (error as Error).message);
+    console.error('❌ [Podcast Composition] Error:', (error as Error).message);
     return {
       success: false,
       error: (error as Error).message

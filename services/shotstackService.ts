@@ -570,10 +570,233 @@ export const renderVideo = async (
 };
 
 // =============================================================================================
-// HELPER: Create composition from BroadcastSegments
+// PODCAST-STYLE COMPOSITION (Following shockstack.md guide)
 // =============================================================================================
 
 import { BroadcastSegment, VideoAssets, ChannelConfig } from "../types";
+
+/**
+ * Scene input for podcast-style composition
+ */
+export interface PodcastScene {
+  video_url: string;
+  title: string;
+  duration: number; // Duration in seconds (from video metadata or estimate)
+  speaker?: string; // Optional speaker name
+}
+
+/**
+ * Build podcast-style Shotstack edit following the guide
+ * 
+ * This creates a clean, modern podcast aesthetic with:
+ * - Videos playing sequentially (NO overlaps)
+ * - Minimalist lower thirds with titles
+ * - Subtle frame/border
+ * - Soft vignette overlay
+ * - Fade transitions only
+ */
+export const buildPodcastStyleEdit = (
+  scenes: PodcastScene[],
+  options: {
+    channelName?: string;
+    episodeTitle?: string;
+    showBorder?: boolean;
+    showVignette?: boolean;
+    resolution?: '1080' | 'hd' | 'sd';
+  } = {}
+): any => {
+  // Calculate cumulative start times
+  // CRITICAL: Each video starts when the previous one ends
+  let currentStart = 0;
+  const scenesWithTiming = scenes.map(scene => {
+    const sceneWithStart = {
+      ...scene,
+      start: currentStart
+    };
+    currentStart += scene.duration;
+    return sceneWithStart;
+  });
+
+  const totalDuration = currentStart;
+  console.log(`🎬 [Podcast Composition] Total duration: ${totalDuration}s across ${scenes.length} scenes`);
+
+  // Track 1: Video clips (bottom layer)
+  const videoClips = scenesWithTiming.map(scene => ({
+    asset: {
+      type: 'video',
+      src: scene.video_url,
+      volume: 1 // Use embedded audio
+    },
+    start: scene.start,
+    length: 'auto', // Let Shotstack detect the duration
+    transition: {
+      in: 'fade',
+      out: 'fade'
+    }
+  }));
+
+  // Track 2: Lower third title overlays (HTML-based for podcast style)
+  const titleClips = scenesWithTiming.map(scene => ({
+    asset: {
+      type: 'html',
+      html: `<div style="width:100%;height:100%;display:flex;align-items:flex-end;">
+        <div style="margin:0 auto 40px auto;max-width:70%;padding:14px 24px;background:rgba(0,0,0,0.65);border-radius:12px;font-family:Inter,Arial,sans-serif;">
+          <div style="font-size:26px;font-weight:600;color:#ffffff;text-align:center;">${escapeHtml(scene.title)}</div>
+          ${scene.speaker ? `<div style="font-size:16px;color:rgba(255,255,255,0.7);text-align:center;margin-top:4px;">🎙️ ${escapeHtml(scene.speaker)}</div>` : ''}
+        </div>
+      </div>`.replace(/\n\s*/g, '')
+    },
+    start: scene.start,
+    length: Math.min(scene.duration, 5), // Show title for max 5 seconds
+    transition: {
+      in: 'fade',
+      out: 'fade'
+    }
+  }));
+
+  // Track 3: Decorative border (optional)
+  const borderClip = options.showBorder !== false ? [{
+    asset: {
+      type: 'html',
+      html: `<div style="width:100%;height:100%;display:flex;justify-content:center;align-items:center;pointer-events:none;">
+        <div style="width:95%;height:95%;border-radius:20px;border:4px solid rgba(255,255,255,0.12);box-shadow:0 0 20px rgba(0,0,0,0.6);"></div>
+      </div>`.replace(/\n\s*/g, '')
+    },
+    start: 0,
+    length: totalDuration + 1 // Slightly longer to cover fade out
+  }] : [];
+
+  // Track 4: Vignette overlay (optional)
+  const vignetteClip = options.showVignette !== false ? [{
+    asset: {
+      type: 'html',
+      html: `<div style="width:100%;height:100%;background:radial-gradient(circle at center, rgba(0,0,0,0) 60%, rgba(0,0,0,0.35) 100%);"></div>`
+    },
+    start: 0,
+    length: totalDuration + 1
+  }] : [];
+
+  // Track 5: Channel branding (top corner, optional)
+  const brandingClip = options.channelName ? [{
+    asset: {
+      type: 'html',
+      html: `<div style="width:100%;height:100%;display:flex;justify-content:flex-end;align-items:flex-start;padding:20px;">
+        <div style="padding:8px 16px;background:rgba(0,0,0,0.5);border-radius:8px;font-family:Inter,Arial,sans-serif;">
+          <div style="font-size:14px;font-weight:600;color:#ffffff;">${escapeHtml(options.channelName)}</div>
+        </div>
+      </div>`.replace(/\n\s*/g, '')
+    },
+    start: 0,
+    length: totalDuration + 1
+  }] : [];
+
+  // Build tracks array (order matters: bottom to top)
+  const tracks: any[] = [];
+  
+  // Videos at the bottom
+  tracks.push({ clips: videoClips });
+  
+  // Title overlays
+  if (titleClips.length > 0) {
+    tracks.push({ clips: titleClips });
+  }
+  
+  // Border
+  if (borderClip.length > 0) {
+    tracks.push({ clips: borderClip });
+  }
+  
+  // Vignette
+  if (vignetteClip.length > 0) {
+    tracks.push({ clips: vignetteClip });
+  }
+  
+  // Branding on top
+  if (brandingClip.length > 0) {
+    tracks.push({ clips: brandingClip });
+  }
+
+  // Resolution settings
+  const resolutionMap: Record<string, { width: number; height: number }> = {
+    '1080': { width: 1920, height: 1080 },
+    'hd': { width: 1280, height: 720 },
+    'sd': { width: 854, height: 480 }
+  };
+  const size = resolutionMap[options.resolution || '1080'];
+
+  return {
+    timeline: {
+      background: '#000000',
+      tracks
+    },
+    output: {
+      format: 'mp4',
+      fps: 25,
+      size
+    }
+  };
+};
+
+/**
+ * Helper to escape HTML special characters
+ */
+const escapeHtml = (text: string): string => {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+};
+
+/**
+ * Render a podcast-style video from scenes
+ * This is the main function to use for podcast composition
+ */
+export const renderPodcastVideo = async (
+  scenes: PodcastScene[],
+  options: {
+    channelName?: string;
+    episodeTitle?: string;
+    showBorder?: boolean;
+    showVignette?: boolean;
+    resolution?: '1080' | 'hd' | 'sd';
+  } = {}
+): Promise<RenderResult> => {
+  console.log(`🎙️ [Podcast Render] Starting podcast-style composition...`);
+  console.log(`🎙️ [Podcast Render] ${scenes.length} scenes to compose`);
+  
+  // Validate scenes
+  const validScenes = scenes.filter(s => s.video_url && s.duration > 0);
+  if (validScenes.length === 0) {
+    return {
+      success: false,
+      error: 'No valid scenes to render'
+    };
+  }
+
+  // Build the edit
+  const edit = buildPodcastStyleEdit(validScenes, options);
+  
+  console.log(`📋 [Podcast Render] Edit config built, submitting to Shotstack...`);
+
+  try {
+    // Submit to Shotstack
+    const response = await shotstackRequest('/render', 'POST', edit);
+    const renderId = response.response.id;
+    
+    console.log(`✅ [Podcast Render] Job submitted: ${renderId}`);
+    
+    // Poll for completion
+    return await pollRenderJob(renderId);
+  } catch (error) {
+    console.error('❌ [Podcast Render] Error:', (error as Error).message);
+    return {
+      success: false,
+      error: (error as Error).message
+    };
+  }
+};
 
 /**
  * Professional effect presets for different scene types
