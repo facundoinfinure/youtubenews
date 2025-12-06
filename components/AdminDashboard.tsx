@@ -1911,15 +1911,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                                               published_at: new Date().toISOString()
                                             });
                                             
-                                            await saveVideoToDB({
-                                              title: production.viral_metadata.title,
-                                              description: production.viral_metadata.description,
-                                              youtube_id: youtubeId,
-                                              viral_score: 0,
-                                              tags: production.viral_metadata.tags,
-                                              is_posted: true,
-                                              channel_id: production.channel_id
-                                            });
+                                            await saveVideoToDB(
+                                              production.viral_metadata,
+                                              production.channel_id,
+                                              youtubeId,
+                                              0
+                                            );
                                             
                                             toast.dismiss(toastId);
                                             toast.success('¡Publicado en YouTube!');
