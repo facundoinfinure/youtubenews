@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
-import { AppState, ChannelConfig, NewsItem, BroadcastSegment, VideoAssets, ViralMetadata, UserProfile, Channel, ScriptLine, StoredVideo, ScriptWithScenes, NarrativeType } from './types';
+import { AppState, ChannelConfig, NewsItem, BroadcastSegment, VideoAssets, ViralMetadata, UserProfile, Channel, ScriptLine, StoredVideo, ScriptWithScenes, NarrativeType, Production, ProductionWizardState } from './types';
 import { signInWithGoogle, getSession, signOut, getAllChannels, saveChannel, getChannelById, saveVideoToDB, getNewsByDate, saveNewsToDB, markNewsAsSelected, deleteVideoFromDB, supabase, fetchVideosFromDB, saveProduction, getIncompleteProductions, getProductionById, updateProductionStatus, uploadAudioToStorage, uploadImageToStorage, getAudioFromStorage, findCachedScript, findCachedScriptWithScenes, findCachedAudio, getAllProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction, verifyStorageBucket, getCompletedProductionsWithVideoInfo, ProductionWithVideoInfo, getUsedNewsIdsForDate, saveCheckpoint, getLastCheckpoint, markStepFailed, saveCachedAudio, updateSegmentStatus, getSegmentsNeedingRegeneration, getDefaultChannelConfig } from './services/supabaseService';
 import { fetchEconomicNews, generateScript, generateScriptWithScenes, convertScenesToScriptLines, generateSegmentedAudio, generateSegmentedAudioWithCache, generateAudioFromScenes, ExtendedBroadcastSegment, setFindCachedAudioFunction, generateBroadcastVisuals, generateViralMetadata, generateThumbnail, generateThumbnailVariants, generateViralHook, generateVideoSegmentsWithInfiniteTalk, composeVideoWithShotstack, isCompositionAvailable, getCompositionStatus } from './services/geminiService';
 import { uploadVideoToYouTube, deleteVideoFromYouTube } from './services/youtubeService';
@@ -17,6 +17,7 @@ import { Header } from './components/Header';
 import { IdleState } from './components/IdleState';
 import { ErrorState } from './components/ErrorState';
 import { ProductionStatus } from './components/ProductionStatus';
+import { ProductionWizard } from './components/ProductionWizard';
 // Shared utilities
 import { EMPTY_VIDEO_ASSETS, normalizeVideoAssets, hasVideoAssets } from './utils/videoAssets';
 import { parseLocalDate, getYesterdayString } from './utils/dateUtils';
@@ -99,6 +100,11 @@ const App: React.FC = () => {
   const [completedProductions, setCompletedProductions] = useState<ProductionWithVideoInfo[]>([]); // For home page sidebar - completed/published productions
   const [productionProgress, setProductionProgress] = useState({ current: 0, total: 0, step: '' });
   const [currentProductionId, setCurrentProductionId] = useState<string | null>(null); // Track current production
+  const [incompleteProductions, setIncompleteProductions] = useState<Production[]>([]); // For home page - incomplete productions
+  
+  // Production Wizard State (v2.4)
+  const [showWizard, setShowWizard] = useState(false);
+  const [wizardProduction, setWizardProduction] = useState<Production | null>(null);
   
   // Video Composition State (Shotstack)
   const [composedVideoUrl, setComposedVideoUrl] = useState<string | null>(null);
@@ -138,6 +144,17 @@ const App: React.FC = () => {
     };
     fetchCompletedProds();
   }, [activeChannel, user]);
+
+  // Fetch incomplete productions for home page (wizard resumption)
+  useEffect(() => {
+    const fetchIncompleteProds = async () => {
+      if (activeChannel && user) {
+        const prods = await getIncompleteProductions(activeChannel.id, user.email);
+        setIncompleteProductions(prods);
+      }
+    };
+    fetchIncompleteProds();
+  }, [activeChannel, user, showWizard]); // Re-fetch when wizard closes
 
   const addLog = (msg: string) => setLogs(prev => [...prev, msg]);
 
@@ -1974,38 +1991,52 @@ const App: React.FC = () => {
           <div className={`w-full bg-black rounded-xl overflow-hidden shadow-lg relative flex flex-col transition-all duration-500 ${config.format === '9:16' ? 'max-w-[400px] mx-auto aspect-[9/16]' : 'aspect-video'}`}>
 
             {state === AppState.IDLE || state === AppState.FETCHING_NEWS ? (
-              // 1. INPUT PHASE
-              <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0f0f0f] text-center p-8 space-y-6">
-                <div
-                  className="w-24 h-24 rounded-full flex items-center justify-center shadow-2xl mb-4"
-                  style={{ background: `linear-gradient(135deg, ${config.logoColor1}, ${config.logoColor2})` }}
-                >
-                  {state === AppState.FETCHING_NEWS ? (
-                    <span className="text-4xl animate-spin">🌍</span>
-                  ) : (
-                    <span className="text-4xl">🎥</span>
-                  )}
-                </div>
-                <h2 className="text-2xl font-bold">
-                  {state === AppState.FETCHING_NEWS ? "Scanning Markets..." : `${config.channelName} Studio`}
-                </h2>
-                {state === AppState.IDLE && (
-                  <>
-                    <p className="text-gray-400 max-w-md">
-                      {config.tagline}. Select a date to scrape news for {config.country}.
-                    </p>
-
-                    <div className="flex flex-col items-center gap-2 w-full max-w-xs">
-                      <label className="text-xs text-gray-500 uppercase tracking-wider font-bold">News Date</label>
-                      <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)}
-                        className="bg-[#1f1f1f] border border-[#3f3f3f] text-white px-4 py-2 rounded-lg w-full focus:outline-none focus:border-blue-500" />
-                    </div>
-                    <button onClick={verifyKeyAndStart} className="btn-primary mt-4">
-                      ▶ Start Production
-                    </button>
-                  </>
-                )}
-              </div>
+              // 1. INPUT PHASE - Now uses IdleState component with wizard integration
+              <IdleState
+                state={state}
+                config={config}
+                selectedDate={selectedDate}
+                onDateChange={setSelectedDate}
+                onStart={verifyKeyAndStart}
+                incompleteProductions={incompleteProductions}
+                onResumeProduction={async (production) => {
+                  setWizardProduction(production);
+                  setShowWizard(true);
+                }}
+                onStartWizard={async () => {
+                  // Create a new production for the wizard
+                  if (!activeChannel || !user) {
+                    toast.error('No hay canal activo');
+                    return;
+                  }
+                  
+                  const newProduction = await saveProduction({
+                    channel_id: activeChannel.id,
+                    news_date: selectedDate,
+                    status: 'draft',
+                    selected_news_ids: [],
+                    progress_step: 0,
+                    wizard_state: {
+                      currentStep: 'news_fetch',
+                      newsFetch: { status: 'pending' },
+                      newsSelect: { status: 'pending' },
+                      scriptGenerate: { status: 'pending' },
+                      scriptReview: { status: 'pending' },
+                      audioGenerate: { status: 'pending' },
+                      videoGenerate: { status: 'pending' },
+                      renderFinal: { status: 'pending' },
+                      publish: { status: 'pending' }
+                    }
+                  }, user.email);
+                  
+                  if (newProduction) {
+                    setWizardProduction(newProduction);
+                    setShowWizard(true);
+                  } else {
+                    toast.error('Error creando producción');
+                  }
+                }}
+              />
 
             ) : state === AppState.SELECTING_NEWS ? (
               // 2. SELECTION PHASE
@@ -2409,6 +2440,96 @@ const App: React.FC = () => {
           )}
         </div>
       </main>
+
+      {/* Production Wizard Modal (v2.4 step-by-step flow) */}
+      {showWizard && wizardProduction && activeChannel && (
+        <ProductionWizard
+          production={wizardProduction}
+          channel={activeChannel}
+          config={config}
+          user={user}
+          onUpdateProduction={(updatedProd) => {
+            setWizardProduction(updatedProd);
+          }}
+          onClose={() => {
+            setShowWizard(false);
+            setWizardProduction(null);
+          }}
+          onFetchNews={async () => {
+            // Use existing news fetch logic
+            const dateObj = parseLocalDate(selectedDate);
+            const news = await fetchEconomicNews(config.topicToken || '', config.country, config.language, dateObj);
+            return news;
+          }}
+          onGenerateScript={async (newsItems) => {
+            // Use existing script generation logic
+            const result = await generateScriptWithScenes(
+              newsItems.slice(0, 4),
+              config,
+              config.preferredNarrative
+            );
+            const metadata = await generateViralMetadata(
+              convertScenesToScriptLines(result),
+              newsItems.slice(0, 4),
+              config
+            );
+            return { scenes: result, metadata };
+          }}
+          onGenerateAudio={async (segmentIndex, text, speaker) => {
+            // Generate audio for a single segment
+            const characterKey = speaker.toLowerCase().includes(config.characters.hostA.name.toLowerCase()) 
+              ? 'hostA' 
+              : 'hostB';
+            const character = config.characters[characterKey];
+            
+            const audio = await generateSegmentedAudioWithCache(
+              text,
+              character.voiceName,
+              character.speakingRate || 1.0,
+              character.pitch || 0
+            );
+            
+            // Upload to storage
+            const audioUrl = await uploadAudioToStorage(
+              audio.audioBase64,
+              wizardProduction.channel_id,
+              `segment-${segmentIndex}`
+            );
+            
+            return {
+              audioUrl: audioUrl || '',
+              duration: audio.duration
+            };
+          }}
+          onGenerateVideo={async (segmentIndex, audioUrl, speaker) => {
+            // Generate video for a single segment
+            const characterKey = speaker.toLowerCase().includes(config.characters.hostA.name.toLowerCase()) 
+              ? 'hostA' 
+              : 'hostB';
+            
+            const segment = wizardProduction.segments?.[segmentIndex];
+            const scene = wizardProduction.scenes?.scenes?.[String(segmentIndex + 1)];
+            
+            // Use WaveSpeed/InfiniteTalk to generate video
+            const result = await generateVideoSegmentsWithInfiniteTalk(
+              [{
+                speaker: speaker,
+                text: segment?.text || '',
+                audioBase64: '', // Not needed, we pass audioUrl
+                audioUrl: audioUrl
+              }],
+              config,
+              activeChannel.id,
+              wizardProduction.id,
+              config.format
+            );
+            
+            return {
+              videoUrl: result.segments[0]?.videoUrl || ''
+            };
+          }}
+        />
+      )}
     </div>
   );
 };

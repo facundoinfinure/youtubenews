@@ -1,11 +1,13 @@
 /**
  * Idle State Component
  * 
- * Displays the welcome screen with date picker and start button.
+ * Displays the welcome screen with options to:
+ * - Start a new production (opens wizard)
+ * - Resume an existing production
  */
 
 import React from 'react';
-import { ChannelConfig, AppState } from '../types';
+import { ChannelConfig, AppState, Production, getStepDisplayName, getStepNumber } from '../types';
 
 interface IdleStateProps {
   state: AppState;
@@ -13,6 +15,10 @@ interface IdleStateProps {
   selectedDate: string;
   onDateChange: (date: string) => void;
   onStart: () => void;
+  // New props for wizard integration
+  incompleteProductions?: Production[];
+  onResumeProduction?: (production: Production) => void;
+  onStartWizard?: () => void;
 }
 
 export const IdleState: React.FC<IdleStateProps> = ({
@@ -20,53 +26,147 @@ export const IdleState: React.FC<IdleStateProps> = ({
   config,
   selectedDate,
   onDateChange,
-  onStart
+  onStart,
+  incompleteProductions = [],
+  onResumeProduction,
+  onStartWizard
 }) => {
   const isFetching = state === AppState.FETCHING_NEWS;
 
+  // Get wizard step info for a production
+  const getProductionStepInfo = (prod: Production) => {
+    if (prod.wizard_state?.currentStep) {
+      const step = prod.wizard_state.currentStep;
+      return {
+        stepName: getStepDisplayName(step),
+        stepNumber: getStepNumber(step),
+        totalSteps: 8
+      };
+    }
+    // Fallback for legacy productions
+    return {
+      stepName: prod.status === 'in_progress' ? '🔄 En progreso' : '📝 Borrador',
+      stepNumber: prod.progress_step || 0,
+      totalSteps: 8
+    };
+  };
+
   return (
-    <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0f0f0f] text-center p-8 space-y-6">
-      {/* Logo */}
-      <div
-        className="w-24 h-24 rounded-full flex items-center justify-center shadow-2xl mb-4"
-        style={{ background: `linear-gradient(135deg, ${config.logoColor1}, ${config.logoColor2})` }}
-      >
-        {isFetching ? (
-          <span className="text-4xl animate-spin">🌍</span>
-        ) : (
-          <span className="text-4xl">🎥</span>
+    <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0f0f0f] text-center p-8">
+      <div className="max-w-2xl w-full space-y-8">
+        {/* Logo */}
+        <div
+          className="w-24 h-24 rounded-full flex items-center justify-center shadow-2xl mx-auto"
+          style={{ background: `linear-gradient(135deg, ${config.logoColor1}, ${config.logoColor2})` }}
+        >
+          {isFetching ? (
+            <span className="text-4xl animate-spin">🌍</span>
+          ) : (
+            <span className="text-4xl">🎥</span>
+          )}
+        </div>
+
+        {/* Title */}
+        <div>
+          <h2 className="text-3xl font-bold mb-2">
+            {isFetching ? "Scanning Markets..." : `${config.channelName} Studio`}
+          </h2>
+          <p className="text-gray-400">{config.tagline}</p>
+        </div>
+
+        {/* Content when Idle */}
+        {state === AppState.IDLE && (
+          <div className="space-y-6">
+            {/* Date Selector + New Production Button */}
+            <div className="bg-[#1a1a1a] rounded-xl p-6 border border-[#333]">
+              <h3 className="text-lg font-bold mb-4 flex items-center justify-center gap-2">
+                <span className="text-2xl">✨</span> Nueva Producción
+              </h3>
+              
+              <div className="flex flex-col sm:flex-row items-center gap-4 justify-center">
+                <div className="flex flex-col items-start">
+                  <label className="text-xs text-gray-500 uppercase tracking-wider font-bold mb-1">
+                    Fecha de Noticias
+                  </label>
+                  <input 
+                    type="date" 
+                    value={selectedDate} 
+                    onChange={(e) => onDateChange(e.target.value)}
+                    className="bg-[#111] border border-[#333] text-white px-4 py-2 rounded-lg focus:outline-none focus:border-cyan-500" 
+                  />
+                </div>
+
+                <button 
+                  onClick={onStartWizard || onStart} 
+                  className="bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white px-8 py-3 rounded-xl font-bold shadow-lg shadow-cyan-500/20 transition-all hover:scale-105"
+                >
+                  🎬 Iniciar Producción
+                </button>
+              </div>
+            </div>
+
+            {/* Incomplete Productions */}
+            {incompleteProductions.length > 0 && (
+              <div className="bg-[#1a1a1a] rounded-xl p-6 border border-[#333]">
+                <h3 className="text-lg font-bold mb-4 flex items-center justify-center gap-2">
+                  <span className="text-2xl">📂</span> Producciones Pendientes
+                </h3>
+                
+                <div className="space-y-3">
+                  {incompleteProductions.slice(0, 3).map((prod) => {
+                    const stepInfo = getProductionStepInfo(prod);
+                    const progressPercent = (stepInfo.stepNumber / stepInfo.totalSteps) * 100;
+                    
+                    return (
+                      <div 
+                        key={prod.id}
+                        className="bg-[#111] rounded-lg p-4 border border-[#333] hover:border-cyan-500/50 transition-all cursor-pointer group"
+                        onClick={() => onResumeProduction?.(prod)}
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex-1 text-left">
+                            <h4 className="font-medium text-white truncate">
+                              {prod.viral_metadata?.title || `Producción ${new Date(prod.news_date).toLocaleDateString()}`}
+                            </h4>
+                            <p className="text-xs text-gray-400">
+                              {new Date(prod.updated_at).toLocaleDateString()} • {stepInfo.stepName}
+                            </p>
+                          </div>
+                          <button className="bg-cyan-600/20 hover:bg-cyan-600 text-cyan-400 hover:text-white px-4 py-2 rounded-lg text-sm font-medium opacity-0 group-hover:opacity-100 transition-all">
+                            Retomar →
+                          </button>
+                        </div>
+                        
+                        {/* Progress bar */}
+                        <div className="h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                          <div 
+                            className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 transition-all"
+                            style={{ width: `${progressPercent}%` }}
+                          />
+                        </div>
+                        <div className="text-xs text-gray-500 mt-1 text-right">
+                          Paso {stepInfo.stepNumber} de {stepInfo.totalSteps}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                
+                {incompleteProductions.length > 3 && (
+                  <p className="text-sm text-gray-500 mt-3">
+                    +{incompleteProductions.length - 3} más en el Dashboard
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Quick tip */}
+            <p className="text-sm text-gray-500">
+              💡 El wizard te guiará paso a paso: noticias → guión → audio → video → publicar
+            </p>
+          </div>
         )}
       </div>
-
-      {/* Title */}
-      <h2 className="text-2xl font-bold">
-        {isFetching ? "Scanning Markets..." : `${config.channelName} Studio`}
-      </h2>
-
-      {/* Content when Idle */}
-      {state === AppState.IDLE && (
-        <>
-          <p className="text-gray-400 max-w-md">
-            {config.tagline}. Select a date to scrape news for {config.country}.
-          </p>
-
-          <div className="flex flex-col items-center gap-2 w-full max-w-xs">
-            <label className="text-xs text-gray-500 uppercase tracking-wider font-bold">
-              News Date
-            </label>
-            <input 
-              type="date" 
-              value={selectedDate} 
-              onChange={(e) => onDateChange(e.target.value)}
-              className="bg-[#1f1f1f] border border-[#3f3f3f] text-white px-4 py-2 rounded-lg w-full focus:outline-none focus:border-blue-500" 
-            />
-          </div>
-
-          <button onClick={onStart} className="btn-primary mt-4">
-            ▶ Start Production
-          </button>
-        </>
-      )}
     </div>
   );
 };

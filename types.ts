@@ -134,6 +134,103 @@ export interface CharacterProfile {
   gender?: "male" | "female";
 }
 
+// Shotstack Render Configuration Types
+export type ShotstackTransitionType = 
+  | 'none' | 'fade' | 'fadeSlow' | 'fadeFast'
+  | 'reveal' | 'revealSlow' | 'revealFast'
+  | 'wipeLeft' | 'wipeRight' | 'slideLeft' | 'slideRight'
+  | 'slideUp' | 'slideDown' | 'zoom';
+
+export type ShotstackEffectType = 
+  | 'none' | 'zoomIn' | 'zoomInSlow' | 'zoomInFast'
+  | 'zoomOut' | 'zoomOutSlow' | 'zoomOutFast'
+  | 'slideLeft' | 'slideRight' | 'slideUp' | 'slideDown';
+
+export type ShotstackFilterType = 
+  | 'none' | 'boost' | 'contrast' | 'darken' 
+  | 'greyscale' | 'lighten' | 'muted' | 'blur';
+
+export interface RenderConfig {
+  // Transitions
+  transition: {
+    type: ShotstackTransitionType;
+    duration: number; // seconds (0.3 - 2.0)
+  };
+  
+  // Motion Effects
+  effects: {
+    clipEffect: ShotstackEffectType; // Applied to each clip
+    filter: ShotstackFilterType; // Visual filter
+    autoEffectRotation: boolean; // Auto-rotate effects for variety
+  };
+  
+  // Watermark/Logo
+  watermark?: {
+    enabled: boolean;
+    url?: string;
+    position: 'topLeft' | 'topRight' | 'bottomLeft' | 'bottomRight';
+    opacity: number; // 0-1
+    scale: number; // 0.1-1
+  };
+  
+  // Output Quality
+  output: {
+    resolution: 'sd' | 'hd' | '1080' | '4k';
+    fps: 24 | 25 | 30 | 60;
+    quality: 'low' | 'medium' | 'high' | 'highest';
+  };
+  
+  // Overlays
+  overlays: {
+    showBreakingNews: boolean;
+    breakingNewsText?: string;
+    showDate: boolean;
+    showHostNames: boolean;
+    showLiveIndicator: boolean;
+  };
+  
+  // Background Music
+  backgroundMusic?: {
+    enabled: boolean;
+    url?: string;
+    volume: number; // 0-1
+  };
+}
+
+// Default render configuration
+export const DEFAULT_RENDER_CONFIG: RenderConfig = {
+  transition: {
+    type: 'fade',
+    duration: 0.5
+  },
+  effects: {
+    clipEffect: 'zoomInSlow',
+    filter: 'none',
+    autoEffectRotation: true
+  },
+  watermark: {
+    enabled: false,
+    position: 'bottomRight',
+    opacity: 0.7,
+    scale: 0.15
+  },
+  output: {
+    resolution: '1080',
+    fps: 30,
+    quality: 'high'
+  },
+  overlays: {
+    showBreakingNews: false,
+    showDate: true,
+    showHostNames: true,
+    showLiveIndicator: false
+  },
+  backgroundMusic: {
+    enabled: false,
+    volume: 0.1
+  }
+};
+
 export interface ChannelConfig {
   channelName: string;
   tagline: string;
@@ -167,6 +264,8 @@ export interface ChannelConfig {
   };
   studioSetup?: string; // Description of the podcast studio setup
   preferredNarrative?: NarrativeType; // Optional preferred narrative (auto-selection if not set)
+  // Render settings (v2.3)
+  renderConfig?: RenderConfig; // Shotstack render configuration
 }
 
 export interface Channel {
@@ -179,6 +278,174 @@ export interface Channel {
 
 // Production Types
 export type ProductionStatus = 'draft' | 'in_progress' | 'completed' | 'failed';
+
+// =============================================================================================
+// PRODUCTION WIZARD - Step-by-step flow (v2.4)
+// =============================================================================================
+
+/**
+ * Main production steps - the wizard progresses through these in order
+ */
+export type ProductionStep = 
+  | 'news_fetch'      // Step 1: Fetch news from sources
+  | 'news_select'     // Step 2: User selects which news to use
+  | 'script_generate' // Step 3: Generate scripts/scenes
+  | 'script_review'   // Step 4: User reviews/edits scripts
+  | 'audio_generate'  // Step 5: Generate audio for each segment
+  | 'video_generate'  // Step 6: Generate video for each segment
+  | 'render_final'    // Step 7: Render final composition
+  | 'publish'         // Step 8: Publish to YouTube
+  | 'done';           // Complete
+
+/**
+ * Sub-step status within a main step
+ */
+export type SubStepStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'skipped';
+
+/**
+ * Detailed progress tracking for each sub-step
+ */
+export interface SubStepProgress {
+  status: SubStepStatus;
+  startedAt?: string;
+  completedAt?: string;
+  error?: string;
+  retryCount?: number;
+  data?: any; // Step-specific data
+}
+
+/**
+ * Progress tracking for the entire production wizard
+ */
+export interface ProductionWizardState {
+  currentStep: ProductionStep;
+  
+  // Step 1: News fetching
+  newsFetch: SubStepProgress & {
+    data?: {
+      fetchedNews?: NewsItem[];
+      fetchedAt?: string;
+      source?: string;
+    };
+  };
+  
+  // Step 2: News selection
+  newsSelect: SubStepProgress & {
+    data?: {
+      selectedIds?: string[];
+      confirmedAt?: string;
+    };
+  };
+  
+  // Step 3: Script generation
+  scriptGenerate: SubStepProgress & {
+    data?: {
+      narrativeType?: NarrativeType;
+      generatedAt?: string;
+    };
+  };
+  
+  // Step 4: Script review (user can edit)
+  scriptReview: SubStepProgress & {
+    data?: {
+      editedByUser?: boolean;
+      approvedAt?: string;
+    };
+  };
+  
+  // Step 5: Audio generation - tracks each segment
+  audioGenerate: SubStepProgress & {
+    data?: {
+      totalSegments?: number;
+      completedSegments?: number;
+      segmentProgress?: Record<number, SubStepProgress>;
+    };
+  };
+  
+  // Step 6: Video generation - tracks each segment
+  videoGenerate: SubStepProgress & {
+    data?: {
+      totalSegments?: number;
+      completedSegments?: number;
+      segmentProgress?: Record<number, SubStepProgress>;
+    };
+  };
+  
+  // Step 7: Final render
+  renderFinal: SubStepProgress & {
+    data?: {
+      renderId?: string;
+      renderStartedAt?: string;
+      videoUrl?: string;
+      posterUrl?: string;
+    };
+  };
+  
+  // Step 8: YouTube publish
+  publish: SubStepProgress & {
+    data?: {
+      youtubeId?: string;
+      publishedAt?: string;
+      isShort?: boolean;
+    };
+  };
+}
+
+/**
+ * Default empty wizard state
+ */
+export const createEmptyWizardState = (): ProductionWizardState => ({
+  currentStep: 'news_fetch',
+  newsFetch: { status: 'pending' },
+  newsSelect: { status: 'pending' },
+  scriptGenerate: { status: 'pending' },
+  scriptReview: { status: 'pending' },
+  audioGenerate: { status: 'pending' },
+  videoGenerate: { status: 'pending' },
+  renderFinal: { status: 'pending' },
+  publish: { status: 'pending' }
+});
+
+/**
+ * Get the next step in the wizard
+ */
+export const getNextProductionStep = (current: ProductionStep): ProductionStep | null => {
+  const steps: ProductionStep[] = [
+    'news_fetch', 'news_select', 'script_generate', 'script_review',
+    'audio_generate', 'video_generate', 'render_final', 'publish', 'done'
+  ];
+  const currentIndex = steps.indexOf(current);
+  return currentIndex < steps.length - 1 ? steps[currentIndex + 1] : null;
+};
+
+/**
+ * Get human-readable step name
+ */
+export const getStepDisplayName = (step: ProductionStep): string => {
+  const names: Record<ProductionStep, string> = {
+    'news_fetch': '📰 Buscar Noticias',
+    'news_select': '✅ Seleccionar Noticias',
+    'script_generate': '📝 Generar Guiones',
+    'script_review': '👁️ Revisar Guiones',
+    'audio_generate': '🎙️ Generar Audios',
+    'video_generate': '🎬 Generar Videos',
+    'render_final': '🎞️ Renderizar Final',
+    'publish': '📺 Publicar',
+    'done': '✅ Completado'
+  };
+  return names[step];
+};
+
+/**
+ * Get step number (1-8)
+ */
+export const getStepNumber = (step: ProductionStep): number => {
+  const steps: ProductionStep[] = [
+    'news_fetch', 'news_select', 'script_generate', 'script_review',
+    'audio_generate', 'video_generate', 'render_final', 'publish', 'done'
+  ];
+  return steps.indexOf(step) + 1;
+};
 
 // Segment resource status for incremental regeneration
 export type SegmentResourceState = 'pending' | 'generating' | 'done' | 'failed';
@@ -228,6 +495,9 @@ export interface Production {
   final_video_poster?: string; // Poster/thumbnail from Shotstack
   youtube_id?: string; // YouTube video ID after publishing
   published_at?: string; // When it was published to YouTube
+  // Wizard state for step-by-step flow (v2.4)
+  wizard_state?: ProductionWizardState; // Detailed step-by-step progress tracking
+  fetched_news?: NewsItem[]; // Cached fetched news for this production
 }
 
 // Window augmentation for AI Studio key selection & Google Identity & Runtime Env

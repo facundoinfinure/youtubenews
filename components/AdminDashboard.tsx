@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
-import { ChannelConfig, CharacterProfile, StoredVideo, Channel, UserProfile, Production } from '../types';
+import { ChannelConfig, CharacterProfile, StoredVideo, Channel, UserProfile, Production, RenderConfig, DEFAULT_RENDER_CONFIG, ShotstackTransitionType, ShotstackEffectType, ShotstackFilterType } from '../types';
 import { fetchVideosFromDB, saveConfigToDB, getAllChannels, saveChannel, getChannelById, uploadImageToStorage, getIncompleteProductions, getAllProductions, getPublishedProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction, updateSegmentStatus, saveProduction, saveVideoToDB } from '../services/supabaseService';
 import { uploadVideoToYouTube } from '../services/youtubeService';
 import { generateSeedImage } from '../services/geminiService';
@@ -148,7 +148,7 @@ const RetentionChart: React.FC<{ data: number[], color: string }> = ({ data, col
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdateConfig, onExit, activeChannel, channels, onChannelChange, onDeleteVideo, onResumeProduction, user }) => {
   const [tempConfig, setTempConfig] = useState<ChannelConfig>(config);
-  const [activeTab, setActiveTab] = useState<'overview' | 'insights' | 'settings' | 'costs' | 'cache' | 'productions'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'insights' | 'settings' | 'costs' | 'cache' | 'productions' | 'render'>('overview');
   const [videos, setVideos] = useState<StoredVideo[]>([]);
   const [selectedVideo, setSelectedVideo] = useState<StoredVideo | null>(null);
   const [isLoadingVideos, setIsLoadingVideos] = useState(false);
@@ -469,6 +469,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
               }`}
           >
             Cache & Storage
+          </button>
+          <button
+            onClick={() => setActiveTab('render')}
+            className={`pb-3 px-2 border-b-2 font-semibold text-sm transition-all duration-200 ${activeTab === 'render'
+              ? 'border-cyan-500 text-white'
+              : 'border-transparent text-gray-500 hover:text-gray-300'
+              }`}
+          >
+            🎬 Render Settings
           </button>
         </div>
 
@@ -1868,9 +1877,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                                     </button>
                                     
                                     {/* Publish to YouTube */}
-                                    {!production.youtube_id && user?.accessToken && (
+                                    {!production.youtube_id && (
                                       <button
                                         onClick={async () => {
+                                          // Check if user has YouTube access token
+                                          if (!user?.accessToken) {
+                                            toast.error('Necesitas conectar tu cuenta de YouTube. Cierra sesión y vuelve a iniciar con Google para otorgar permisos de YouTube.');
+                                            return;
+                                          }
+                                          
                                           if (!production.final_video_url || !production.viral_metadata) {
                                             toast.error('Video o metadata faltante');
                                             return;
@@ -1931,11 +1946,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                                           }
                                         }}
                                         disabled={publishingProduction === production.id}
-                                        className="bg-red-600 hover:bg-red-500 disabled:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium"
+                                        className={`${user?.accessToken ? 'bg-red-600 hover:bg-red-500' : 'bg-red-900/50 hover:bg-red-800'} disabled:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2`}
                                       >
                                         {publishingProduction === production.id 
                                           ? `⏳ ${uploadProgress.toFixed(0)}%` 
-                                          : `📺 Publicar ${config.format === '9:16' ? 'Short' : 'Video'}`}
+                                          : (
+                                            <>
+                                              {!user?.accessToken && <span className="text-yellow-400">🔑</span>}
+                                              📺 Publicar {config.format === '9:16' ? 'Short' : 'Video'}
+                                            </>
+                                          )}
                                       </button>
                                     )}
                                     
@@ -2234,6 +2254,515 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                 )}
               </div>
             </div>
+          </div>
+        )}
+
+        {/* RENDER SETTINGS TAB */}
+        {activeTab === 'render' && (
+          <div className="space-y-6">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-cyan-900/30 to-blue-900/30 p-6 rounded-xl border border-cyan-500/30">
+              <div className="flex items-center gap-3 mb-2">
+                <span className="text-3xl">🎬</span>
+                <h2 className="text-2xl font-bold">Render Settings</h2>
+              </div>
+              <p className="text-gray-400">
+                Configure how your videos are rendered in Shotstack. These settings will be used as defaults for all productions in this channel.
+              </p>
+            </div>
+
+            {(() => {
+              const renderConfig: RenderConfig = tempConfig.renderConfig || DEFAULT_RENDER_CONFIG;
+              
+              const updateRenderConfig = (updates: Partial<RenderConfig>) => {
+                setTempConfig({
+                  ...tempConfig,
+                  renderConfig: { ...renderConfig, ...updates }
+                });
+              };
+
+              return (
+                <>
+                  {/* Transitions & Effects */}
+                  <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
+                    <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+                      <span className="text-xl">✨</span> Transitions & Motion
+                    </h3>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {/* Transition Type */}
+                      <div className="space-y-2">
+                        <label className="text-sm text-gray-400 block">Transition Type</label>
+                        <select
+                          value={renderConfig.transition.type}
+                          onChange={(e) => updateRenderConfig({ 
+                            transition: { ...renderConfig.transition, type: e.target.value as ShotstackTransitionType }
+                          })}
+                          className="w-full bg-[#111] border border-[#333] rounded-lg px-3 py-2 text-white"
+                        >
+                          <option value="none">None (Hard Cut)</option>
+                          <option value="fade">Fade</option>
+                          <option value="fadeSlow">Fade (Slow)</option>
+                          <option value="fadeFast">Fade (Fast)</option>
+                          <option value="wipeLeft">Wipe Left</option>
+                          <option value="wipeRight">Wipe Right</option>
+                          <option value="slideLeft">Slide Left</option>
+                          <option value="slideRight">Slide Right</option>
+                          <option value="slideUp">Slide Up</option>
+                          <option value="slideDown">Slide Down</option>
+                          <option value="zoom">Zoom</option>
+                        </select>
+                        <p className="text-xs text-gray-500">How clips transition to each other</p>
+                      </div>
+
+                      {/* Transition Duration */}
+                      <div className="space-y-2">
+                        <label className="text-sm text-gray-400 block">Transition Duration</label>
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="range"
+                            min="0.2"
+                            max="2"
+                            step="0.1"
+                            value={renderConfig.transition.duration}
+                            onChange={(e) => updateRenderConfig({
+                              transition: { ...renderConfig.transition, duration: parseFloat(e.target.value) }
+                            })}
+                            className="flex-1 accent-cyan-500"
+                          />
+                          <span className="text-white font-mono w-12">{renderConfig.transition.duration}s</span>
+                        </div>
+                      </div>
+
+                      {/* Clip Effect */}
+                      <div className="space-y-2">
+                        <label className="text-sm text-gray-400 block">Motion Effect</label>
+                        <select
+                          value={renderConfig.effects.clipEffect}
+                          onChange={(e) => updateRenderConfig({ 
+                            effects: { ...renderConfig.effects, clipEffect: e.target.value as ShotstackEffectType }
+                          })}
+                          className="w-full bg-[#111] border border-[#333] rounded-lg px-3 py-2 text-white"
+                        >
+                          <option value="none">None (Static)</option>
+                          <option value="zoomIn">Zoom In</option>
+                          <option value="zoomInSlow">Zoom In (Slow)</option>
+                          <option value="zoomInFast">Zoom In (Fast)</option>
+                          <option value="zoomOut">Zoom Out</option>
+                          <option value="zoomOutSlow">Zoom Out (Slow)</option>
+                          <option value="zoomOutFast">Zoom Out (Fast)</option>
+                          <option value="slideLeft">Slide Left</option>
+                          <option value="slideRight">Slide Right</option>
+                          <option value="slideUp">Slide Up</option>
+                          <option value="slideDown">Slide Down</option>
+                        </select>
+                        <p className="text-xs text-gray-500">Ken Burns style movement on each clip</p>
+                      </div>
+
+                      {/* Auto Effect Rotation */}
+                      <div className="space-y-2">
+                        <label className="text-sm text-gray-400 block">Effect Variety</label>
+                        <label className="flex items-center gap-3 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={renderConfig.effects.autoEffectRotation}
+                            onChange={(e) => updateRenderConfig({
+                              effects: { ...renderConfig.effects, autoEffectRotation: e.target.checked }
+                            })}
+                            className="w-5 h-5 accent-cyan-500"
+                          />
+                          <span className="text-white">Auto-rotate effects for variety</span>
+                        </label>
+                        <p className="text-xs text-gray-500">Alternates between zoom in/out and slides for a dynamic look</p>
+                      </div>
+
+                      {/* Filter */}
+                      <div className="space-y-2">
+                        <label className="text-sm text-gray-400 block">Visual Filter</label>
+                        <select
+                          value={renderConfig.effects.filter}
+                          onChange={(e) => updateRenderConfig({ 
+                            effects: { ...renderConfig.effects, filter: e.target.value as ShotstackFilterType }
+                          })}
+                          className="w-full bg-[#111] border border-[#333] rounded-lg px-3 py-2 text-white"
+                        >
+                          <option value="none">None (Original)</option>
+                          <option value="boost">Boost (Vibrant)</option>
+                          <option value="contrast">High Contrast</option>
+                          <option value="darken">Darken</option>
+                          <option value="lighten">Lighten</option>
+                          <option value="muted">Muted</option>
+                          <option value="greyscale">Greyscale</option>
+                          <option value="blur">Blur</option>
+                        </select>
+                        <p className="text-xs text-gray-500">Color grading applied to all clips</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Output Quality */}
+                  <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
+                    <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+                      <span className="text-xl">📺</span> Output Quality
+                    </h3>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                      {/* Resolution */}
+                      <div className="space-y-2">
+                        <label className="text-sm text-gray-400 block">Resolution</label>
+                        <select
+                          value={renderConfig.output.resolution}
+                          onChange={(e) => updateRenderConfig({ 
+                            output: { ...renderConfig.output, resolution: e.target.value as 'sd' | 'hd' | '1080' | '4k' }
+                          })}
+                          className="w-full bg-[#111] border border-[#333] rounded-lg px-3 py-2 text-white"
+                        >
+                          <option value="sd">SD (480p) - Fastest</option>
+                          <option value="hd">HD (720p)</option>
+                          <option value="1080">Full HD (1080p) ⭐</option>
+                          <option value="4k">4K (2160p) - Slowest</option>
+                        </select>
+                      </div>
+
+                      {/* FPS */}
+                      <div className="space-y-2">
+                        <label className="text-sm text-gray-400 block">Frame Rate</label>
+                        <select
+                          value={renderConfig.output.fps}
+                          onChange={(e) => updateRenderConfig({ 
+                            output: { ...renderConfig.output, fps: parseInt(e.target.value) as 24 | 25 | 30 | 60 }
+                          })}
+                          className="w-full bg-[#111] border border-[#333] rounded-lg px-3 py-2 text-white"
+                        >
+                          <option value="24">24 fps (Cinematic)</option>
+                          <option value="25">25 fps (PAL)</option>
+                          <option value="30">30 fps (Standard) ⭐</option>
+                          <option value="60">60 fps (Smooth)</option>
+                        </select>
+                      </div>
+
+                      {/* Quality */}
+                      <div className="space-y-2">
+                        <label className="text-sm text-gray-400 block">Render Quality</label>
+                        <select
+                          value={renderConfig.output.quality}
+                          onChange={(e) => updateRenderConfig({ 
+                            output: { ...renderConfig.output, quality: e.target.value as 'low' | 'medium' | 'high' | 'highest' }
+                          })}
+                          className="w-full bg-[#111] border border-[#333] rounded-lg px-3 py-2 text-white"
+                        >
+                          <option value="low">Low - Fast</option>
+                          <option value="medium">Medium</option>
+                          <option value="high">High ⭐</option>
+                          <option value="highest">Highest - Slow</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 p-3 bg-cyan-900/20 border border-cyan-500/30 rounded-lg">
+                      <p className="text-xs text-cyan-300">
+                        💡 Higher quality and resolution increases render time and Shotstack costs (~$0.05/min for 1080p)
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Watermark */}
+                  <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
+                    <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+                      <span className="text-xl">🏷️</span> Watermark / Logo
+                    </h3>
+                    
+                    <div className="space-y-4">
+                      <label className="flex items-center gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={renderConfig.watermark?.enabled || false}
+                          onChange={(e) => updateRenderConfig({
+                            watermark: { 
+                              ...(renderConfig.watermark || { position: 'bottomRight', opacity: 0.7, scale: 0.15 }),
+                              enabled: e.target.checked 
+                            }
+                          })}
+                          className="w-5 h-5 accent-cyan-500"
+                        />
+                        <span className="text-white font-medium">Enable Watermark</span>
+                      </label>
+
+                      {renderConfig.watermark?.enabled && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pl-8">
+                          <div className="space-y-2">
+                            <label className="text-sm text-gray-400 block">Logo URL</label>
+                            <input
+                              type="text"
+                              value={renderConfig.watermark?.url || ''}
+                              onChange={(e) => updateRenderConfig({
+                                watermark: { ...renderConfig.watermark!, url: e.target.value }
+                              })}
+                              placeholder="https://example.com/logo.png"
+                              className="w-full bg-[#111] border border-[#333] rounded-lg px-3 py-2 text-white text-sm"
+                            />
+                          </div>
+
+                          <div className="space-y-2">
+                            <label className="text-sm text-gray-400 block">Position</label>
+                            <select
+                              value={renderConfig.watermark?.position || 'bottomRight'}
+                              onChange={(e) => updateRenderConfig({
+                                watermark: { ...renderConfig.watermark!, position: e.target.value as any }
+                              })}
+                              className="w-full bg-[#111] border border-[#333] rounded-lg px-3 py-2 text-white"
+                            >
+                              <option value="topLeft">Top Left</option>
+                              <option value="topRight">Top Right</option>
+                              <option value="bottomLeft">Bottom Left</option>
+                              <option value="bottomRight">Bottom Right</option>
+                            </select>
+                          </div>
+
+                          <div className="space-y-2">
+                            <label className="text-sm text-gray-400 block">Opacity</label>
+                            <div className="flex items-center gap-3">
+                              <input
+                                type="range"
+                                min="0.1"
+                                max="1"
+                                step="0.1"
+                                value={renderConfig.watermark?.opacity || 0.7}
+                                onChange={(e) => updateRenderConfig({
+                                  watermark: { ...renderConfig.watermark!, opacity: parseFloat(e.target.value) }
+                                })}
+                                className="flex-1 accent-cyan-500"
+                              />
+                              <span className="text-white font-mono w-12">{((renderConfig.watermark?.opacity || 0.7) * 100).toFixed(0)}%</span>
+                            </div>
+                          </div>
+
+                          <div className="space-y-2">
+                            <label className="text-sm text-gray-400 block">Scale</label>
+                            <div className="flex items-center gap-3">
+                              <input
+                                type="range"
+                                min="0.05"
+                                max="0.5"
+                                step="0.05"
+                                value={renderConfig.watermark?.scale || 0.15}
+                                onChange={(e) => updateRenderConfig({
+                                  watermark: { ...renderConfig.watermark!, scale: parseFloat(e.target.value) }
+                                })}
+                                className="flex-1 accent-cyan-500"
+                              />
+                              <span className="text-white font-mono w-12">{((renderConfig.watermark?.scale || 0.15) * 100).toFixed(0)}%</span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Overlays */}
+                  <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
+                    <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+                      <span className="text-xl">📰</span> News Overlays
+                    </h3>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <label className="flex items-center gap-3 cursor-pointer p-3 bg-black/30 rounded-lg">
+                        <input
+                          type="checkbox"
+                          checked={renderConfig.overlays.showBreakingNews}
+                          onChange={(e) => updateRenderConfig({
+                            overlays: { ...renderConfig.overlays, showBreakingNews: e.target.checked }
+                          })}
+                          className="w-5 h-5 accent-red-500"
+                        />
+                        <div>
+                          <span className="text-white font-medium">🔴 Breaking News Banner</span>
+                          <p className="text-xs text-gray-500">Show at video start</p>
+                        </div>
+                      </label>
+
+                      <label className="flex items-center gap-3 cursor-pointer p-3 bg-black/30 rounded-lg">
+                        <input
+                          type="checkbox"
+                          checked={renderConfig.overlays.showDate}
+                          onChange={(e) => updateRenderConfig({
+                            overlays: { ...renderConfig.overlays, showDate: e.target.checked }
+                          })}
+                          className="w-5 h-5 accent-cyan-500"
+                        />
+                        <div>
+                          <span className="text-white font-medium">📅 Date Display</span>
+                          <p className="text-xs text-gray-500">Show current date</p>
+                        </div>
+                      </label>
+
+                      <label className="flex items-center gap-3 cursor-pointer p-3 bg-black/30 rounded-lg">
+                        <input
+                          type="checkbox"
+                          checked={renderConfig.overlays.showHostNames}
+                          onChange={(e) => updateRenderConfig({
+                            overlays: { ...renderConfig.overlays, showHostNames: e.target.checked }
+                          })}
+                          className="w-5 h-5 accent-cyan-500"
+                        />
+                        <div>
+                          <span className="text-white font-medium">🎙️ Host Names</span>
+                          <p className="text-xs text-gray-500">Lower-third name tags</p>
+                        </div>
+                      </label>
+
+                      <label className="flex items-center gap-3 cursor-pointer p-3 bg-black/30 rounded-lg">
+                        <input
+                          type="checkbox"
+                          checked={renderConfig.overlays.showLiveIndicator}
+                          onChange={(e) => updateRenderConfig({
+                            overlays: { ...renderConfig.overlays, showLiveIndicator: e.target.checked }
+                          })}
+                          className="w-5 h-5 accent-red-500"
+                        />
+                        <div>
+                          <span className="text-white font-medium">🔴 LIVE Indicator</span>
+                          <p className="text-xs text-gray-500">Show fake live badge</p>
+                        </div>
+                      </label>
+                    </div>
+
+                    {renderConfig.overlays.showBreakingNews && (
+                      <div className="mt-4 space-y-2">
+                        <label className="text-sm text-gray-400 block">Breaking News Text</label>
+                        <input
+                          type="text"
+                          value={renderConfig.overlays.breakingNewsText || ''}
+                          onChange={(e) => updateRenderConfig({
+                            overlays: { ...renderConfig.overlays, breakingNewsText: e.target.value }
+                          })}
+                          placeholder="🔴 BREAKING NEWS"
+                          className="w-full bg-[#111] border border-[#333] rounded-lg px-3 py-2 text-white"
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Background Music */}
+                  <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
+                    <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+                      <span className="text-xl">🎵</span> Background Music
+                    </h3>
+                    
+                    <div className="space-y-4">
+                      <label className="flex items-center gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={renderConfig.backgroundMusic?.enabled || false}
+                          onChange={(e) => updateRenderConfig({
+                            backgroundMusic: { 
+                              ...(renderConfig.backgroundMusic || { volume: 0.1 }),
+                              enabled: e.target.checked 
+                            }
+                          })}
+                          className="w-5 h-5 accent-purple-500"
+                        />
+                        <span className="text-white font-medium">Enable Background Music</span>
+                      </label>
+
+                      {renderConfig.backgroundMusic?.enabled && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pl-8">
+                          <div className="space-y-2">
+                            <label className="text-sm text-gray-400 block">Music URL (MP3)</label>
+                            <input
+                              type="text"
+                              value={renderConfig.backgroundMusic?.url || ''}
+                              onChange={(e) => updateRenderConfig({
+                                backgroundMusic: { ...renderConfig.backgroundMusic!, url: e.target.value }
+                              })}
+                              placeholder="https://example.com/music.mp3"
+                              className="w-full bg-[#111] border border-[#333] rounded-lg px-3 py-2 text-white text-sm"
+                            />
+                          </div>
+
+                          <div className="space-y-2">
+                            <label className="text-sm text-gray-400 block">Volume</label>
+                            <div className="flex items-center gap-3">
+                              <input
+                                type="range"
+                                min="0"
+                                max="0.5"
+                                step="0.05"
+                                value={renderConfig.backgroundMusic?.volume || 0.1}
+                                onChange={(e) => updateRenderConfig({
+                                  backgroundMusic: { ...renderConfig.backgroundMusic!, volume: parseFloat(e.target.value) }
+                                })}
+                                className="flex-1 accent-purple-500"
+                              />
+                              <span className="text-white font-mono w-12">{((renderConfig.backgroundMusic?.volume || 0.1) * 100).toFixed(0)}%</span>
+                            </div>
+                            <p className="text-xs text-gray-500">Keep low to not overshadow voices</p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Save Button */}
+                  <div className="flex justify-between items-center">
+                    <button
+                      onClick={() => {
+                        setTempConfig({
+                          ...tempConfig,
+                          renderConfig: DEFAULT_RENDER_CONFIG
+                        });
+                        toast.success('Reset to defaults');
+                      }}
+                      className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm"
+                    >
+                      🔄 Reset to Defaults
+                    </button>
+                    
+                    <button
+                      onClick={() => {
+                        onUpdateConfig(tempConfig);
+                        toast.success('Render settings saved!');
+                      }}
+                      className="px-6 py-3 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 rounded-lg font-bold shadow-lg shadow-cyan-500/20"
+                    >
+                      💾 Save Render Settings
+                    </button>
+                  </div>
+
+                  {/* Preview Card */}
+                  <div className="bg-gradient-to-br from-[#1a1a1a] to-[#0d0d0d] p-6 rounded-xl border border-[#333]">
+                    <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+                      <span className="text-xl">👁️</span> Current Configuration Preview
+                    </h3>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                      <div className="bg-black/30 p-3 rounded-lg">
+                        <div className="text-gray-400 text-xs mb-1">Transition</div>
+                        <div className="text-white font-mono">{renderConfig.transition.type} ({renderConfig.transition.duration}s)</div>
+                      </div>
+                      <div className="bg-black/30 p-3 rounded-lg">
+                        <div className="text-gray-400 text-xs mb-1">Effect</div>
+                        <div className="text-white font-mono">{renderConfig.effects.clipEffect}</div>
+                      </div>
+                      <div className="bg-black/30 p-3 rounded-lg">
+                        <div className="text-gray-400 text-xs mb-1">Resolution</div>
+                        <div className="text-white font-mono">{renderConfig.output.resolution} @ {renderConfig.output.fps}fps</div>
+                      </div>
+                      <div className="bg-black/30 p-3 rounded-lg">
+                        <div className="text-gray-400 text-xs mb-1">Overlays</div>
+                        <div className="text-white font-mono">
+                          {[
+                            renderConfig.overlays.showBreakingNews && '🔴',
+                            renderConfig.overlays.showDate && '📅',
+                            renderConfig.overlays.showHostNames && '🎙️',
+                            renderConfig.overlays.showLiveIndicator && '📡'
+                          ].filter(Boolean).join(' ') || 'None'}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
           </div>
         )}
       </div>

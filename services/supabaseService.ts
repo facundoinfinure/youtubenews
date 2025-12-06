@@ -775,6 +775,9 @@ const normalizeProduction = (data: any): Production => ({
   final_video_poster: data.final_video_poster ?? undefined,
   youtube_id: data.youtube_id ?? undefined,
   published_at: data.published_at ?? undefined,
+  // v2.4 Wizard state for step-by-step flow
+  wizard_state: data.wizard_state ?? undefined,
+  fetched_news: data.fetched_news ?? undefined,
 });
 
 export const saveProduction = async (
@@ -830,6 +833,9 @@ export const saveProduction = async (
     if (production.final_video_poster !== undefined) updateData.final_video_poster = production.final_video_poster;
     if (production.youtube_id !== undefined) updateData.youtube_id = production.youtube_id;
     if (production.published_at !== undefined) updateData.published_at = production.published_at;
+    // v2.4 Wizard state for step-by-step flow
+    if (production.wizard_state !== undefined) updateData.wizard_state = production.wizard_state;
+    if (production.fetched_news !== undefined) updateData.fetched_news = production.fetched_news;
 
     console.log(`💾 [Production] Updating ${production.id} with fields:`, Object.keys(updateData).join(', '));
 
@@ -891,7 +897,10 @@ export const saveProduction = async (
       final_video_url: production.final_video_url || null,
       final_video_poster: production.final_video_poster || null,
       youtube_id: production.youtube_id || null,
-      published_at: production.published_at || null
+      published_at: production.published_at || null,
+      // v2.4 Wizard state for step-by-step flow
+      wizard_state: production.wizard_state || null,
+      fetched_news: production.fetched_news || null
     };
 
     console.log(`💾 [Production] Creating new production for channel ${production.channel_id}`);
