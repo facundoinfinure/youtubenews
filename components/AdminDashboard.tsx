@@ -1293,9 +1293,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                                   );
                                   toast.dismiss(toastId);
                                   
-                                  if (result.success && result.url) {
+                                  if (result.success && result.videoUrl) {
                                     toast.success('Video rendered successfully!');
-                                    window.open(result.url, '_blank');
+                                    window.open(result.videoUrl, '_blank');
                                   } else {
                                     toast.error(`Render failed: ${result.error || 'Unknown error'}`);
                                   }
