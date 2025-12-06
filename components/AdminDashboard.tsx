@@ -1345,7 +1345,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                           >
                             📥 Export
                           </button>
-                          {production.status === 'completed' && hasVideosForRender(production) && (
+                          {/* Render button - show for completed OR in_progress with videos */}
+                          {hasVideosForRender(production) && (
                             <button
                               onClick={async () => {
                                 const toastId = toast.loading('🎬 Sending to Shotstack...');
