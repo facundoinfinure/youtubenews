@@ -37,7 +37,7 @@ export const NewsSelector: React.FC<NewsSelectorProps> = ({ news, onConfirmSelec
   };
 
   const handleConfirm = () => {
-    if (selectedIndices.length >= 2 && selectedIndices.length <= 5) {
+    if (selectedIndices.length >= 1 && selectedIndices.length <= 5) {
       const selectedItems = selectedIndices.map(i => news[i]);
       onConfirmSelection(selectedItems);
     }
@@ -60,7 +60,7 @@ export const NewsSelector: React.FC<NewsSelectorProps> = ({ news, onConfirmSelec
           <h2 className="text-2xl font-bold text-white mb-2">Editorial Meeting</h2>
           <p className="text-gray-400 text-sm">
             Wire reports for <span className="text-white font-mono">{date.toLocaleDateString()}</span>.
-            Select <span className="text-yellow-400 font-bold">2 to 5 stories</span> for the broadcast.
+            Select <span className="text-yellow-400 font-bold">1 to 5 stories</span> for the broadcast.
             {usedNewsIds.size > 0 && (
               <span className="block mt-1 text-xs text-red-400">
                 ⚠️ {usedNewsIds.size} story{usedNewsIds.size !== 1 ? 'ies' : ''} already used in other productions (shown in red)
@@ -69,7 +69,7 @@ export const NewsSelector: React.FC<NewsSelectorProps> = ({ news, onConfirmSelec
           </p>
         </div>
         <div className="text-right">
-          <div className={`text-3xl font-bold ${selectedIndices.length >= 2 ? 'text-green-500' : 'text-gray-500'}`}>
+          <div className={`text-3xl font-bold ${selectedIndices.length >= 1 ? 'text-green-500' : 'text-gray-500'}`}>
             {selectedIndices.length}/5
           </div>
           <div className="text-xs text-gray-500 uppercase">Selected</div>
