@@ -2458,7 +2458,7 @@ const App: React.FC = () => {
           onFetchNews={async () => {
             // Use existing news fetch logic
             const dateObj = parseLocalDate(selectedDate);
-            const news = await fetchEconomicNews(config.topicToken || '', config.country, config.language, dateObj);
+            const news = await fetchEconomicNews(dateObj, config);
             return news;
           }}
           onGenerateScript={async (newsItems) => {
@@ -2499,8 +2499,8 @@ const App: React.FC = () => {
             // Upload to storage
             const audioUrl = await uploadAudioToStorage(
               audioSegment.audioBase64,
-              wizardProduction?.channel_id || '',
-              `segment-${segmentIndex}`
+              wizardProduction?.id || '',
+              segmentIndex
             );
             
             return {
