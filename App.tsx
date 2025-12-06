@@ -2039,6 +2039,7 @@ const App: React.FC = () => {
             </div>
           ) : (
             /* Other states respect video format */
+            <>
             <div className={`w-full bg-black rounded-xl overflow-hidden shadow-lg relative flex flex-col transition-all duration-500 ${config.format === '9:16' ? 'max-w-[400px] mx-auto aspect-[9/16]' : 'aspect-video'}`}>
               {state === AppState.SELECTING_NEWS ? (
               // 2. SELECTION PHASE
@@ -2362,6 +2363,8 @@ const App: React.FC = () => {
                 ))}
               </div>
             </div>
+          )}
+          </>
           )}
         </div>
 
