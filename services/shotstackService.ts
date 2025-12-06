@@ -1209,6 +1209,52 @@ export const createProfessionalComposition = (
 };
 
 // =============================================================================================
+// RENDER FROM COMPLETED PRODUCTION
+// =============================================================================================
+
+import { Production } from "../types";
+
+/**
+ * Render a completed production to Shotstack using existing assets
+ * This reuses all already-generated videos without creating new ones
+ */
+export const renderProductionToShotstack = async (
+  production: Production,
+  channelName?: string
+): Promise<RenderResult> => {
+  console.log(`🎬 [Shotstack] Rendering production ${production.id} to final video...`);
+  
+  if (!production.segments || production.segments.length === 0) {
+    return { success: false, error: 'No segments found in production' };
+  }
+
+  // Convert BroadcastSegment[] to PodcastScene[]
+  const scenes: PodcastScene[] = production.segments
+    .filter(seg => seg.videoUrl) // Only segments with video
+    .map((seg, index) => ({
+      video_url: seg.videoUrl!,
+      title: seg.sceneTitle || `Scene ${index + 1}`,
+      duration: seg.audioDuration || 10, // Fallback to 10s if no duration
+      speaker: seg.speaker
+    }));
+
+  if (scenes.length === 0) {
+    return { success: false, error: 'No segments with video URLs found' };
+  }
+
+  console.log(`🎬 [Shotstack] Found ${scenes.length} scenes with videos`);
+  console.log(`🎬 [Shotstack] Total estimated duration: ${scenes.reduce((acc, s) => acc + s.duration, 0)}s`);
+
+  return await renderPodcastVideo(scenes, {
+    channelName,
+    episodeTitle: production.viral_metadata?.title,
+    showBorder: true,
+    showVignette: true,
+    resolution: '1080'
+  });
+};
+
+// =============================================================================================
 // EXPORTS
 // =============================================================================================
 
@@ -1221,5 +1267,6 @@ export const ShotstackService = {
   createFromSegments: createCompositionFromSegments,
   createProfessionalComposition,
   createLowerThirdOverlay,
-  createTickerOverlay
+  createTickerOverlay,
+  renderFromProduction: renderProductionToShotstack
 };

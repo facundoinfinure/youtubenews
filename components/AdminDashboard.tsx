@@ -7,6 +7,7 @@ import { CostTracker } from '../services/CostTracker';
 import { ContentCache } from '../services/ContentCache';
 import { VideoListSkeleton, AnalyticsCardSkeleton, EmptyState } from './LoadingStates';
 import { getStorageUsage, cleanupOldFiles } from '../services/storageManager';
+import { renderProductionToShotstack } from '../services/shotstackService';
 
 interface AdminDashboardProps {
   config: ChannelConfig;
@@ -1281,6 +1282,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                           >
                             📥 Export
                           </button>
+                          {production.status === 'completed' && production.segments && production.segments.some(s => s.videoUrl) && (
+                            <button
+                              onClick={async () => {
+                                const toastId = toast.loading('🎬 Sending to Shotstack...');
+                                try {
+                                  const result = await renderProductionToShotstack(
+                                    production,
+                                    activeChannel?.name
+                                  );
+                                  toast.dismiss(toastId);
+                                  
+                                  if (result.success && result.url) {
+                                    toast.success('Video rendered successfully!');
+                                    window.open(result.url, '_blank');
+                                  } else {
+                                    toast.error(`Render failed: ${result.error || 'Unknown error'}`);
+                                  }
+                                } catch (error) {
+                                  toast.dismiss(toastId);
+                                  console.error('Shotstack render error:', error);
+                                  toast.error('Failed to render video');
+                                }
+                              }}
+                              className="bg-cyan-600 text-white border border-cyan-500 hover:bg-cyan-700 px-3 py-1.5 rounded-lg text-xs font-bold transition-all duration-200 hover:scale-105 active:scale-95"
+                              title="Render final video with Shotstack (uses existing assets)"
+                            >
+                              🎬 Render
+                            </button>
+                          )}
                           <button
                             onClick={async () => {
                               try {
