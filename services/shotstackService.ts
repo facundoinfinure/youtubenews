@@ -621,6 +621,7 @@ export const buildPodcastStyleEdit = (
   console.log(`🎬 [Podcast Composition] Total duration: ${totalDuration}s across ${scenes.length} scenes`);
 
   // Track 1: Video clips (bottom layer)
+  // Using fadeFast for snappier ~0.5s transitions between scenes
   const videoClips = scenesWithTiming.map(scene => ({
     asset: {
       type: 'video',
@@ -630,8 +631,8 @@ export const buildPodcastStyleEdit = (
     start: scene.start,
     length: 'auto', // Let Shotstack detect the duration
     transition: {
-      in: 'fade',
-      out: 'fade'
+      in: 'fadeFast',
+      out: 'fadeFast'
     }
   }));
 
@@ -649,8 +650,8 @@ export const buildPodcastStyleEdit = (
     start: scene.start,
     length: Math.min(scene.duration, 5), // Show title for max 5 seconds
     transition: {
-      in: 'fade',
-      out: 'fade'
+      in: 'fadeFast',
+      out: 'fadeFast'
     }
   }));
 
