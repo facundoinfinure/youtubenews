@@ -933,8 +933,8 @@ const App: React.FC = () => {
                 segs.map(async (seg: ExtendedBroadcastSegment | BroadcastSegment, idx: number) => {
                   const extSeg = seg as ExtendedBroadcastSegment;
                   
-                  // Check if this is a "both" scene with separate audios
-                  const isBothScene = extSeg.video_mode === 'both' && extSeg.hostA_audioBase64 && extSeg.hostB_audioBase64;
+                  // Check if this is a legacy "both" scene with separate audios
+                  const isBothScene = (extSeg.video_mode as string) === 'both' && extSeg.hostA_audioBase64 && extSeg.hostB_audioBase64;
                   
                   // Only upload if not from cache (already in storage)
                   if ((seg as any).fromCache && (seg as any).audioUrl) {

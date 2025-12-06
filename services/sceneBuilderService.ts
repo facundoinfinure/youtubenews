@@ -105,7 +105,7 @@ const getExpressionHint = (
   const toneKeywords = emotionalTone.toLowerCase();
   
   // Convert legacy "both" to hostA
-  const effectiveMode = videoMode === 'both' ? 'hostA' : videoMode;
+  const effectiveMode = (videoMode as string) === 'both' ? 'hostA' : videoMode;
   
   if (effectiveMode === 'hostA') {
     if (toneKeywords.includes('skeptical') || toneKeywords.includes('concern')) {
@@ -163,7 +163,7 @@ const buildVisualPrompt = (
   };
   
   // Convert legacy "both" to hostA for backwards compatibility
-  const effectiveVideoMode = scene.video_mode === 'both' ? 'hostA' : scene.video_mode;
+  const effectiveVideoMode = (scene.video_mode as string) === 'both' ? 'hostA' : scene.video_mode;
   
   const selectedSeedImage = effectiveVideoMode === 'hostA' 
     ? seedImages.hostASolo 
@@ -325,7 +325,7 @@ Characters:
 - ${appearanceB}`;
 
   // Convert legacy "both" to hostA for backwards compatibility
-  const effectiveMode = scene.video_mode === 'both' ? 'hostA' : scene.video_mode;
+  const effectiveMode = (scene.video_mode as string) === 'both' ? 'hostA' : scene.video_mode;
   const whoAppears = effectiveMode === "hostA"
     ? "Only hostA appears in this scene."
     : "Only hostB appears in this scene.";

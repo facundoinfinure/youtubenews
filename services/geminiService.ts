@@ -243,7 +243,7 @@ const generateInfiniteTalkVideo = async (
   
   if (sceneMetadata?.video_mode) {
     // Convert legacy "both" to hostA for backwards compatibility
-    effectiveVideoMode = sceneMetadata.video_mode === 'both' ? 'hostA' : sceneMetadata.video_mode;
+    effectiveVideoMode = (sceneMetadata.video_mode as string) === 'both' ? 'hostA' : sceneMetadata.video_mode;
     videoType = effectiveVideoMode === 'hostA' ? 'host_a' : 'host_b';
     // Always use single character mode (no multi model)
     useMultiModel = false;
@@ -748,8 +748,8 @@ export const generateAudioFromScenes = async (
     const sceneIndex = parseInt(sceneNum) - 1;
     
     // Legacy "both" scenes are converted to hostA (backwards compatibility)
-    let effectiveVideoMode = scene.video_mode;
-    if (effectiveVideoMode === 'both') {
+    let effectiveVideoMode: 'hostA' | 'hostB' = scene.video_mode as 'hostA' | 'hostB';
+    if ((scene.video_mode as string) === 'both') {
       console.warn(`⚠️ [Audio v2.0] Scene ${sceneNum}: Converting legacy "both" mode to hostA`);
       effectiveVideoMode = 'hostA';
     }
@@ -760,7 +760,7 @@ export const generateAudioFromScenes = async (
       const speaker = effectiveVideoMode === 'hostA' ? hostA.name : hostB.name;
       const character = effectiveVideoMode === 'hostA' ? hostA : hostB;
       // For legacy "both" scenes, try hostA_text first, then fallback to text
-      const sceneText = (scene.video_mode === 'both' && scene.hostA_text) 
+      const sceneText = ((scene.video_mode as string) === 'both' && scene.hostA_text) 
         ? scene.hostA_text.trim() 
         : (scene.text || '').trim();
       

@@ -286,7 +286,7 @@ const validateScriptWithScenes = (script: ScriptWithScenes) => {
     }
     
     // Convert legacy "both" scenes to hostA (backwards compatibility)
-    if (scene.video_mode === 'both') {
+    if ((scene.video_mode as string) === 'both') {
       console.warn(`Scene ${sceneId}: Converting legacy "both" video_mode to "hostA"`);
       scene.video_mode = 'hostA';
       scene.model = 'infinite_talk';
