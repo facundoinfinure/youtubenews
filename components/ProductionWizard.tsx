@@ -768,7 +768,8 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
         videoBlob,
         metadata,
         user.accessToken,
-        null
+        null,
+        () => {} // onProgress callback (not used in wizard)
       );
       
       const youtubeId = youtubeUrl.split('/').pop() || '';

@@ -2468,64 +2468,66 @@ const App: React.FC = () => {
               config,
               config.preferredNarrative
             );
+            const dateObj = parseLocalDate(selectedDate);
             const metadata = await generateViralMetadata(
-              convertScenesToScriptLines(result),
               newsItems.slice(0, 4),
-              config
+              config,
+              dateObj
             );
             return { scenes: result, metadata };
           }}
           onGenerateAudio={async (segmentIndex, text, speaker) => {
-            // Generate audio for a single segment
+            // Generate audio for a single segment using the script line format
             const characterKey = speaker.toLowerCase().includes(config.characters.hostA.name.toLowerCase()) 
               ? 'hostA' 
               : 'hostB';
             const character = config.characters[characterKey];
             
-            const audio = await generateSegmentedAudioWithCache(
-              text,
-              character.voiceName,
-              character.speakingRate || 1.0,
-              character.pitch || 0
+            // Create a single-item script array to use existing function
+            const singleLineScript: ScriptLine[] = [{ speaker, text }];
+            const audioSegments = await generateSegmentedAudioWithCache(
+              singleLineScript,
+              config,
+              wizardProduction?.channel_id || ''
             );
+            
+            const audioSegment = audioSegments[0];
+            if (!audioSegment?.audioBase64) {
+              throw new Error('Failed to generate audio');
+            }
             
             // Upload to storage
             const audioUrl = await uploadAudioToStorage(
-              audio.audioBase64,
-              wizardProduction.channel_id,
+              audioSegment.audioBase64,
+              wizardProduction?.channel_id || '',
               `segment-${segmentIndex}`
             );
             
             return {
               audioUrl: audioUrl || '',
-              duration: audio.duration
+              duration: audioSegment.audioDuration || 5
             };
           }}
           onGenerateVideo={async (segmentIndex, audioUrl, speaker) => {
             // Generate video for a single segment
-            const characterKey = speaker.toLowerCase().includes(config.characters.hostA.name.toLowerCase()) 
-              ? 'hostA' 
-              : 'hostB';
-            
-            const segment = wizardProduction.segments?.[segmentIndex];
-            const scene = wizardProduction.scenes?.scenes?.[String(segmentIndex + 1)];
+            const segment = wizardProduction?.segments?.[segmentIndex];
             
             // Use WaveSpeed/InfiniteTalk to generate video
-            const result = await generateVideoSegmentsWithInfiniteTalk(
+            const videoUrls = await generateVideoSegmentsWithInfiniteTalk(
               [{
                 speaker: speaker,
                 text: segment?.text || '',
-                audioBase64: '', // Not needed, we pass audioUrl
+                audioBase64: '',
                 audioUrl: audioUrl
               }],
               config,
-              activeChannel.id,
-              wizardProduction.id,
-              config.format
+              activeChannel?.id || '',
+              wizardProduction?.id,
+              wizardProduction?.scenes
             );
             
             return {
-              videoUrl: result.segments[0]?.videoUrl || ''
+              videoUrl: videoUrls[0] || ''
             };
           }}
         />
