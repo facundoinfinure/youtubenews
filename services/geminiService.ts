@@ -1448,11 +1448,11 @@ export const generateThumbnail = async (newsContext: string, config: ChannelConf
 };
 
 // Generate seed image for Narrative Engine hosts
-export const generateSeedImage = async (prompt: string, aspectRatio: '1:1' | '16:9' = '1:1'): Promise<string | null> => {
+export const generateSeedImage = async (prompt: string, aspectRatio: '1:1' | '16:9' | '9:16' = '1:1'): Promise<string | null> => {
   // Try WaveSpeed first
   if (isWavespeedConfigured()) {
     try {
-      console.log(`🎨 [SeedImage] Generating seed image using WaveSpeed...`);
+      console.log(`🎨 [SeedImage] Generating seed image using WaveSpeed (${aspectRatio})...`);
       const taskId = await createWavespeedImageTask(prompt, aspectRatio);
       const imageUrl = await pollWavespeedImageTask(taskId);
       const dataUri = await imageUrlToDataUri(imageUrl);
@@ -1466,9 +1466,10 @@ export const generateSeedImage = async (prompt: string, aspectRatio: '1:1' | '16
 
   // Fallback to DALL-E
   try {
-    console.log(`🎨 [SeedImage] Generating seed image using DALL-E 3...`);
-    const size = aspectRatio === '16:9' ? '1792x1024' : '1024x1024';
-    const dalleImage = await generateImageWithDALLE(prompt, size as '1024x1024' | '1792x1024');
+    console.log(`🎨 [SeedImage] Generating seed image using DALL-E 3 (${aspectRatio})...`);
+    // DALL-E 3 sizes: 1024x1024 (1:1), 1792x1024 (16:9), 1024x1792 (9:16)
+    const size = aspectRatio === '16:9' ? '1792x1024' : aspectRatio === '9:16' ? '1024x1792' : '1024x1024';
+    const dalleImage = await generateImageWithDALLE(prompt, size as '1024x1024' | '1792x1024' | '1024x1792');
     if (dalleImage) {
       console.log(`✅ [SeedImage] Generated via DALL-E 3`);
       return dalleImage;
