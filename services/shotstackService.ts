@@ -236,7 +236,8 @@ const isValidPublicUrl = (url: string): boolean => {
 const buildShotstackEdit = (config: CompositionConfig): any => {
   const tracks: any[] = [];
   let currentTime = 0;
-  const transitionDuration = config.transition?.duration || 0;
+  // NO transitions - videos play back to back
+  const transitionDuration = 0;
   
   // === VIDEO TRACK ===
   const videoClips: any[] = [];
@@ -252,14 +253,10 @@ const buildShotstackEdit = (config: CompositionConfig): any => {
       start: currentTime,
       length: config.intro.length || 3,
       fit: config.intro.fit || 'cover',
-      // Professional intro with zoom in and fade transition
-      effect: config.intro.effect || 'zoomIn',
-      transition: {
-        in: 'fade',
-        out: config.transition?.type || 'fade'
-      }
+      // Professional intro with zoom in - NO transition
+      effect: config.intro.effect || 'zoomIn'
     });
-    currentTime += (config.intro.length || 3) - transitionDuration;
+    currentTime += (config.intro.length || 3);
   } else if (config.intro) {
     console.warn(`⚠️ [Shotstack] Skipping intro - not a valid public URL: ${config.intro.url?.substring(0, 50)}...`);
   }
@@ -283,14 +280,8 @@ const buildShotstackEdit = (config: CompositionConfig): any => {
   ];
   
   validClips.forEach((clip, index) => {
-    const isLast = index === validClips.length - 1 && (!config.outro || !isValidPublicUrl(config.outro.url));
-    const isFirst = index === 0 && (!config.intro || !isValidPublicUrl(config.intro.url));
-    
     // Auto-assign effects for professional look (Ken Burns style)
     const autoEffect = clip.effect || effectRotation[index % effectRotation.length];
-    
-    // Use configured transition or rotate through options
-    const transitionType = config.transition?.type || transitionRotation[index % transitionRotation.length];
     
     videoClips.push({
       asset: {
@@ -304,23 +295,13 @@ const buildShotstackEdit = (config: CompositionConfig): any => {
       // Add motion effect for professional Ken Burns style
       effect: autoEffect,
       // Add filter if specified
-      filter: clip.filter || (config.effects?.filter),
-      // Transition to next clip (not on last clip)
-      transition: !isLast ? {
-        out: transitionType
-      } : undefined,
-      // Smooth fade in on first clip
-      ...(isFirst && { 
-        transition: { 
-          in: 'fade',
-          out: !isLast ? transitionType : undefined 
-        }
-      })
+      filter: clip.filter || (config.effects?.filter)
+      // NO transitions - clips play back to back
     });
     
     // Estimate clip duration if not provided (assume 5 seconds for auto)
     const clipDuration = clip.length || 5;
-    currentTime += clipDuration - (isLast ? 0 : transitionDuration);
+    currentTime += clipDuration;
   });
   
   // Add outro if provided AND is a valid public URL
@@ -334,12 +315,8 @@ const buildShotstackEdit = (config: CompositionConfig): any => {
       start: currentTime,
       length: config.outro.length || 3,
       fit: config.outro.fit || 'cover',
-      // Professional outro with zoom out and fade out
-      effect: config.outro.effect || 'zoomOutSlow',
-      transition: {
-        in: config.transition?.type || 'fade',
-        out: 'fade'
-      }
+      // Professional outro with zoom out - NO transition
+      effect: config.outro.effect || 'zoomOutSlow'
     });
   } else if (config.outro) {
     console.warn(`⚠️ [Shotstack] Skipping outro - not a valid public URL: ${config.outro.url?.substring(0, 50)}...`);
@@ -621,7 +598,7 @@ export const buildPodcastStyleEdit = (
   console.log(`🎬 [Podcast Composition] Total duration: ${totalDuration}s across ${scenes.length} scenes`);
 
   // Track 1: Video clips (bottom layer)
-  // Using fadeFast for snappier ~0.5s transitions between scenes
+  // NO transitions - videos play back to back seamlessly
   const videoClips = scenesWithTiming.map(scene => ({
     asset: {
       type: 'video',
@@ -629,11 +606,8 @@ export const buildPodcastStyleEdit = (
       volume: 1 // Use embedded audio
     },
     start: scene.start,
-    length: 'auto', // Let Shotstack detect the duration
-    transition: {
-      in: 'fadeFast',
-      out: 'fadeFast'
-    }
+    length: 'auto' // Let Shotstack detect the duration
+    // NO transitions - clips are sequential without gaps
   }));
 
   // Track 2: Lower third title overlays (HTML-based for podcast style)
@@ -1153,10 +1127,8 @@ export const createCompositionFromSegments = (
     resolution: options.resolution || '1080',
     aspectRatio: config.format,
     fps: 30,
-    transition: options.transition || { 
-      type: transitionType, 
-      duration: 0.5 
-    },
+    // NO transitions - videos play back to back
+    transition: undefined,
     effects: {
       zoom: 'zoomInSlow' // Default Ken Burns effect
     },
