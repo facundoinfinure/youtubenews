@@ -1020,11 +1020,15 @@ const App: React.FC = () => {
                 });
                 
                 // Update segment status for granular tracking
+                // Include hostA/hostB audio URLs for "both" scenes
                 for (let idx = 0; idx < segmentsWithUrls.length; idx++) {
                   const seg = segmentsWithUrls[idx];
                   await updateSegmentStatus(productionId, idx, {
                     audio: seg?.audioUrl ? 'done' : 'failed',
-                    audioUrl: seg?.audioUrl || undefined
+                    audioUrl: seg?.audioUrl || undefined,
+                    // For "both" scenes - save separate audio URLs
+                    hostA_audioUrl: seg?.hostA_audioUrl || undefined,
+                    hostB_audioUrl: seg?.hostB_audioUrl || undefined
                   });
                 }
               }
@@ -1035,9 +1039,16 @@ const App: React.FC = () => {
               });
               
               // Return segments with audioUrl attached for video generation
+              // CRITICAL: Include hostA_audioUrl and hostB_audioUrl for "both" scenes!
               return segs.map((seg, idx) => ({
                 ...seg,
-                audioUrl: segmentsWithUrls[idx]?.audioUrl
+                audioUrl: segmentsWithUrls[idx]?.audioUrl,
+                // For "both" scenes - pass the separate audio URLs to WaveSpeed Multi
+                hostA_audioUrl: segmentsWithUrls[idx]?.hostA_audioUrl,
+                hostB_audioUrl: segmentsWithUrls[idx]?.hostB_audioUrl,
+                hostA_text: segmentsWithUrls[idx]?.hostA_text,
+                hostB_text: segmentsWithUrls[idx]?.hostB_text,
+                order: segmentsWithUrls[idx]?.order
               }));
             }
             

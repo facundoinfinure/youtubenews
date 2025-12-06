@@ -1174,6 +1174,9 @@ export const updateSegmentStatus = async (
     video?: 'pending' | 'generating' | 'done' | 'failed';
     audioUrl?: string;
     videoUrl?: string;
+    // For "both" scenes - separate audio URLs for each host
+    hostA_audioUrl?: string;
+    hostB_audioUrl?: string;
     error?: string;
   }
 ): Promise<boolean> => {
