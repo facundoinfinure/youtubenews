@@ -223,6 +223,11 @@ export interface Production {
   scenes?: ScriptWithScenes; // Complete scene structure with metadata
   // New field for granular segment tracking (v2.1)
   segment_status?: Record<number, SegmentStatus>; // Per-segment resource status
+  // Final video and publishing fields (v2.2)
+  final_video_url?: string; // URL of rendered final video from Shotstack
+  final_video_poster?: string; // Poster/thumbnail from Shotstack
+  youtube_id?: string; // YouTube video ID after publishing
+  published_at?: string; // When it was published to YouTube
 }
 
 // Window augmentation for AI Studio key selection & Google Identity & Runtime Env

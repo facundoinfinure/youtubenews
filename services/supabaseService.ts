@@ -769,7 +769,12 @@ const normalizeProduction = (data: any): Production => ({
   narrative_used: data.narrative_used ?? undefined,
   scenes: data.scenes ?? undefined,
   // v2.1 Granular segment tracking
-  segment_status: data.segment_status ?? undefined
+  segment_status: data.segment_status ?? undefined,
+  // v2.2 Final video and publishing fields
+  final_video_url: data.final_video_url ?? undefined,
+  final_video_poster: data.final_video_poster ?? undefined,
+  youtube_id: data.youtube_id ?? undefined,
+  published_at: data.published_at ?? undefined,
 });
 
 export const saveProduction = async (
@@ -820,6 +825,11 @@ export const saveProduction = async (
     if (production.scenes !== undefined) updateData.scenes = production.scenes;
     if (production.segment_status !== undefined) updateData.segment_status = production.segment_status;
     if (production.completed_at !== undefined) updateData.completed_at = production.completed_at;
+    // v2.2 Final video and publishing fields
+    if (production.final_video_url !== undefined) updateData.final_video_url = production.final_video_url;
+    if (production.final_video_poster !== undefined) updateData.final_video_poster = production.final_video_poster;
+    if (production.youtube_id !== undefined) updateData.youtube_id = production.youtube_id;
+    if (production.published_at !== undefined) updateData.published_at = production.published_at;
 
     console.log(`💾 [Production] Updating ${production.id} with fields:`, Object.keys(updateData).join(', '));
 
@@ -876,7 +886,12 @@ export const saveProduction = async (
       cost_breakdown: production.cost_breakdown || null,
       narrative_used: production.narrative_used || null,
       scenes: production.scenes || null,
-      segment_status: production.segment_status || null
+      segment_status: production.segment_status || null,
+      // v2.2 Final video and publishing fields
+      final_video_url: production.final_video_url || null,
+      final_video_poster: production.final_video_poster || null,
+      youtube_id: production.youtube_id || null,
+      published_at: production.published_at || null
     };
 
     console.log(`💾 [Production] Creating new production for channel ${production.channel_id}`);
@@ -985,6 +1000,7 @@ export const getAllProductions = async (
 
 /**
  * Get published productions (completed productions that have been published to YouTube)
+ * Uses youtube_id directly from production instead of matching by title
  */
 export const getPublishedProductions = async (
   channelId: string,
@@ -993,13 +1009,14 @@ export const getPublishedProductions = async (
 ): Promise<Production[]> => {
   if (!supabase) return [];
 
-  // Get all completed productions
+  // Get productions that have youtube_id (directly published from dashboard)
   let query = supabase
     .from('productions')
     .select('*')
     .eq('channel_id', channelId)
     .eq('status', 'completed')
-    .order('updated_at', { ascending: false })
+    .not('youtube_id', 'is', null) // Only get productions with youtube_id
+    .order('published_at', { ascending: false })
     .limit(limit);
 
   // Show productions that match user_id OR have null user_id (legacy/orphaned productions)
@@ -1007,45 +1024,14 @@ export const getPublishedProductions = async (
     query = query.or(`user_id.eq.${userId},user_id.is.null`);
   }
 
-  const { data: productions, error } = await query;
+  const { data, error } = await query;
 
   if (error) {
     console.error("Error fetching published productions:", error);
     return [];
   }
 
-  // Get all published videos for this channel (videos with youtube_id are considered posted)
-  const { data: videos, error: videosError } = await supabase
-    .from('videos')
-    .select('*')
-    .eq('channel_id', channelId)
-    .not('youtube_id', 'is', null)
-    .order('created_at', { ascending: false });
-
-  if (videosError) {
-    console.error("Error fetching published videos:", videosError);
-    return [];
-  }
-
-  // Match productions with published videos by title
-  const publishedProds = (productions || []).filter(prod => {
-    const prodData = normalizeProduction(prod);
-    if (!prodData.viral_metadata?.title) return false;
-    
-    // Check if there's a published video with matching title
-    return (videos || []).some((video: any) => {
-      const videoTitle = video.title || '';
-      const prodTitle = prodData.viral_metadata?.title || '';
-      
-      // Exact match or partial match (for flexibility)
-      return videoTitle === prodTitle || 
-             videoTitle.includes(prodTitle) ||
-             prodTitle.includes(videoTitle) ||
-             videoTitle.includes(prodTitle.substring(0, 30));
-    });
-  });
-
-  return publishedProds.map(normalizeProduction);
+  return (data || []).map(normalizeProduction);
 };
 
 /**

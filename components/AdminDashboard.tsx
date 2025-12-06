@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { ChannelConfig, CharacterProfile, StoredVideo, Channel, UserProfile, Production } from '../types';
-import { fetchVideosFromDB, saveConfigToDB, getAllChannels, saveChannel, getChannelById, uploadImageToStorage, getIncompleteProductions, getAllProductions, getPublishedProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction, updateSegmentStatus } from '../services/supabaseService';
+import { fetchVideosFromDB, saveConfigToDB, getAllChannels, saveChannel, getChannelById, uploadImageToStorage, getIncompleteProductions, getAllProductions, getPublishedProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction, updateSegmentStatus, saveProduction, saveVideoToDB } from '../services/supabaseService';
+import { uploadVideoToYouTube } from '../services/youtubeService';
 import { generateSeedImage } from '../services/geminiService';
 import { CostTracker } from '../services/CostTracker';
 import { ContentCache } from '../services/ContentCache';
@@ -184,6 +185,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
   // Asset management state
   const [playingAudio, setPlayingAudio] = useState<string | null>(null);
   const audioRefs = useRef<Record<string, HTMLAudioElement>>({});
+  // Publishing state
+  const [publishingProduction, setPublishingProduction] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<number>(0);
 
   // Helper to refresh productions list
   const refreshProductions = async () => {
@@ -1743,79 +1747,318 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                             </div>
                             
                             {/* Action Bar */}
-                            <div className="border-t border-[#333] p-4 bg-[#0a0a0a] flex flex-wrap gap-2">
-                              {onResumeProduction && (production.status === 'in_progress' || production.status === 'draft' || production.status === 'failed') && (
-                                <button
-                                  onClick={() => { onResumeProduction(production); onExit(); }}
-                                  className="bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-lg shadow-blue-500/20"
-                                >
-                                  ▶️ Retomar
-                                </button>
+                            <div className="border-t border-[#333] p-4 bg-[#0a0a0a]">
+                              {/* COMPLETED WITH FINAL VIDEO */}
+                              {production.status === 'completed' && production.final_video_url ? (
+                                <div className="space-y-4">
+                                  {/* Video Preview & Download */}
+                                  <div className="flex gap-4 items-start">
+                                    <div className="flex-shrink-0 w-48 h-28 bg-black rounded-lg overflow-hidden relative group">
+                                      {production.final_video_poster ? (
+                                        <img src={production.final_video_poster} className="w-full h-full object-cover" alt="Preview" />
+                                      ) : (
+                                        <div className="w-full h-full flex items-center justify-center text-4xl bg-gradient-to-br from-cyan-900 to-purple-900">🎬</div>
+                                      )}
+                                      <a 
+                                        href={production.final_video_url} 
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
+                                      >
+                                        <span className="text-white text-lg">▶️ Ver</span>
+                                      </a>
+                                    </div>
+                                    
+                                    <div className="flex-1 space-y-2">
+                                      <a 
+                                        href={production.final_video_url} 
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-cyan-400 hover:text-cyan-300 text-sm flex items-center gap-1"
+                                      >
+                                        👁️ Ver Video Completo
+                                      </a>
+                                      <a 
+                                        href={production.final_video_url} 
+                                        download
+                                        className="text-purple-400 hover:text-purple-300 text-sm flex items-center gap-1"
+                                      >
+                                        📥 Descargar MP4
+                                      </a>
+                                      <div className="text-xs text-gray-500">
+                                        Formato: {config.format === '9:16' ? '📱 Vertical (Short)' : '📺 Horizontal'}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  
+                                  {/* SEO Metadata */}
+                                  {production.viral_metadata && (
+                                    <div className="bg-[#111] p-3 rounded-lg space-y-2">
+                                      <h5 className="text-sm font-bold text-gray-300">📊 SEO Metadata</h5>
+                                      <div className="space-y-1">
+                                        <div className="text-xs">
+                                          <span className="text-gray-500">Título:</span>
+                                          <span className="text-white ml-2">{production.viral_metadata.title}</span>
+                                        </div>
+                                        <div className="text-xs">
+                                          <span className="text-gray-500">Descripción:</span>
+                                          <p className="text-gray-400 mt-1 line-clamp-2">{production.viral_metadata.description}</p>
+                                        </div>
+                                        <div className="text-xs">
+                                          <span className="text-gray-500">Tags:</span>
+                                          <div className="flex flex-wrap gap-1 mt-1">
+                                            {production.viral_metadata.tags?.slice(0, 5).map((tag, idx) => (
+                                              <span key={idx} className="bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded text-xs">#{tag}</span>
+                                            ))}
+                                            {(production.viral_metadata.tags?.length || 0) > 5 && (
+                                              <span className="text-gray-500 text-xs">+{(production.viral_metadata.tags?.length || 0) - 5}</span>
+                                            )}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )}
+                                  
+                                  {/* Published Status */}
+                                  {production.youtube_id && (
+                                    <div className="bg-green-500/10 border border-green-500/30 p-3 rounded-lg flex items-center justify-between">
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-green-400">✅</span>
+                                        <span className="text-sm text-green-300">Publicado en YouTube</span>
+                                        {production.published_at && (
+                                          <span className="text-xs text-gray-500">
+                                            • {new Date(production.published_at).toLocaleDateString()}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <a 
+                                        href={`https://youtu.be/${production.youtube_id}`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-sm text-green-400 hover:text-green-300"
+                                      >
+                                        Ver en YouTube →
+                                      </a>
+                                    </div>
+                                  )}
+                                  
+                                  {/* Action Buttons for Completed */}
+                                  <div className="flex flex-wrap gap-2">
+                                    {/* Re-render */}
+                                    <button
+                                      onClick={async () => {
+                                        const toastId = toast.loading('🎬 Re-rendering...');
+                                        const result = await renderProductionToShotstack(production, activeChannel?.name, config.format);
+                                        toast.dismiss(toastId);
+                                        if (result.success && result.videoUrl) {
+                                          await saveProduction({ 
+                                            id: production.id, 
+                                            final_video_url: result.videoUrl,
+                                            final_video_poster: result.posterUrl 
+                                          });
+                                          toast.success('¡Video re-renderizado!');
+                                          refreshProductions();
+                                        } else {
+                                          toast.error(result.error || 'Error');
+                                        }
+                                      }}
+                                      className="bg-cyan-600 hover:bg-cyan-500 text-white px-4 py-2 rounded-lg text-sm font-medium"
+                                    >
+                                      🔄 Re-Render
+                                    </button>
+                                    
+                                    {/* Publish to YouTube */}
+                                    {!production.youtube_id && user?.accessToken && (
+                                      <button
+                                        onClick={async () => {
+                                          if (!production.final_video_url || !production.viral_metadata) {
+                                            toast.error('Video o metadata faltante');
+                                            return;
+                                          }
+                                          
+                                          setPublishingProduction(production.id);
+                                          const toastId = toast.loading('📤 Descargando video...');
+                                          
+                                          try {
+                                            const response = await fetch(production.final_video_url);
+                                            const videoBlob = await response.blob();
+                                            
+                                            toast.loading('📺 Subiendo a YouTube...', { id: toastId });
+                                            
+                                            const metadata = {
+                                              ...production.viral_metadata,
+                                              tags: config.format === '9:16' 
+                                                ? ['Shorts', ...(production.viral_metadata.tags || [])]
+                                                : production.viral_metadata.tags,
+                                              description: config.format === '9:16'
+                                                ? `${production.viral_metadata.description}\n\n#Shorts`
+                                                : production.viral_metadata.description
+                                            };
+                                            
+                                            const youtubeUrl = await uploadVideoToYouTube(
+                                              videoBlob,
+                                              metadata,
+                                              user.accessToken,
+                                              null,
+                                              (percent) => setUploadProgress(percent)
+                                            );
+                                            
+                                            const youtubeId = youtubeUrl.split('/').pop() || '';
+                                            
+                                            await saveProduction({
+                                              id: production.id,
+                                              youtube_id: youtubeId,
+                                              published_at: new Date().toISOString()
+                                            });
+                                            
+                                            await saveVideoToDB({
+                                              title: production.viral_metadata.title,
+                                              description: production.viral_metadata.description,
+                                              youtube_id: youtubeId,
+                                              viral_score: 0,
+                                              tags: production.viral_metadata.tags,
+                                              is_posted: true,
+                                              channel_id: production.channel_id
+                                            });
+                                            
+                                            toast.dismiss(toastId);
+                                            toast.success('¡Publicado en YouTube!');
+                                            refreshProductions();
+                                            
+                                          } catch (error) {
+                                            toast.dismiss(toastId);
+                                            toast.error(`Error: ${(error as Error).message}`);
+                                          } finally {
+                                            setPublishingProduction(null);
+                                            setUploadProgress(0);
+                                          }
+                                        }}
+                                        disabled={publishingProduction === production.id}
+                                        className="bg-red-600 hover:bg-red-500 disabled:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium"
+                                      >
+                                        {publishingProduction === production.id 
+                                          ? `⏳ ${uploadProgress.toFixed(0)}%` 
+                                          : `📺 Publicar ${config.format === '9:16' ? 'Short' : 'Video'}`}
+                                      </button>
+                                    )}
+                                    
+                                    <button
+                                      onClick={async () => {
+                                        const json = await exportProduction(production.id);
+                                        if (json) {
+                                          const blob = new Blob([json], { type: 'application/json' });
+                                          const url = URL.createObjectURL(blob);
+                                          const a = document.createElement('a');
+                                          a.href = url;
+                                          a.download = `production-${production.id.slice(0, 8)}.json`;
+                                          a.click();
+                                          URL.revokeObjectURL(url);
+                                        }
+                                      }}
+                                      className="bg-purple-600 hover:bg-purple-500 text-white px-3 py-2 rounded-lg text-sm font-medium"
+                                    >
+                                      📥 Export
+                                    </button>
+                                    
+                                    <button
+                                      onClick={async () => {
+                                        if (confirm('¿Eliminar producción?')) {
+                                          await deleteProduction(production.id);
+                                          toast.success('Eliminada');
+                                          refreshProductions();
+                                        }
+                                      }}
+                                      className="bg-red-600/30 hover:bg-red-600 text-red-300 hover:text-white px-3 py-2 rounded-lg text-sm font-medium ml-auto"
+                                    >
+                                      🗑️ Eliminar
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                /* IN-PROGRESS/DRAFT UI */
+                                <div className="flex flex-wrap gap-2">
+                                  {onResumeProduction && (production.status === 'in_progress' || production.status === 'draft' || production.status === 'failed') && (
+                                    <button
+                                      onClick={() => { onResumeProduction(production); onExit(); }}
+                                      className="bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-lg shadow-blue-500/20"
+                                    >
+                                      ▶️ Retomar
+                                    </button>
+                                  )}
+                                  
+                                  {hasVideosForRender(production) && (
+                                    <button
+                                      onClick={async () => {
+                                        const toastId = toast.loading('🎬 Rendering...');
+                                        const result = await renderProductionToShotstack(production, activeChannel?.name, config.format);
+                                        toast.dismiss(toastId);
+                                        if (result.success && result.videoUrl) {
+                                          // Save video URL and mark as completed
+                                          await saveProduction({
+                                            id: production.id,
+                                            final_video_url: result.videoUrl,
+                                            final_video_poster: result.posterUrl,
+                                            status: 'completed',
+                                            completed_at: new Date().toISOString()
+                                          });
+                                          toast.success('¡Video listo! Producción completada.');
+                                          refreshProductions();
+                                        } else {
+                                          toast.error(result.error || 'Error');
+                                        }
+                                      }}
+                                      className="bg-gradient-to-r from-cyan-600 to-cyan-500 hover:from-cyan-500 hover:to-cyan-400 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-lg shadow-cyan-500/20"
+                                    >
+                                      🎬 Render Final
+                                    </button>
+                                  )}
+                                  
+                                  <button
+                                    onClick={async () => {
+                                      const json = await exportProduction(production.id);
+                                      if (json) {
+                                        const blob = new Blob([json], { type: 'application/json' });
+                                        const url = URL.createObjectURL(blob);
+                                        const a = document.createElement('a');
+                                        a.href = url;
+                                        a.download = `production-${production.id.slice(0, 8)}.json`;
+                                        a.click();
+                                        URL.revokeObjectURL(url);
+                                        toast.success('Exported!');
+                                      }
+                                    }}
+                                    className="bg-purple-600 hover:bg-purple-500 text-white px-3 py-2 rounded-lg text-sm font-medium"
+                                  >
+                                    📥 Export
+                                  </button>
+                                  
+                                  <button
+                                    onClick={async () => {
+                                      const newVersion = await createProductionVersion(production.id, user?.email);
+                                      if (newVersion) {
+                                        toast.success(`v${newVersion.version} created!`);
+                                        refreshProductions();
+                                      }
+                                    }}
+                                    className="bg-orange-600 hover:bg-orange-500 text-white px-3 py-2 rounded-lg text-sm font-medium"
+                                  >
+                                    🔄 New Version
+                                  </button>
+                                  
+                                  <button
+                                    onClick={async () => {
+                                      if (confirm('¿Eliminar producción?')) {
+                                        await deleteProduction(production.id);
+                                        toast.success('Eliminada');
+                                        refreshProductions();
+                                      }
+                                    }}
+                                    className="bg-red-600/30 hover:bg-red-600 text-red-300 hover:text-white px-3 py-2 rounded-lg text-sm font-medium ml-auto"
+                                  >
+                                    🗑️ Eliminar
+                                  </button>
+                                </div>
                               )}
-                              
-                              {hasVideosForRender(production) && (
-                                <button
-                                  onClick={async () => {
-                                    const toastId = toast.loading('🎬 Rendering...');
-                                    const result = await renderProductionToShotstack(production, activeChannel?.name, config.format);
-                                    toast.dismiss(toastId);
-                                    if (result.success && result.videoUrl) {
-                                      toast.success('¡Video listo!');
-                                      window.open(result.videoUrl, '_blank');
-                                    } else {
-                                      toast.error(result.error || 'Error');
-                                    }
-                                  }}
-                                  className="bg-gradient-to-r from-cyan-600 to-cyan-500 hover:from-cyan-500 hover:to-cyan-400 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-lg shadow-cyan-500/20"
-                                >
-                                  🎬 Render Final
-                                </button>
-                              )}
-                              
-                              <button
-                                onClick={async () => {
-                                  const json = await exportProduction(production.id);
-                                  if (json) {
-                                    const blob = new Blob([json], { type: 'application/json' });
-                                    const url = URL.createObjectURL(blob);
-                                    const a = document.createElement('a');
-                                    a.href = url;
-                                    a.download = `production-${production.id.slice(0, 8)}.json`;
-                                    a.click();
-                                    URL.revokeObjectURL(url);
-                                    toast.success('Exported!');
-                                  }
-                                }}
-                                className="bg-purple-600 hover:bg-purple-500 text-white px-3 py-2 rounded-lg text-sm font-medium"
-                              >
-                                📥 Export
-                              </button>
-                              
-                              <button
-                                onClick={async () => {
-                                  const newVersion = await createProductionVersion(production.id, user?.email);
-                                  if (newVersion) {
-                                    toast.success(`v${newVersion.version} created!`);
-                                    refreshProductions();
-                                  }
-                                }}
-                                className="bg-orange-600 hover:bg-orange-500 text-white px-3 py-2 rounded-lg text-sm font-medium"
-                              >
-                                🔄 New Version
-                              </button>
-                              
-                              <button
-                                onClick={async () => {
-                                  if (confirm('¿Eliminar producción?')) {
-                                    await deleteProduction(production.id);
-                                    toast.success('Eliminada');
-                                    refreshProductions();
-                                  }
-                                }}
-                                className="bg-red-600/30 hover:bg-red-600 text-red-300 hover:text-white px-3 py-2 rounded-lg text-sm font-medium ml-auto"
-                              >
-                                🗑️ Eliminar
-                              </button>
                             </div>
                           </div>
                         )}
