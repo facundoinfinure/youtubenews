@@ -597,8 +597,8 @@ export const buildPodcastStyleEdit = (
   const totalDuration = currentStart;
   console.log(`🎬 [Podcast Composition] Total duration: ${totalDuration}s across ${scenes.length} scenes`);
 
-  // Track 1: Video clips (bottom layer)
-  // NO transitions - videos play back to back seamlessly
+  // Track 1: Video clips - clean, dynamic, back to back
+  // NO transitions, NO overlays - just pure video flow
   const videoClips = scenesWithTiming.map(scene => ({
     asset: {
       type: 'video',
@@ -610,86 +610,10 @@ export const buildPodcastStyleEdit = (
     // NO transitions - clips are sequential without gaps
   }));
 
-  // Track 2: Lower third title overlays (HTML-based for podcast style)
-  const titleClips = scenesWithTiming.map(scene => ({
-    asset: {
-      type: 'html',
-      html: `<div style="width:100%;height:100%;display:flex;align-items:flex-end;">
-        <div style="margin:0 auto 40px auto;max-width:70%;padding:14px 24px;background:rgba(0,0,0,0.65);border-radius:12px;font-family:Inter,Arial,sans-serif;">
-          <div style="font-size:26px;font-weight:600;color:#ffffff;text-align:center;">${escapeHtml(scene.title)}</div>
-          ${scene.speaker ? `<div style="font-size:16px;color:rgba(255,255,255,0.7);text-align:center;margin-top:4px;">🎙️ ${escapeHtml(scene.speaker)}</div>` : ''}
-        </div>
-      </div>`.replace(/\n\s*/g, '')
-    },
-    start: scene.start,
-    length: Math.min(scene.duration, 5), // Show title for max 5 seconds
-    transition: {
-      in: 'fadeFast',
-      out: 'fadeFast'
-    }
-  }));
-
-  // Track 3: Decorative border (optional)
-  const borderClip = options.showBorder !== false ? [{
-    asset: {
-      type: 'html',
-      html: `<div style="width:100%;height:100%;display:flex;justify-content:center;align-items:center;pointer-events:none;">
-        <div style="width:95%;height:95%;border-radius:20px;border:4px solid rgba(255,255,255,0.12);box-shadow:0 0 20px rgba(0,0,0,0.6);"></div>
-      </div>`.replace(/\n\s*/g, '')
-    },
-    start: 0,
-    length: totalDuration + 1 // Slightly longer to cover fade out
-  }] : [];
-
-  // Track 4: Vignette overlay (optional)
-  const vignetteClip = options.showVignette !== false ? [{
-    asset: {
-      type: 'html',
-      html: `<div style="width:100%;height:100%;background:radial-gradient(circle at center, rgba(0,0,0,0) 60%, rgba(0,0,0,0.35) 100%);"></div>`
-    },
-    start: 0,
-    length: totalDuration + 1
-  }] : [];
-
-  // Track 5: Channel branding (top corner, optional)
-  const brandingClip = options.channelName ? [{
-    asset: {
-      type: 'html',
-      html: `<div style="width:100%;height:100%;display:flex;justify-content:flex-end;align-items:flex-start;padding:20px;">
-        <div style="padding:8px 16px;background:rgba(0,0,0,0.5);border-radius:8px;font-family:Inter,Arial,sans-serif;">
-          <div style="font-size:14px;font-weight:600;color:#ffffff;">${escapeHtml(options.channelName)}</div>
-        </div>
-      </div>`.replace(/\n\s*/g, '')
-    },
-    start: 0,
-    length: totalDuration + 1
-  }] : [];
-
-  // Build tracks array (order matters: bottom to top)
+  // Build tracks array - only video track for dynamic flow
+  // REMOVED: Title overlays, border, vignette, branding for cleaner playback
   const tracks: any[] = [];
-  
-  // Videos at the bottom
   tracks.push({ clips: videoClips });
-  
-  // Title overlays
-  if (titleClips.length > 0) {
-    tracks.push({ clips: titleClips });
-  }
-  
-  // Border
-  if (borderClip.length > 0) {
-    tracks.push({ clips: borderClip });
-  }
-  
-  // Vignette
-  if (vignetteClip.length > 0) {
-    tracks.push({ clips: vignetteClip });
-  }
-  
-  // Branding on top
-  if (brandingClip.length > 0) {
-    tracks.push({ clips: brandingClip });
-  }
 
   // Resolution settings
   const resolutionMap: Record<string, { width: number; height: number }> = {
@@ -710,18 +634,6 @@ export const buildPodcastStyleEdit = (
       size
     }
   };
-};
-
-/**
- * Helper to escape HTML special characters
- */
-const escapeHtml = (text: string): string => {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
 };
 
 /**
@@ -1080,71 +992,40 @@ export const createCompositionFromSegments = (
   }, 0);
   const estimatedTotalDuration = introDuration + segmentsDuration + outroDuration;
   
-  // Build text overlays - NEWS BROADCAST STYLE
-  let textOverlays: TextOverlay[] = [];
-  
-  // Default news overlays configuration
-  const defaultNewsConfig: NewsOverlayConfig = {
-    showBreakingNews: true,
-    breakingNewsText: options.breakingNewsTitle 
-      ? `🔴 BREAKING: ${options.breakingNewsTitle.toUpperCase()}`
-      : '🔴 BREAKING NEWS',
-    breakingNewsDuration: 4,
-    showDate: true,
-    dateFormat: 'short',
-    channelName: config.channelName,
-    showHostNames: true,
-    hostAName: config.characters?.hostA?.name || 'RUSTY',
-    hostBName: config.characters?.hostB?.name || 'DANI',
-    headlines: options.headlines
-  };
-  
-  // Use provided news overlays or defaults if overlays enabled
-  if (options.enableOverlays !== false) {
-    const newsConfig = options.newsOverlays || defaultNewsConfig;
-    textOverlays = createNewsOverlays(estimatedTotalDuration, newsConfig, segments);
-  }
+  // DISABLED: Text overlays for cleaner dynamic video flow
+  // Videos now play back to back without any overlays
+  const textOverlays: TextOverlay[] = [];
   
   // NOTE: We do NOT include audioTrack - videos have embedded audio from InfiniteTalk
+  // Clean dynamic composition - no overlays, no transitions, no effects
   return {
     clips,
     intro: videos.intro ? { 
       url: videos.intro, 
       start: 0, 
       length: 3,
-      volume: 1, // Intro may have its own audio
-      effect: 'zoomIn' // Professional intro zoom
+      volume: 1
     } : undefined,
     outro: videos.outro ? { 
       url: videos.outro, 
       start: 0, 
       length: 3,
-      volume: 1, // Outro may have its own audio
-      effect: 'zoomOutSlow' // Smooth outro
+      volume: 1
     } : undefined,
-    // NO audioTrack - videos already have embedded audio from InfiniteTalk lip-sync
-    audioTrack: undefined, // EXPLICITLY undefined to avoid any audio duplication
+    audioTrack: undefined,
     resolution: options.resolution || '1080',
     aspectRatio: config.format,
     fps: 30,
-    // NO transitions - videos play back to back
     transition: undefined,
-    effects: {
-      zoom: 'zoomInSlow' // Default Ken Burns effect
-    },
-    textOverlays: textOverlays.length > 0 ? textOverlays : undefined,
-    watermark: options.watermarkUrl ? {
-      url: options.watermarkUrl,
-      position: 'bottomRight',
-      opacity: 0.7,
-      scale: 0.1
-    } : undefined,
+    textOverlays: undefined,
+    watermark: undefined,
     callbackUrl: options.callbackUrl
   };
 };
 
 /**
- * Create a composition config with all professional features enabled
+ * Create a composition config - clean dynamic video flow
+ * No overlays, no transitions - just videos back to back
  */
 export const createProfessionalComposition = (
   segments: BroadcastSegment[],
@@ -1153,32 +1034,15 @@ export const createProfessionalComposition = (
   config: ChannelConfig,
   title?: string
 ): CompositionConfig => {
-  const composition = createCompositionFromSegments(
+  return createCompositionFromSegments(
     segments,
     videoUrls,
     videos,
     config,
     {
-      resolution: '1080',
-      transitionStyle: 'smooth',
-      enableOverlays: true
+      resolution: '1080'
     }
   );
-  
-  // Add title card overlay at the beginning
-  if (title && composition.textOverlays) {
-    composition.textOverlays.unshift({
-      text: title,
-      start: 0.5,
-      length: 3,
-      position: 'center',
-      style: 'blockbuster',
-      size: 'large',
-      color: '#ffffff'
-    });
-  }
-  
-  return composition;
 };
 
 // =============================================================================================
@@ -1252,11 +1116,10 @@ export const renderProductionToShotstack = async (
   console.log(`🎬 [Shotstack] Found ${scenes.length} scenes with videos`);
   console.log(`🎬 [Shotstack] Total estimated duration: ${scenes.reduce((acc, s) => acc + s.duration, 0)}s`);
 
+  // Clean dynamic video flow - no overlays, no borders, no vignette
   return await renderPodcastVideo(scenes, {
-    channelName,
-    episodeTitle: production.viral_metadata?.title,
-    showBorder: true,
-    showVignette: true,
+    showBorder: false,
+    showVignette: false,
     resolution: '1080'
   });
 };
