@@ -7,7 +7,7 @@ import { CostTracker } from '../services/CostTracker';
 import { ContentCache } from '../services/ContentCache';
 import { VideoListSkeleton, AnalyticsCardSkeleton, EmptyState } from './LoadingStates';
 import { getStorageUsage, cleanupOldFiles } from '../services/storageManager';
-import { renderProductionToShotstack } from '../services/shotstackService';
+import { renderProductionToShotstack, hasVideosForRender } from '../services/shotstackService';
 
 interface AdminDashboardProps {
   config: ChannelConfig;
@@ -1282,7 +1282,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                           >
                             📥 Export
                           </button>
-                          {production.status === 'completed' && production.segments && production.segments.some(s => s.videoUrl) && (
+                          {production.status === 'completed' && hasVideosForRender(production) && (
                             <button
                               onClick={async () => {
                                 const toastId = toast.loading('🎬 Sending to Shotstack...');

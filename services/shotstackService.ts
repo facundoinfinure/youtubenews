@@ -1218,6 +1218,11 @@ import { Production } from "../types";
 /**
  * Render a completed production to Shotstack using existing assets
  * This reuses all already-generated videos without creating new ones
+ * 
+ * Data sources:
+ * - segment_status: contains videoUrl and audioUrl for each segment
+ * - segments: contains speaker and text
+ * - scenes.scenes: contains title for each scene
  */
 export const renderProductionToShotstack = async (
   production: Production,
@@ -1225,22 +1230,51 @@ export const renderProductionToShotstack = async (
 ): Promise<RenderResult> => {
   console.log(`🎬 [Shotstack] Rendering production ${production.id} to final video...`);
   
-  if (!production.segments || production.segments.length === 0) {
-    return { success: false, error: 'No segments found in production' };
+  // Check if we have segment_status with video URLs
+  if (!production.segment_status) {
+    return { success: false, error: 'No segment_status found in production' };
   }
 
-  // Convert BroadcastSegment[] to PodcastScene[]
-  const scenes: PodcastScene[] = production.segments
-    .filter(seg => seg.videoUrl) // Only segments with video
-    .map((seg, index) => ({
-      video_url: seg.videoUrl!,
-      title: seg.sceneTitle || `Scene ${index + 1}`,
-      duration: seg.audioDuration || 10, // Fallback to 10s if no duration
-      speaker: seg.speaker
-    }));
+  // Get scene titles from scenes.scenes if available
+  const sceneData = production.scenes?.scenes || {};
+  
+  // Build scenes from segment_status, segments, and scenes
+  const scenes: PodcastScene[] = [];
+  
+  // Get segment indices sorted
+  const segmentIndices = Object.keys(production.segment_status)
+    .map(k => parseInt(k))
+    .sort((a, b) => a - b);
+  
+  for (const index of segmentIndices) {
+    const status = production.segment_status[index];
+    
+    // Skip if no video URL
+    if (!status?.videoUrl) continue;
+    
+    // Get speaker from segments array
+    const segment = production.segments?.[index];
+    const speaker = segment?.speaker || 'Host';
+    
+    // Get title from scenes (scenes are 1-indexed, segments are 0-indexed)
+    const sceneInfo = sceneData[String(index + 1)];
+    const title = sceneInfo?.title || `Scene ${index + 1}`;
+    
+    // Estimate duration from text length (~150 words per minute = 2.5 words per second)
+    const text = segment?.text || sceneInfo?.text || '';
+    const wordCount = text.split(/\s+/).length;
+    const estimatedDuration = Math.max(5, Math.ceil(wordCount / 2.5));
+    
+    scenes.push({
+      video_url: status.videoUrl,
+      title,
+      duration: segment?.audioDuration || estimatedDuration,
+      speaker
+    });
+  }
 
   if (scenes.length === 0) {
-    return { success: false, error: 'No segments with video URLs found' };
+    return { success: false, error: 'No segments with video URLs found in segment_status' };
   }
 
   console.log(`🎬 [Shotstack] Found ${scenes.length} scenes with videos`);
@@ -1253,6 +1287,17 @@ export const renderProductionToShotstack = async (
     showVignette: true,
     resolution: '1080'
   });
+};
+
+/**
+ * Check if a production has videos ready for Shotstack rendering
+ */
+export const hasVideosForRender = (production: Production): boolean => {
+  if (!production.segment_status) return false;
+  
+  return Object.values(production.segment_status).some(
+    status => status?.videoUrl && status.video === 'done'
+  );
 };
 
 // =============================================================================================
@@ -1269,5 +1314,6 @@ export const ShotstackService = {
   createProfessionalComposition,
   createLowerThirdOverlay,
   createTickerOverlay,
-  renderFromProduction: renderProductionToShotstack
+  renderFromProduction: renderProductionToShotstack,
+  hasVideosForRender
 };
