@@ -29,10 +29,16 @@ export const TIMING = {
   API_TIMEOUT_MS: 55000,
   
   /** Polling interval for video generation */
-  VIDEO_POLL_INTERVAL_MS: 5000,
+  VIDEO_POLL_INTERVAL_MS: 10000, // 10 seconds (reduced frequency for long-running tasks)
   
-  /** Maximum wait time for video generation (10 minutes) */
-  VIDEO_MAX_WAIT_MS: 600000,
+  /** Maximum wait time for video generation (15 minutes - WaveSpeed can take 400-700s) */
+  VIDEO_MAX_WAIT_MS: 900000, // 15 minutes
+  
+  /** Stagger delay between parallel video requests */
+  VIDEO_STAGGER_DELAY_MS: 500, // 500ms between each video task start
+  
+  /** Average expected video generation time (for progress estimates) */
+  VIDEO_AVG_GENERATION_MS: 400000, // ~6.7 minutes average
 } as const;
 
 // =============================================================================

@@ -950,8 +950,21 @@ export const generateVideoSegmentsWithInfiniteTalk = async (
     });
   }
 
-  // Generate videos in batches with retry logic
-  const BATCH_SIZE = 3; // Process 3 videos at a time to avoid rate limits
+  // =============================================================================================
+  // PARALLEL VIDEO GENERATION - Send all requests at once with staggered delays
+  // =============================================================================================
+  // Instead of processing in sequential batches (slow), we send ALL video requests
+  // in parallel with small staggered delays to avoid rate limits. This dramatically
+  // reduces total generation time from O(n * batch_time) to O(max_video_time + small_delays)
+  //
+  // TIMING INFO (WaveSpeed InfiniteTalk):
+  // - Average generation time: ~400 seconds (~6.7 minutes)
+  // - Slow cases: up to 700+ seconds (~12 minutes)
+  // - By sending in parallel, total time ≈ slowest video + stagger delays
+  // - Example: 8 videos × 400s avg = would be 53+ min sequential, but ~7 min parallel!
+  
+  const STAGGER_DELAY_MS = 500; // Delay between starting each video (500ms)
+  const AVG_VIDEO_TIME_MS = 400000; // ~6.7 minutes average
   const videoUrls: (string | null)[] = new Array(segments.length).fill(null);
   const failedIndices: number[] = [];
   const missingAudioIndices: number[] = [];
@@ -994,143 +1007,149 @@ export const generateVideoSegmentsWithInfiniteTalk = async (
     console.warn(`⚠️ [InfiniteTalk] These segments will be skipped. Ensure audio is uploaded before video generation.`);
   }
 
-  // Process in batches
-  for (let i = 0; i < segments.length; i += BATCH_SIZE) {
-    const batch = segments.slice(i, i + BATCH_SIZE);
-    const batchIndices = batch.map((_, idx) => i + idx);
+  // =============================================================================================
+  // PARALLEL PROCESSING: Launch all video generation tasks with staggered starts
+  // =============================================================================================
+  const totalStaggerTime = (segments.length - 1) * STAGGER_DELAY_MS;
+  const estimatedTotalTime = Math.round((AVG_VIDEO_TIME_MS + totalStaggerTime) / 60000);
+  
+  console.log(`🚀 [InfiniteTalk] Launching ${segments.length} video tasks in parallel`);
+  console.log(`⏱️ [InfiniteTalk] Estimated time: ~${estimatedTotalTime} minutes (avg ${Math.round(AVG_VIDEO_TIME_MS / 60000)} min/video + stagger)`);
+  
+  const startTime = Date.now();
+  
+  // Create all video generation promises with staggered delays
+  const videoPromises = segments.map(async (segment, globalIndex) => {
+    // Stagger the start of each request to avoid overwhelming the API
+    await new Promise(resolve => setTimeout(resolve, globalIndex * STAGGER_DELAY_MS));
+    
+    const audioUrl = (segment as any).audioUrl;
+    
+    if (!audioUrl) {
+      // Already warned above, just skip
+      return { index: globalIndex, url: null, reason: 'missing_audio' };
+    }
+    
+    // Get scene metadata if available (now includes Scene Builder visual prompts)
+    const sceneMetadata = sceneMetadataMap.get(globalIndex);
 
-    console.log(`🎬 [InfiniteTalk] Processing batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(segments.length / BATCH_SIZE)} (segments ${i + 1}-${Math.min(i + BATCH_SIZE, segments.length)})`);
+    // Determine which model to use based on scene metadata
+    // This affects which image we need (single host vs two-shot)
+    const useMultiModel = sceneMetadata?.model === 'infinite_talk_multi' || sceneMetadata?.video_mode === 'both';
 
-    // Process batch with retry and continue on error
-    const batchResults = await Promise.allSettled(
-      batch.map(async (segment, batchIdx) => {
-        const globalIndex = batchIndices[batchIdx];
-        const audioUrl = (segment as any).audioUrl;
-        
-        if (!audioUrl) {
-          // Already warned above, just skip
-          return { index: globalIndex, url: null, reason: 'missing_audio' };
+    // Determine which image to use based on MODEL and video_mode
+    // CRITICAL: Single model needs single-host image, Multi model needs two-shot image
+    let imageUrlForSegment: string;
+    
+    if (useMultiModel) {
+      // Multi model: MUST use two-shot image (both hosts in frame)
+      if (twoShotUrl) {
+        imageUrlForSegment = twoShotUrl;
+        console.log(`🖼️ [InfiniteTalk Multi] Segment ${globalIndex}: Using two-shot image (both hosts)`);
+      } else {
+        // Fallback if no two-shot available
+        console.warn(`⚠️ [InfiniteTalk Multi] Segment ${globalIndex}: No two-shot image available, using fallback`);
+        imageUrlForSegment = config.referenceImageUrl || hostASoloUrl || hostBSoloUrl || '';
+      }
+    } else {
+      // Single model: Use solo image of the speaking host
+      const videoMode = sceneMetadata?.video_mode || (segment.speaker === hostAName ? 'hostA' : 'hostB');
+      
+      if (videoMode === 'hostA' && hostASoloUrl) {
+        imageUrlForSegment = hostASoloUrl;
+        console.log(`🖼️ [InfiniteTalk Single] Segment ${globalIndex}: Using Host A solo image`);
+      } else if (videoMode === 'hostB' && hostBSoloUrl) {
+        imageUrlForSegment = hostBSoloUrl;
+        console.log(`🖼️ [InfiniteTalk Single] Segment ${globalIndex}: Using Host B solo image`);
+      } else if (segment.speaker === hostAName && hostASoloUrl) {
+        imageUrlForSegment = hostASoloUrl;
+        console.log(`🖼️ [InfiniteTalk Single] Segment ${globalIndex}: Using Host A solo image (by speaker)`);
+      } else if (segment.speaker === hostBName && hostBSoloUrl) {
+        imageUrlForSegment = hostBSoloUrl;
+        console.log(`🖼️ [InfiniteTalk Single] Segment ${globalIndex}: Using Host B solo image (by speaker)`);
+      } else {
+        // Fallback: use any available solo image or two-shot
+        imageUrlForSegment = hostASoloUrl || hostBSoloUrl || twoShotUrl || config.referenceImageUrl || '';
+        console.warn(`⚠️ [InfiniteTalk Single] Segment ${globalIndex}: Using fallback image`);
+      }
+    }
+
+    if (!imageUrlForSegment) {
+      console.error(`❌ [InfiniteTalk] Segment ${globalIndex}: No image available`);
+      return { index: globalIndex, url: null, reason: 'no_image' };
+    }
+
+    // Get extended segment data (for "both" scenes with separate audios)
+    const extSegment = segment as ExtendedBroadcastSegment;
+    const hostA_audioUrl = extSegment.hostA_audioUrl;
+    const hostB_audioUrl = extSegment.hostB_audioUrl;
+    const order = extSegment.order;
+    // Get audio duration for accurate video timing
+    const segmentDuration = segment.audioDuration;
+
+    console.log(`🎬 [InfiniteTalk] Starting segment ${globalIndex + 1}/${segments.length}...`);
+
+    // Use retry logic for video generation
+    const { retryVideoGeneration } = await import('./retryUtils');
+    const result = await retryVideoGeneration(
+      async () => {
+        const videoResult = await generateInfiniteTalkVideo({
+          channelId,
+          productionId,
+          segmentIndex: globalIndex,
+          audioUrl,
+          referenceImageUrl: imageUrlForSegment,
+          speaker: segment.speaker,
+          dialogueText: segment.text,
+          hostAName,
+          hostBName,
+          hostAVisualPrompt,
+          hostBVisualPrompt,
+          resolution: '720p',
+          // Pass separate audios for "both" scenes
+          hostA_audioUrl,
+          hostB_audioUrl,
+          order,
+          sceneMetadata,
+          // Pass audio duration for accurate video timing
+          audioDuration: segmentDuration
+        });
+        return videoResult.url;
+      },
+      {
+        maxRetries: 2,
+        continueOnError: true,
+        onFailure: (error, attempt) => {
+          console.warn(`⚠️ [InfiniteTalk] Segment ${globalIndex} failed (attempt ${attempt}):`, (error as Error).message);
         }
-        
-        // Get scene metadata if available (now includes Scene Builder visual prompts)
-        const sceneMetadata = sceneMetadataMap.get(globalIndex);
-
-        // Determine which model to use based on scene metadata
-        // This affects which image we need (single host vs two-shot)
-        const useMultiModel = sceneMetadata?.model === 'infinite_talk_multi' || sceneMetadata?.video_mode === 'both';
-
-        // Determine which image to use based on MODEL and video_mode
-        // CRITICAL: Single model needs single-host image, Multi model needs two-shot image
-        let imageUrlForSegment: string;
-        
-        if (useMultiModel) {
-          // Multi model: MUST use two-shot image (both hosts in frame)
-          if (twoShotUrl) {
-            imageUrlForSegment = twoShotUrl;
-            console.log(`🖼️ [InfiniteTalk Multi] Segment ${globalIndex}: Using two-shot image (both hosts)`);
-          } else {
-            // Fallback if no two-shot available
-            console.warn(`⚠️ [InfiniteTalk Multi] Segment ${globalIndex}: No two-shot image available, using fallback`);
-            imageUrlForSegment = config.referenceImageUrl || hostASoloUrl || hostBSoloUrl || '';
-          }
-        } else {
-          // Single model: Use solo image of the speaking host
-          const videoMode = sceneMetadata?.video_mode || (segment.speaker === hostAName ? 'hostA' : 'hostB');
-          
-          if (videoMode === 'hostA' && hostASoloUrl) {
-          imageUrlForSegment = hostASoloUrl;
-            console.log(`🖼️ [InfiniteTalk Single] Segment ${globalIndex}: Using Host A solo image`);
-          } else if (videoMode === 'hostB' && hostBSoloUrl) {
-            imageUrlForSegment = hostBSoloUrl;
-            console.log(`🖼️ [InfiniteTalk Single] Segment ${globalIndex}: Using Host B solo image`);
-          } else if (segment.speaker === hostAName && hostASoloUrl) {
-            imageUrlForSegment = hostASoloUrl;
-            console.log(`🖼️ [InfiniteTalk Single] Segment ${globalIndex}: Using Host A solo image (by speaker)`);
-        } else if (segment.speaker === hostBName && hostBSoloUrl) {
-          imageUrlForSegment = hostBSoloUrl;
-            console.log(`🖼️ [InfiniteTalk Single] Segment ${globalIndex}: Using Host B solo image (by speaker)`);
-        } else {
-            // Fallback: use any available solo image or two-shot
-            imageUrlForSegment = hostASoloUrl || hostBSoloUrl || twoShotUrl || config.referenceImageUrl || '';
-            console.warn(`⚠️ [InfiniteTalk Single] Segment ${globalIndex}: Using fallback image`);
-          }
-        }
-
-        if (!imageUrlForSegment) {
-          console.error(`❌ [InfiniteTalk] Segment ${globalIndex}: No image available`);
-          return { index: globalIndex, url: null, reason: 'no_image' };
-        }
-
-        // Get extended segment data (for "both" scenes with separate audios)
-        const extSegment = segment as ExtendedBroadcastSegment;
-        const hostA_audioUrl = extSegment.hostA_audioUrl;
-        const hostB_audioUrl = extSegment.hostB_audioUrl;
-        const order = extSegment.order;
-        // Get audio duration for accurate video timing
-        const segmentDuration = segment.audioDuration;
-
-        // Use retry logic for video generation
-        const { retryVideoGeneration } = await import('./retryUtils');
-        const result = await retryVideoGeneration(
-          async () => {
-            const videoResult = await generateInfiniteTalkVideo({
-              channelId,
-              productionId,
-              segmentIndex: globalIndex,
-              audioUrl,
-              referenceImageUrl: imageUrlForSegment,
-              speaker: segment.speaker,
-              dialogueText: segment.text,
-              hostAName,
-              hostBName,
-              hostAVisualPrompt,
-              hostBVisualPrompt,
-              resolution: '720p',
-              // Pass separate audios for "both" scenes
-              hostA_audioUrl,
-              hostB_audioUrl,
-              order,
-              sceneMetadata,
-              // Pass audio duration for accurate video timing
-              audioDuration: segmentDuration
-            });
-            return videoResult.url;
-          },
-          {
-            maxRetries: 2,
-            continueOnError: true,
-            onFailure: (error, attempt) => {
-              console.warn(`⚠️ [InfiniteTalk] Segment ${globalIndex} failed (attempt ${attempt}):`, (error as Error).message);
-            }
-          }
-        );
-
-        if (result) {
-          console.log(`✅ [InfiniteTalk] Segment ${globalIndex + 1}/${segments.length} complete`);
-        } else {
-          failedIndices.push(globalIndex);
-        }
-
-        return { index: globalIndex, url: result };
-      })
+      }
     );
 
-    // Process batch results
-    batchResults.forEach((result, batchIdx) => {
-      if (result.status === 'fulfilled') {
-        videoUrls[result.value.index] = result.value.url;
-      } else {
-        const globalIndex = batchIndices[batchIdx];
-        failedIndices.push(globalIndex);
-        console.error(`❌ [InfiniteTalk] Segment ${globalIndex} failed:`, result.reason);
-      }
-    });
-
-    // Small delay between batches to avoid rate limits
-    if (i + BATCH_SIZE < segments.length) {
-      await new Promise(resolve => setTimeout(resolve, 1000));
+    if (result) {
+      console.log(`✅ [InfiniteTalk] Segment ${globalIndex + 1}/${segments.length} complete`);
+    } else {
+      failedIndices.push(globalIndex);
     }
-  }
+
+    return { index: globalIndex, url: result };
+  });
+
+  // Wait for ALL videos to complete in parallel
+  console.log(`⏳ [InfiniteTalk] Waiting for all ${segments.length} videos to complete...`);
+  const allResults = await Promise.allSettled(videoPromises);
+  
+  const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(1);
+  console.log(`⏱️ [InfiniteTalk] All video tasks completed in ${elapsedTime}s`);
+
+  // Process all results
+  allResults.forEach((result, idx) => {
+    if (result.status === 'fulfilled') {
+      videoUrls[result.value.index] = result.value.url;
+    } else {
+      failedIndices.push(idx);
+      console.error(`❌ [InfiniteTalk] Segment ${idx} failed:`, result.reason);
+    }
+  });
   
   const successCount = videoUrls.filter(url => url !== null).length;
   const skippedCount = missingAudioIndices.length;

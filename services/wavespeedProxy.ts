@@ -642,23 +642,34 @@ export const createInfiniteTalkSingleTask = async (
 /**
  * Poll an InfiniteTalk task for completion
  * Works for both single and multi character tasks
+ * 
+ * TIMING: WaveSpeed InfiniteTalk videos typically take:
+ * - Average: 400 seconds (~6.7 minutes)
+ * - Slow cases: up to 700+ seconds (~12 minutes)
+ * - Max timeout: 15 minutes to handle slow cases with margin
  */
 export const pollInfiniteTalkTask = async (taskId: string): Promise<string> => {
   const endpoint = `api/v3/predictions/${taskId}/result`;
-  const maxRetries = 120; // 10 minutes max (InfiniteTalk can take longer for long videos)
+  const POLL_INTERVAL_MS = 10000; // Check every 10 seconds (was 5s, reduced polling frequency)
+  const MAX_WAIT_MS = 900000; // 15 minutes max (was 10 min, increased for slow videos)
+  const maxRetries = Math.ceil(MAX_WAIT_MS / POLL_INTERVAL_MS); // ~90 retries
   let retries = 0;
+  const startTime = Date.now();
 
-  console.log(`[InfiniteTalk] 🔄 Polling task: ${taskId}`);
+  console.log(`[InfiniteTalk] 🔄 Polling task: ${taskId} (max wait: ${MAX_WAIT_MS / 60000} min)`);
 
   while (retries < maxRetries) {
-    await new Promise(resolve => setTimeout(resolve, 5000)); // Check every 5 seconds
+    await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
+    
+    const elapsedMs = Date.now() - startTime;
+    const elapsedSec = Math.round(elapsedMs / 1000);
 
     const response = await wavespeedRequest(endpoint, { method: 'GET' });
 
     if (!response.ok) {
       const errorText = await response.text();
-      if (response.status === 404 && retries < 20) {
-        console.log(`[InfiniteTalk] ⏳ Task not ready yet... (${retries + 1}/${maxRetries})`);
+      if (response.status === 404 && retries < 30) {
+        console.log(`[InfiniteTalk] ⏳ Task not ready yet... (${elapsedSec}s elapsed)`);
         retries++;
         continue;
       }
@@ -669,7 +680,7 @@ export const pollInfiniteTalkTask = async (taskId: string): Promise<string> => {
     const data = await response.json();
     const status = data.status || data.data?.status;
 
-    console.log(`[InfiniteTalk] 📊 Poll ${retries + 1}/${maxRetries} - Status: ${status || 'unknown'}`);
+    console.log(`[InfiniteTalk] 📊 Status: ${status || 'processing'} (${elapsedSec}s elapsed, ${retries + 1}/${maxRetries})`);
 
     // Extract video URL from response
     const videoUrl = 
@@ -698,7 +709,9 @@ export const pollInfiniteTalkTask = async (taskId: string): Promise<string> => {
     retries++;
   }
 
-  throw new Error(`InfiniteTalk timed out after ${maxRetries * 5} seconds`);
+  const totalElapsed = Math.round((Date.now() - startTime) / 1000);
+  console.error(`[InfiniteTalk] ❌ Timeout after ${totalElapsed}s (max: ${MAX_WAIT_MS / 1000}s)`);
+  throw new Error(`InfiniteTalk timed out after ${totalElapsed} seconds (task: ${taskId})`);
 };
 
 /**

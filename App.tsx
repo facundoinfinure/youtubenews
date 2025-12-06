@@ -511,6 +511,64 @@ const App: React.FC = () => {
       }
     };
     
+    // =============================================================================================
+    // STAGE VALIDATION: Verify critical assets before proceeding to next stage
+    // =============================================================================================
+    // This prevents the production from continuing if critical assets (like videos) failed,
+    // which would cause failures later in the pipeline (e.g., composition fails because videos are missing)
+    
+    interface StageValidationResult {
+      valid: boolean;
+      missingCount: number;
+      totalCount: number;
+      missingIndices: number[];
+      message: string;
+    }
+    
+    const validateVideoStage = (videoSegments: (string | null)[], minSuccessRate: number = 0.8): StageValidationResult => {
+      const totalCount = videoSegments.length;
+      const missingIndices = videoSegments
+        .map((url, idx) => url === null ? idx : -1)
+        .filter(idx => idx >= 0);
+      const missingCount = missingIndices.length;
+      const successCount = totalCount - missingCount;
+      const successRate = totalCount > 0 ? successCount / totalCount : 0;
+      
+      const valid = successRate >= minSuccessRate;
+      
+      let message = '';
+      if (missingCount === 0) {
+        message = `✅ All ${totalCount} videos generated successfully`;
+      } else if (valid) {
+        message = `⚠️ ${successCount}/${totalCount} videos generated (${(successRate * 100).toFixed(0)}% success rate - acceptable)`;
+      } else {
+        message = `❌ Only ${successCount}/${totalCount} videos generated (${(successRate * 100).toFixed(0)}% success rate - below ${(minSuccessRate * 100).toFixed(0)}% threshold). Missing: [${missingIndices.join(', ')}]`;
+      }
+      
+      return { valid, missingCount, totalCount, missingIndices, message };
+    };
+    
+    const validateAudioStage = (audioSegments: BroadcastSegment[]): StageValidationResult => {
+      const totalCount = audioSegments.length;
+      const missingIndices = audioSegments
+        .map((seg, idx) => (seg as any).audioUrl ? -1 : idx)
+        .filter(idx => idx >= 0);
+      const missingCount = missingIndices.length;
+      const successCount = totalCount - missingCount;
+      
+      // Audio is critical - require 100% success
+      const valid = missingCount === 0;
+      
+      let message = '';
+      if (valid) {
+        message = `✅ All ${totalCount} audio segments generated successfully`;
+      } else {
+        message = `❌ ${missingCount}/${totalCount} audio segments failed. Missing: [${missingIndices.join(', ')}]`;
+      }
+      
+      return { valid, missingCount, totalCount, missingIndices, message };
+    };
+    
     if (!activeChannel) {
       setState(AppState.ERROR);
       addLog("❌ No active channel selected. Please select a channel first.");
@@ -1226,6 +1284,32 @@ const App: React.FC = () => {
           });
         }
       }
+
+      // =============================================================================================
+      // STAGE VALIDATION: Verify video generation before proceeding
+      // =============================================================================================
+      const videoValidation = validateVideoStage(videoSegments, 0.8); // Require 80% success
+      addLog(videoValidation.message);
+      
+      if (!videoValidation.valid) {
+        // Critical failure - too many videos failed
+        const errorMsg = `Video generation failed: ${videoValidation.missingCount}/${videoValidation.totalCount} videos missing`;
+        addLog(`❌ ${errorMsg}`);
+        addLog(`💡 TIP: You can resume this production later to regenerate failed videos`);
+        
+        // Mark production as failed but recoverable
+        if (productionId) {
+          await markStepFailed(productionId, 'video_generation', errorMsg);
+          await updateProductionStatus(productionId, 'failed');
+        }
+        
+        toast.error(`${videoValidation.missingCount} videos failed to generate. Production paused.`);
+        setState(AppState.ERROR);
+        return;
+      }
+      
+      // Check if aborted before continuing
+      checkAbort();
 
       // Step 4: Merge segments
       setProductionProgress({ current: 4, total: TOTAL_STEPS, step: 'Merging media segments...' });
