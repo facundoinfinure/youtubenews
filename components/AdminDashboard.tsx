@@ -163,6 +163,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
   const [generatingSeedImage, setGeneratingSeedImage] = useState<'hostASolo' | 'hostBSolo' | 'twoShot' | null>(null);
   const [uploadingSeedImage, setUploadingSeedImage] = useState<'hostASolo' | 'hostBSolo' | 'twoShot' | null>(null);
   const seedImageInputRef = useRef<HTMLInputElement>(null);
+  // Seed image format tab (16:9 or 9:16)
+  const [seedImageFormat, setSeedImageFormat] = useState<'16:9' | '9:16'>('16:9');
   const [storageUsage, setStorageUsage] = useState<{
     totalFiles: number;
     totalSize: number;
@@ -718,10 +720,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                   />
                 </div>
 
+                {/* Format Tabs */}
+                <div className="flex gap-2 mb-4">
+                  <button
+                    onClick={() => setSeedImageFormat('16:9')}
+                    className={`px-4 py-2 rounded font-medium transition-colors ${seedImageFormat === '16:9' ? 'bg-yellow-500 text-black' : 'bg-[#222] text-gray-400 hover:bg-[#333]'}`}
+                  >
+                    📺 16:9 (Landscape)
+                  </button>
+                  <button
+                    onClick={() => setSeedImageFormat('9:16')}
+                    className={`px-4 py-2 rounded font-medium transition-colors ${seedImageFormat === '9:16' ? 'bg-yellow-500 text-black' : 'bg-[#222] text-gray-400 hover:bg-[#333]'}`}
+                  >
+                    📱 9:16 (Vertical)
+                  </button>
+                </div>
+
                 <div className="grid grid-cols-1 gap-6">
                   {/* Host A Solo */}
                   <div className="border border-[#333] rounded-lg p-4">
-                    <label className="text-sm text-gray-400 block mb-1">Seed Image: Host A Solo</label>
+                    <label className="text-sm text-gray-400 block mb-1">
+                      Seed Image: Host A Solo ({seedImageFormat})
+                    </label>
                     <div className="flex gap-4">
                       <div className="flex-1">
                         <textarea
@@ -746,20 +766,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                               }
                               setGeneratingSeedImage('hostASolo');
                               try {
-                                const imageDataUrl = await generateSeedImage(prompt);
+                                const imageDataUrl = await generateSeedImage(prompt, seedImageFormat);
                                 if (imageDataUrl) {
-                                  // Upload to storage
-                                  const fileName = `seed-hostA-${activeChannel?.id || 'default'}-${Date.now()}.png`;
+                                  // Upload to storage with format suffix
+                                  const formatSuffix = seedImageFormat === '9:16' ? '-9x16' : '';
+                                  const fileName = `seed-hostA${formatSuffix}-${activeChannel?.id || 'default'}-${Date.now()}.png`;
                                   const uploadedUrl = await uploadImageToStorage(imageDataUrl, fileName);
                                   if (uploadedUrl) {
+                                    const urlKey = seedImageFormat === '9:16' ? 'hostASoloUrl_9_16' : 'hostASoloUrl';
                                     setTempConfig(prev => ({
                                       ...prev,
                                       seedImages: {
                                         ...prev.seedImages,
-                                        hostASoloUrl: uploadedUrl
+                                        [urlKey]: uploadedUrl
                                       }
                                     }));
-                                    toast.success('Host A image generated & saved!');
+                                    toast.success(`Host A ${seedImageFormat} image generated & saved!`);
                                   }
                                 } else {
                                   toast.error('Failed to generate image');
@@ -795,14 +817,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                           </button>
                         </div>
                       </div>
-                      {tempConfig.seedImages?.hostASoloUrl && (
-                        <div className="w-32 h-32 rounded-lg overflow-hidden border border-[#333] flex-shrink-0 relative group">
-                          <img src={tempConfig.seedImages.hostASoloUrl} alt="Host A" className="w-full h-full object-cover" />
+                      {/* Show image for current format */}
+                      {(seedImageFormat === '16:9' ? tempConfig.seedImages?.hostASoloUrl : tempConfig.seedImages?.hostASoloUrl_9_16) && (
+                        <div className={`${seedImageFormat === '9:16' ? 'w-20 h-36' : 'w-32 h-20'} rounded-lg overflow-hidden border border-[#333] flex-shrink-0 relative group`}>
+                          <img 
+                            src={seedImageFormat === '16:9' ? tempConfig.seedImages?.hostASoloUrl : tempConfig.seedImages?.hostASoloUrl_9_16} 
+                            alt="Host A" 
+                            className="w-full h-full object-cover" 
+                          />
                           <button
-                            onClick={() => setTempConfig(prev => ({
-                              ...prev,
-                              seedImages: { ...prev.seedImages, hostASoloUrl: undefined }
-                            }))}
+                            onClick={() => {
+                              const urlKey = seedImageFormat === '9:16' ? 'hostASoloUrl_9_16' : 'hostASoloUrl';
+                              setTempConfig(prev => ({
+                                ...prev,
+                                seedImages: { ...prev.seedImages, [urlKey]: undefined }
+                              }));
+                            }}
                             className="absolute top-1 right-1 bg-red-600 text-white rounded-full w-6 h-6 text-xs opacity-0 group-hover:opacity-100 transition-opacity"
                           >
                             ✕
@@ -814,7 +844,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
 
                   {/* Host B Solo */}
                   <div className="border border-[#333] rounded-lg p-4">
-                    <label className="text-sm text-gray-400 block mb-1">Seed Image: Host B Solo</label>
+                    <label className="text-sm text-gray-400 block mb-1">
+                      Seed Image: Host B Solo ({seedImageFormat})
+                    </label>
                     <div className="flex gap-4">
                       <div className="flex-1">
                         <textarea
@@ -839,19 +871,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                               }
                               setGeneratingSeedImage('hostBSolo');
                               try {
-                                const imageDataUrl = await generateSeedImage(prompt);
+                                const imageDataUrl = await generateSeedImage(prompt, seedImageFormat);
                                 if (imageDataUrl) {
-                                  const fileName = `seed-hostB-${activeChannel?.id || 'default'}-${Date.now()}.png`;
+                                  const formatSuffix = seedImageFormat === '9:16' ? '-9x16' : '';
+                                  const fileName = `seed-hostB${formatSuffix}-${activeChannel?.id || 'default'}-${Date.now()}.png`;
                                   const uploadedUrl = await uploadImageToStorage(imageDataUrl, fileName);
                                   if (uploadedUrl) {
+                                    const urlKey = seedImageFormat === '9:16' ? 'hostBSoloUrl_9_16' : 'hostBSoloUrl';
                                     setTempConfig(prev => ({
                                       ...prev,
                                       seedImages: {
                                         ...prev.seedImages,
-                                        hostBSoloUrl: uploadedUrl
+                                        [urlKey]: uploadedUrl
                                       }
                                     }));
-                                    toast.success('Host B image generated & saved!');
+                                    toast.success(`Host B ${seedImageFormat} image generated & saved!`);
                                   }
                                 } else {
                                   toast.error('Failed to generate image');
@@ -887,14 +921,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                           </button>
                         </div>
                       </div>
-                      {tempConfig.seedImages?.hostBSoloUrl && (
-                        <div className="w-32 h-32 rounded-lg overflow-hidden border border-[#333] flex-shrink-0 relative group">
-                          <img src={tempConfig.seedImages.hostBSoloUrl} alt="Host B" className="w-full h-full object-cover" />
+                      {/* Show image for current format */}
+                      {(seedImageFormat === '16:9' ? tempConfig.seedImages?.hostBSoloUrl : tempConfig.seedImages?.hostBSoloUrl_9_16) && (
+                        <div className={`${seedImageFormat === '9:16' ? 'w-20 h-36' : 'w-32 h-20'} rounded-lg overflow-hidden border border-[#333] flex-shrink-0 relative group`}>
+                          <img 
+                            src={seedImageFormat === '16:9' ? tempConfig.seedImages?.hostBSoloUrl : tempConfig.seedImages?.hostBSoloUrl_9_16} 
+                            alt="Host B" 
+                            className="w-full h-full object-cover" 
+                          />
                           <button
-                            onClick={() => setTempConfig(prev => ({
-                              ...prev,
-                              seedImages: { ...prev.seedImages, hostBSoloUrl: undefined }
-                            }))}
+                            onClick={() => {
+                              const urlKey = seedImageFormat === '9:16' ? 'hostBSoloUrl_9_16' : 'hostBSoloUrl';
+                              setTempConfig(prev => ({
+                                ...prev,
+                                seedImages: { ...prev.seedImages, [urlKey]: undefined }
+                              }));
+                            }}
                             className="absolute top-1 right-1 bg-red-600 text-white rounded-full w-6 h-6 text-xs opacity-0 group-hover:opacity-100 transition-opacity"
                           >
                             ✕
@@ -906,7 +948,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
 
                   {/* Two-Shot */}
                   <div className="border border-[#333] rounded-lg p-4">
-                    <label className="text-sm text-gray-400 block mb-1">Seed Image: Two-Shot (Both Hosts)</label>
+                    <label className="text-sm text-gray-400 block mb-1">
+                      Seed Image: Two-Shot / Both Hosts ({seedImageFormat})
+                    </label>
                     <div className="flex gap-4">
                       <div className="flex-1">
                         <textarea
@@ -931,19 +975,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                               }
                               setGeneratingSeedImage('twoShot');
                               try {
-                                const imageDataUrl = await generateSeedImage(prompt, '16:9');
+                                const imageDataUrl = await generateSeedImage(prompt, seedImageFormat);
                                 if (imageDataUrl) {
-                                  const fileName = `seed-twoshot-${activeChannel?.id || 'default'}-${Date.now()}.png`;
+                                  const formatSuffix = seedImageFormat === '9:16' ? '-9x16' : '';
+                                  const fileName = `seed-twoshot${formatSuffix}-${activeChannel?.id || 'default'}-${Date.now()}.png`;
                                   const uploadedUrl = await uploadImageToStorage(imageDataUrl, fileName);
                                   if (uploadedUrl) {
+                                    const urlKey = seedImageFormat === '9:16' ? 'twoShotUrl_9_16' : 'twoShotUrl';
                                     setTempConfig(prev => ({
                                       ...prev,
                                       seedImages: {
                                         ...prev.seedImages,
-                                        twoShotUrl: uploadedUrl
+                                        [urlKey]: uploadedUrl
                                       }
                                     }));
-                                    toast.success('Two-shot image generated & saved!');
+                                    toast.success(`Two-shot ${seedImageFormat} image generated & saved!`);
                                   }
                                 } else {
                                   toast.error('Failed to generate image');
@@ -979,14 +1025,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                           </button>
                         </div>
                       </div>
-                      {tempConfig.seedImages?.twoShotUrl && (
-                        <div className="w-40 h-24 rounded-lg overflow-hidden border border-[#333] flex-shrink-0 relative group">
-                          <img src={tempConfig.seedImages.twoShotUrl} alt="Two-Shot" className="w-full h-full object-cover" />
+                      {/* Show image for current format */}
+                      {(seedImageFormat === '16:9' ? tempConfig.seedImages?.twoShotUrl : tempConfig.seedImages?.twoShotUrl_9_16) && (
+                        <div className={`${seedImageFormat === '9:16' ? 'w-20 h-36' : 'w-40 h-24'} rounded-lg overflow-hidden border border-[#333] flex-shrink-0 relative group`}>
+                          <img 
+                            src={seedImageFormat === '16:9' ? tempConfig.seedImages?.twoShotUrl : tempConfig.seedImages?.twoShotUrl_9_16} 
+                            alt="Two-Shot" 
+                            className="w-full h-full object-cover" 
+                          />
                           <button
-                            onClick={() => setTempConfig(prev => ({
-                              ...prev,
-                              seedImages: { ...prev.seedImages, twoShotUrl: undefined }
-                            }))}
+                            onClick={() => {
+                              const urlKey = seedImageFormat === '9:16' ? 'twoShotUrl_9_16' : 'twoShotUrl';
+                              setTempConfig(prev => ({
+                                ...prev,
+                                seedImages: { ...prev.seedImages, [urlKey]: undefined }
+                              }));
+                            }}
                             className="absolute top-1 right-1 bg-red-600 text-white rounded-full w-6 h-6 text-xs opacity-0 group-hover:opacity-100 transition-opacity"
                           >
                             ✕
@@ -1013,13 +1067,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                       const reader = new FileReader();
                       reader.onload = async () => {
                         const dataUrl = reader.result as string;
-                        const fileName = `seed-${currentUploadType}-${activeChannel?.id || 'default'}-${Date.now()}.png`;
+                        const formatSuffix = seedImageFormat === '9:16' ? '-9x16' : '';
+                        const fileName = `seed-${currentUploadType}${formatSuffix}-${activeChannel?.id || 'default'}-${Date.now()}.png`;
                         const uploadedUrl = await uploadImageToStorage(dataUrl, fileName);
                         
                         if (uploadedUrl) {
-                          const urlKey = currentUploadType === 'hostASolo' ? 'hostASoloUrl' 
-                            : currentUploadType === 'hostBSolo' ? 'hostBSoloUrl' 
-                            : 'twoShotUrl';
+                          // Determine URL key based on upload type AND format
+                          let urlKey: string;
+                          if (seedImageFormat === '9:16') {
+                            urlKey = currentUploadType === 'hostASolo' ? 'hostASoloUrl_9_16' 
+                              : currentUploadType === 'hostBSolo' ? 'hostBSoloUrl_9_16' 
+                              : 'twoShotUrl_9_16';
+                          } else {
+                            urlKey = currentUploadType === 'hostASolo' ? 'hostASoloUrl' 
+                              : currentUploadType === 'hostBSolo' ? 'hostBSoloUrl' 
+                              : 'twoShotUrl';
+                          }
                           
                           // Use function form to get latest state
                           setTempConfig(prev => ({
@@ -1029,7 +1092,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                               [urlKey]: uploadedUrl
                             }
                           }));
-                          toast.success('Image uploaded to Supabase Storage!');
+                          toast.success(`Image uploaded for ${seedImageFormat} format!`);
                         } else {
                           toast.error('Failed to upload image');
                         }

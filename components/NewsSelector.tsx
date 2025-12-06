@@ -198,16 +198,16 @@ export const NewsSelector: React.FC<NewsSelectorProps> = ({ news, onConfirmSelec
       <div className="flex justify-center">
         <button
           onClick={handleConfirm}
-          disabled={selectedIndices.length < 2}
+          disabled={selectedIndices.length < 1}
           className={`
              px-8 py-3 rounded-full font-bold text-lg shadow-lg flex items-center gap-3 transition-all
-             ${selectedIndices.length >= 2
+             ${selectedIndices.length >= 1
               ? 'bg-red-600 text-white hover:bg-red-500 hover:scale-105'
               : 'bg-gray-700 text-gray-400 cursor-not-allowed'}
           `}
         >
-          {selectedIndices.length < 2 ? "Select at least 2 Stories" : "START BROADCAST GENERATION"}
-          {selectedIndices.length >= 2 && (
+          {selectedIndices.length < 1 ? "Select at least 1 Story" : "START BROADCAST GENERATION"}
+          {selectedIndices.length >= 1 && (
             <svg className="w-5 h-5 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
           )}
         </button>

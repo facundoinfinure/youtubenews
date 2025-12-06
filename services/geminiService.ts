@@ -74,6 +74,32 @@ const isWavespeedConfigured = () => {
   return config.configured;
 };
 
+// Helper function to get seed image URL based on channel format (16:9 or 9:16)
+const getSeedImageUrl = (
+  config: ChannelConfig, 
+  imageType: 'hostA' | 'hostB' | 'twoShot'
+): string | undefined => {
+  const isVertical = config.format === '9:16';
+  const seedImages = config.seedImages;
+  
+  if (!seedImages) return undefined;
+  
+  if (imageType === 'hostA') {
+    // Prefer format-specific image, fallback to other format if not available
+    return isVertical 
+      ? (seedImages.hostASoloUrl_9_16 || seedImages.hostASoloUrl)
+      : (seedImages.hostASoloUrl || seedImages.hostASoloUrl_9_16);
+  } else if (imageType === 'hostB') {
+    return isVertical 
+      ? (seedImages.hostBSoloUrl_9_16 || seedImages.hostBSoloUrl)
+      : (seedImages.hostBSoloUrl || seedImages.hostBSoloUrl_9_16);
+  } else {
+    return isVertical 
+      ? (seedImages.twoShotUrl_9_16 || seedImages.twoShotUrl)
+      : (seedImages.twoShotUrl || seedImages.twoShotUrl_9_16);
+  }
+};
+
 // Channel-specific branding overrides (intro/outro assets)
 const CHANNEL_BRANDING_OVERRIDES: Record<string, { intro: string; outro: string }> = {
   chimpnews: {
@@ -161,6 +187,7 @@ interface InfiniteTalkVideoOptions {
   hostAVisualPrompt: string;  // Visual description of host A
   hostBVisualPrompt: string;  // Visual description of host B
   resolution?: '480p' | '720p';
+  aspectRatio?: '16:9' | '9:16'; // Video aspect ratio based on channel format
   // For "both" scenes - separate audio URLs
   hostA_audioUrl?: string;    // Audio URL for Host A (left side)
   hostB_audioUrl?: string;    // Audio URL for Host B (right side)
@@ -201,6 +228,7 @@ const generateInfiniteTalkVideo = async (
     hostAVisualPrompt,
     hostBVisualPrompt,
     resolution = '720p',
+    aspectRatio = '16:9',  // Default to landscape
     hostA_audioUrl,  // Separate audio for Host A (for "both" scenes)
     hostB_audioUrl,  // Separate audio for Host B (for "both" scenes)
     order: providedOrder,  // Who speaks first
@@ -389,7 +417,7 @@ CRITICAL: This is NOT a human being. This is an animated/CGI character as descri
       prompt_hash: createPromptHash(dialogueText),
       dialogue_text: dialogueText,
       provider: 'wavespeed',
-      aspect_ratio: '16:9',
+      aspect_ratio: aspectRatio, // Use channel format (16:9 or 9:16)
       duration_seconds: null,
       status: 'generating',
       error_message: null,
@@ -839,12 +867,14 @@ export const generateIntroVideo = async (
   channelId: string,
   productionId?: string
 ): Promise<string | null> => {
-  // For intro, prefer two-shot image, then fallback to referenceImageUrl or any available image
-  const twoShotUrl = config.seedImages?.twoShotUrl;
-  const introImage = twoShotUrl || config.referenceImageUrl || config.seedImages?.hostASoloUrl || config.seedImages?.hostBSoloUrl;
+  // For intro, prefer two-shot image (using format-aware helper), then fallback
+  const twoShotUrl = getSeedImageUrl(config, 'twoShot');
+  const hostAUrl = getSeedImageUrl(config, 'hostA');
+  const hostBUrl = getSeedImageUrl(config, 'hostB');
+  const introImage = twoShotUrl || config.referenceImageUrl || hostAUrl || hostBUrl;
   
   if (introImage) {
-    console.log(`✅ [Intro] Using ${twoShotUrl ? 'two-shot' : 'fallback'} image as intro frame`);
+    console.log(`✅ [Intro] Using ${twoShotUrl ? 'two-shot' : 'fallback'} image as intro frame (format: ${config.format})`);
     return introImage;
   }
   
@@ -861,12 +891,14 @@ export const generateOutroVideo = async (
   channelId: string,
   productionId?: string
 ): Promise<string | null> => {
-  // For outro, prefer two-shot image, then fallback
-  const twoShotUrl = config.seedImages?.twoShotUrl;
-  const outroImage = twoShotUrl || config.referenceImageUrl || config.seedImages?.hostASoloUrl || config.seedImages?.hostBSoloUrl;
+  // For outro, prefer two-shot image (using format-aware helper), then fallback
+  const twoShotUrl = getSeedImageUrl(config, 'twoShot');
+  const hostAUrl = getSeedImageUrl(config, 'hostA');
+  const hostBUrl = getSeedImageUrl(config, 'hostB');
+  const outroImage = twoShotUrl || config.referenceImageUrl || hostAUrl || hostBUrl;
   
   if (outroImage) {
-    console.log(`✅ [Outro] Using ${twoShotUrl ? 'two-shot' : 'fallback'} image as outro frame`);
+    console.log(`✅ [Outro] Using ${twoShotUrl ? 'two-shot' : 'fallback'} image as outro frame (format: ${config.format})`);
     return outroImage;
   }
   
@@ -897,10 +929,10 @@ export const generateVideoSegmentsWithInfiniteTalk = async (
   productionId?: string,
   scriptWithScenes?: ScriptWithScenes
 ): Promise<(string | null)[]> => {
-  // Get seed images for each host (prefer individual images, fallback to referenceImageUrl)
-  const hostASoloUrl = config.seedImages?.hostASoloUrl;
-  const hostBSoloUrl = config.seedImages?.hostBSoloUrl;
-  const twoShotUrl = config.seedImages?.twoShotUrl || config.referenceImageUrl;
+  // Get seed images for each host using format-aware helper
+  const hostASoloUrl = getSeedImageUrl(config, 'hostA');
+  const hostBSoloUrl = getSeedImageUrl(config, 'hostB');
+  const twoShotUrl = getSeedImageUrl(config, 'twoShot') || config.referenceImageUrl;
   
   // Check if we have at least one image to work with
   const hasAnyImage = hostASoloUrl || hostBSoloUrl || twoShotUrl || config.referenceImageUrl;
@@ -916,7 +948,8 @@ export const generateVideoSegmentsWithInfiniteTalk = async (
     return new Array(segments.length).fill(null);
   }
 
-  console.log(`🎬 [InfiniteTalk Multi] Generating ${segments.length} lip-sync videos`);
+  const channelFormat = config.format || '16:9';
+  console.log(`🎬 [InfiniteTalk Multi] Generating ${segments.length} lip-sync videos (format: ${channelFormat})`);
   console.log(`🖼️ [InfiniteTalk Multi] Host A image: ${hostASoloUrl ? hostASoloUrl.substring(0, 60) + '...' : 'Not set (using fallback)'}`);
   console.log(`🖼️ [InfiniteTalk Multi] Host B image: ${hostBSoloUrl ? hostBSoloUrl.substring(0, 60) + '...' : 'Not set (using fallback)'}`);
   console.log(`🖼️ [InfiniteTalk Multi] Two-shot image: ${twoShotUrl ? twoShotUrl.substring(0, 60) + '...' : 'Not set'}`);
@@ -1106,6 +1139,7 @@ export const generateVideoSegmentsWithInfiniteTalk = async (
           hostAVisualPrompt,
           hostBVisualPrompt,
           resolution: '720p',
+          aspectRatio: channelFormat, // Use channel format (16:9 or 9:16)
           // Pass separate audios for "both" scenes
           hostA_audioUrl,
           hostB_audioUrl,
@@ -1201,8 +1235,8 @@ export const generateBroadcastVisuals = async (
 ): Promise<VideoAssets> => {
   console.log(`[Broadcast Visuals] Skipping intro/outro - videos will start directly with scenes`);
   
-  // Reference image for other purposes (thumbnail generation, etc.)
-  const referenceImage = config.referenceImageUrl || config.seedImages?.twoShotUrl || null;
+  // Reference image for other purposes (thumbnail generation, etc.) - using format-aware helper
+  const referenceImage = config.referenceImageUrl || getSeedImageUrl(config, 'twoShot') || null;
 
   return {
     intro: null,

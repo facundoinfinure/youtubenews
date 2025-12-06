@@ -158,10 +158,14 @@ export interface ChannelConfig {
     hostASolo?: string; // Seed image prompt for hostA solo
     hostBSolo?: string; // Seed image prompt for hostB solo
     twoShot?: string; // Seed image prompt for both hosts
-    // Image URLs (generated or uploaded)
+    // Image URLs for 16:9 format (landscape)
     hostASoloUrl?: string;
     hostBSoloUrl?: string;
     twoShotUrl?: string;
+    // Image URLs for 9:16 format (vertical/shorts)
+    hostASoloUrl_9_16?: string;
+    hostBSoloUrl_9_16?: string;
+    twoShotUrl_9_16?: string;
   };
   studioSetup?: string; // Description of the podcast studio setup
   preferredNarrative?: NarrativeType; // Optional preferred narrative (auto-selection if not set)

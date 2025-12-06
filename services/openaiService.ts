@@ -781,33 +781,109 @@ Be strict: Average news = 40-60, Breaking/controversial = 70-85, Highly viral = 
 
 /**
  * Batch calculate viral scores for multiple news items
- * Uses parallel processing for efficiency
+ * Uses a SINGLE OpenAI API call to analyze ALL items at once (avoids rate limits)
  */
 export const calculateViralScoresBatch = async (
   newsItems: Array<{ headline: string; summary: string; source: string; date?: string }>
 ): Promise<Array<{ score: number; reasoning: string }>> => {
-  console.log(`[Viral Score] 🔥 Analyzing ${newsItems.length} news items with GPT-4o...`);
+  console.log(`[Viral Score] 🔥 Analyzing ${newsItems.length} news items with a single GPT-4o call...`);
   
-  // Process in parallel (up to 10 at a time to avoid rate limits)
-  const batchSize = 10;
-  const results: Array<{ score: number; reasoning: string }> = [];
-  
-  for (let i = 0; i < newsItems.length; i += batchSize) {
-    const batch = newsItems.slice(i, i + batchSize);
-    const batchResults = await Promise.all(
-      batch.map(item => calculateViralScoreWithGPT(item.headline, item.summary, item.source, item.date))
-    );
-    results.push(...batchResults);
-    
-    // Small delay between batches to avoid rate limits
-    if (i + batchSize < newsItems.length) {
-      await new Promise(resolve => setTimeout(resolve, 500));
-    }
+  if (newsItems.length === 0) {
+    return [];
   }
   
-  const scores = results.map(r => r.score);
-  console.log(`[Viral Score] ✅ Analyzed ${results.length} items. Range: ${Math.min(...scores)}-${Math.max(...scores)}`);
-  return results;
+  // Build a single prompt with all news items
+  const newsListFormatted = newsItems.map((item, index) => 
+    `[${index + 1}] HEADLINE: "${item.headline}"
+    SUMMARY: "${item.summary}"
+    SOURCE: "${item.source}"
+    ${item.date ? `DATE: ${item.date}` : ''}`
+  ).join('\n\n');
+  
+  const prompt = `You are an expert at predicting viral content performance on social media and YouTube.
+
+Analyze ALL the following news stories and calculate a viral score from 0-100 for EACH one.
+
+Evaluate these factors for each (0-100 scale):
+1. **Emotional Impact** (shock, anger, joy, fear) - How strong is the emotional reaction?
+2. **Controversy/Polarization** - Will this divide opinions and generate debate?
+3. **Relevance/Timeliness** - How current and relevant is this to today's audience?
+4. **Click-worthiness** - How compelling is the headline? Does it create curiosity?
+5. **Shareability** - Would people want to share this?
+6. **Uniqueness** - Is this breaking news or a fresh angle?
+7. **Source Credibility** - Major trusted sources (CNN, BBC, NYT, Reuters) get bonus points
+
+NEWS STORIES TO ANALYZE:
+${newsListFormatted}
+
+Return ONLY a JSON object with this exact format:
+{
+  "results": [
+    { "index": 1, "viral_score": <0-100>, "reasoning": "<brief explanation in 10-15 words>" },
+    { "index": 2, "viral_score": <0-100>, "reasoning": "<brief explanation>" },
+    ...
+  ]
+}
+
+IMPORTANT:
+- Return results for ALL ${newsItems.length} news items in the SAME order
+- Be strict: Average news = 40-60, Breaking/controversial = 70-85, Highly viral = 85-100
+- Keep reasoning brief (10-15 words max per item)`;
+
+  try {
+    const response = await openaiRequest('chat/completions', {
+      model: 'gpt-4o',
+      messages: [{ role: 'user', content: prompt }],
+      response_format: { type: 'json_object' },
+      temperature: 0.3
+    }, { timeout: 60000 }); // Longer timeout for batch processing
+
+    // Cost estimate: ~$0.01-0.02 for batch analysis (much cheaper than individual calls)
+    CostTracker.track('viralScoreBatch', 'gpt-4o', 0.015);
+
+    const content = response.choices[0]?.message?.content || '{}';
+    const analysis = JSON.parse(content);
+    
+    const results: Array<{ score: number; reasoning: string }> = [];
+    
+    // Map results back to original order
+    for (let i = 0; i < newsItems.length; i++) {
+      const resultItem = analysis.results?.find((r: any) => r.index === i + 1);
+      
+      if (resultItem) {
+        results.push({
+          score: Math.max(0, Math.min(100, Math.round(resultItem.viral_score || 50))),
+          reasoning: resultItem.reasoning || 'No explanation provided'
+        });
+      } else {
+        // Fallback for missing items
+        const fallbackScore = calculateBasicViralScore(
+          newsItems[i].headline,
+          newsItems[i].summary,
+          newsItems[i].source,
+          newsItems[i].date
+        );
+        results.push({
+          score: fallbackScore,
+          reasoning: 'Score calculated using basic algorithm (GPT result missing)'
+        });
+      }
+    }
+    
+    const scores = results.map(r => r.score);
+    console.log(`[Viral Score] ✅ Analyzed ${results.length} items in ONE API call. Range: ${Math.min(...scores)}-${Math.max(...scores)}`);
+    return results;
+    
+  } catch (error: any) {
+    console.error(`[Viral Score] ❌ Batch GPT analysis failed:`, error.message);
+    
+    // Fallback: calculate all scores using basic algorithm
+    console.log(`[Viral Score] ⚠️ Using basic algorithm for all ${newsItems.length} items...`);
+    return newsItems.map(item => ({
+      score: calculateBasicViralScore(item.headline, item.summary, item.source, item.date),
+      reasoning: 'Score calculated using basic algorithm (GPT batch analysis unavailable)'
+    }));
+  }
 };
 
 /**
