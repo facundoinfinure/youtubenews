@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { ChannelConfig, CharacterProfile, StoredVideo, Channel, UserProfile, Production } from '../types';
-import { fetchVideosFromDB, saveConfigToDB, getAllChannels, saveChannel, getChannelById, uploadImageToStorage, getIncompleteProductions, getAllProductions, getPublishedProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction } from '../services/supabaseService';
+import { fetchVideosFromDB, saveConfigToDB, getAllChannels, saveChannel, getChannelById, uploadImageToStorage, getIncompleteProductions, getAllProductions, getPublishedProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction, updateSegmentStatus } from '../services/supabaseService';
 import { generateSeedImage } from '../services/geminiService';
 import { CostTracker } from '../services/CostTracker';
 import { ContentCache } from '../services/ContentCache';
@@ -147,7 +147,7 @@ const RetentionChart: React.FC<{ data: number[], color: string }> = ({ data, col
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdateConfig, onExit, activeChannel, channels, onChannelChange, onDeleteVideo, onResumeProduction, user }) => {
   const [tempConfig, setTempConfig] = useState<ChannelConfig>(config);
-  const [activeTab, setActiveTab] = useState<'insights' | 'settings' | 'costs' | 'cache' | 'productions'>('insights');
+  const [activeTab, setActiveTab] = useState<'overview' | 'insights' | 'settings' | 'costs' | 'cache' | 'productions'>('overview');
   const [videos, setVideos] = useState<StoredVideo[]>([]);
   const [selectedVideo, setSelectedVideo] = useState<StoredVideo | null>(null);
   const [isLoadingVideos, setIsLoadingVideos] = useState(false);
@@ -181,6 +181,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
     avg: number;
     count: number;
   } | null>(null);
+  // Asset management state
+  const [playingAudio, setPlayingAudio] = useState<string | null>(null);
+  const audioRefs = useRef<Record<string, HTMLAudioElement>>({});
+
+  // Helper to refresh productions list
+  const refreshProductions = async () => {
+    if (!activeChannel || !user) return;
+    setIsLoadingProductions(true);
+    try {
+      if (productionFilter === 'incomplete') {
+        const prods = await getIncompleteProductions(activeChannel.id, user.email);
+        setProductions(prods);
+      } else if (productionFilter === 'published') {
+        const prods = await getPublishedProductions(activeChannel.id, user.email, 100);
+        setProductions(prods);
+      } else if (productionFilter === 'all') {
+        const prods = await getAllProductions(activeChannel.id, user.email, 100);
+        setProductions(prods);
+      } else {
+        const allProds = await getAllProductions(activeChannel.id, user.email, 100);
+        setProductions(allProds.filter(p => p.status === productionFilter));
+      }
+    } finally {
+      setIsLoadingProductions(false);
+    }
+  };
 
   // Sync tempConfig when config changes (e.g., when switching channels)
   useEffect(() => {
@@ -188,7 +214,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
   }, [config]);
 
   useEffect(() => {
-    if (activeTab === 'insights' && activeChannel) {
+    if ((activeTab === 'insights' || activeTab === 'overview') && activeChannel) {
       setIsLoadingVideos(true);
       // Only show published videos (is_posted = true) in insights
       fetchVideosFromDB(activeChannel.id)
@@ -199,7 +225,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
         })
         .finally(() => setIsLoadingVideos(false));
     }
-    if (activeTab === 'productions' && activeChannel && user) {
+    if ((activeTab === 'productions' || activeTab === 'overview') && activeChannel && user) {
       setIsLoadingProductions(true);
       if (productionFilter === 'incomplete') {
         getIncompleteProductions(activeChannel.id, user.email)
@@ -244,9 +270,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
     }
   }, [activeTab]);
 
-  // Load production costs when costs tab is active
+  // Load production costs when costs or overview tab is active
   useEffect(() => {
-    if (activeTab === 'costs' && activeChannel && user) {
+    if ((activeTab === 'costs' || activeTab === 'overview') && activeChannel && user) {
       getAllProductions(activeChannel.id, user.email, 100).then(allProds => {
         const completedProds = allProds.filter(p => p.status === 'completed' && p.actual_cost);
         const total = completedProds.reduce((sum, p) => sum + (p.actual_cost || 0), 0);
@@ -387,6 +413,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
         {/* Tabs */}
         <div className="flex gap-6 mb-8 border-b border-[#272727]">
           <button
+            onClick={() => setActiveTab('overview')}
+            className={`pb-3 px-2 border-b-2 font-semibold text-sm transition-all duration-200 ${activeTab === 'overview'
+              ? 'border-blue-500 text-white'
+              : 'border-transparent text-gray-500 hover:text-gray-300'
+              }`}
+          >
+            🏠 Overview
+          </button>
+          <button
             onClick={() => setActiveTab('insights')}
             className={`pb-3 px-2 border-b-2 font-semibold text-sm transition-all duration-200 ${activeTab === 'insights'
               ? 'border-blue-500 text-white'
@@ -432,6 +467,168 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
             Cache & Storage
           </button>
         </div>
+
+        {/* OVERVIEW TAB */}
+        {activeTab === 'overview' && (
+          <div className="space-y-6">
+            {/* Hero Stats Grid */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div 
+                onClick={() => { setProductionFilter('incomplete'); setActiveTab('productions'); }} 
+                className="bg-gradient-to-br from-yellow-500/20 to-orange-500/10 p-6 rounded-xl border border-yellow-500/30 cursor-pointer hover:scale-105 transition-all"
+              >
+                <div className="text-3xl mb-2">🔄</div>
+                <div className="text-3xl font-bold text-yellow-400">
+                  {productions.filter(p => p.status === 'in_progress').length}
+                </div>
+                <div className="text-sm text-gray-400">In Progress</div>
+              </div>
+              
+              <div 
+                onClick={() => { setProductionFilter('completed'); setActiveTab('productions'); }} 
+                className="bg-gradient-to-br from-green-500/20 to-emerald-500/10 p-6 rounded-xl border border-green-500/30 cursor-pointer hover:scale-105 transition-all"
+              >
+                <div className="text-3xl mb-2">✅</div>
+                <div className="text-3xl font-bold text-green-400">
+                  {productions.filter(p => p.status === 'completed').length}
+                </div>
+                <div className="text-sm text-gray-400">Completed</div>
+              </div>
+              
+              <div 
+                onClick={() => setActiveTab('insights')} 
+                className="bg-gradient-to-br from-blue-500/20 to-indigo-500/10 p-6 rounded-xl border border-blue-500/30 cursor-pointer hover:scale-105 transition-all"
+              >
+                <div className="text-3xl mb-2">📺</div>
+                <div className="text-3xl font-bold text-blue-400">{videos.length}</div>
+                <div className="text-sm text-gray-400">Published</div>
+              </div>
+              
+              <div 
+                onClick={() => setActiveTab('costs')} 
+                className="bg-gradient-to-br from-purple-500/20 to-pink-500/10 p-6 rounded-xl border border-purple-500/30 cursor-pointer hover:scale-105 transition-all"
+              >
+                <div className="text-3xl mb-2">💰</div>
+                <div className="text-3xl font-bold text-purple-400">
+                  ${(prodCosts?.total || 0).toFixed(2)}
+                </div>
+                <div className="text-sm text-gray-400">Total Cost</div>
+              </div>
+            </div>
+            
+            {/* Active Productions - Quick Access */}
+            {productions.filter(p => p.status === 'in_progress').length > 0 && (
+              <div className="bg-gradient-to-br from-[#1a1a2e] to-[#16213e] p-6 rounded-xl border border-yellow-500/30">
+                <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+                  <span className="animate-pulse text-red-500">●</span> Producciones Activas
+                </h3>
+                <div className="space-y-3">
+                  {productions.filter(p => p.status === 'in_progress').slice(0, 3).map(prod => {
+                    const segmentStatus = prod.segment_status || {};
+                    const totalSegments = prod.segments?.length || Object.keys(segmentStatus).length;
+                    const audiosDone = Object.values(segmentStatus).filter(s => s?.audio === 'done').length;
+                    const videosDone = Object.values(segmentStatus).filter(s => s?.video === 'done').length;
+                    
+                    return (
+                      <div key={prod.id} className="flex items-center justify-between p-4 bg-[#111] rounded-lg border border-[#333]">
+                        <div className="flex-1">
+                          <div className="font-medium text-white truncate max-w-[400px]">
+                            {prod.viral_metadata?.title || `Production ${prod.id.slice(0, 8)}`}
+                          </div>
+                          <div className="flex items-center gap-3 mt-1">
+                            <span className="text-xs text-gray-500">Step {prod.progress_step}/6</span>
+                            {totalSegments > 0 && (
+                              <>
+                                <span className="text-xs text-cyan-400">🔊 {audiosDone}/{totalSegments}</span>
+                                <span className="text-xs text-purple-400">🎥 {videosDone}/{totalSegments}</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => { onResumeProduction?.(prod); onExit(); }}
+                          className="bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-lg shadow-blue-500/20"
+                        >
+                          ▶️ Retomar
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            
+            {/* Asset Summary */}
+            <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
+              <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+                <span>📦</span> Resumen de Assets
+              </h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="bg-[#111] p-4 rounded-lg text-center">
+                  <div className="text-3xl font-bold text-white">{productions.length}</div>
+                  <div className="text-sm text-gray-400">Producciones</div>
+                </div>
+                <div className="bg-[#111] p-4 rounded-lg text-center">
+                  <div className="text-3xl font-bold text-cyan-400">
+                    {productions.reduce((acc, p) => acc + Object.values(p.segment_status || {}).filter(s => s?.audio === 'done').length, 0)}
+                  </div>
+                  <div className="text-sm text-gray-400">Audios</div>
+                </div>
+                <div className="bg-[#111] p-4 rounded-lg text-center">
+                  <div className="text-3xl font-bold text-purple-400">
+                    {productions.reduce((acc, p) => acc + Object.values(p.segment_status || {}).filter(s => s?.video === 'done').length, 0)}
+                  </div>
+                  <div className="text-sm text-gray-400">Videos</div>
+                </div>
+                <div className="bg-[#111] p-4 rounded-lg text-center">
+                  <div className="text-3xl font-bold text-pink-400">
+                    {productions.reduce((acc, p) => acc + (p.segments?.length || 0), 0)}
+                  </div>
+                  <div className="text-sm text-gray-400">Segmentos</div>
+                </div>
+              </div>
+            </div>
+            
+            {/* Quick Actions */}
+            <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
+              <h3 className="text-xl font-bold mb-4">⚡ Acciones Rápidas</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <button 
+                  onClick={() => setActiveTab('productions')}
+                  className="p-4 bg-[#111] hover:bg-[#1a1a1a] border border-[#333] hover:border-blue-500 rounded-lg text-left transition-all"
+                >
+                  <div className="text-2xl mb-2">📦</div>
+                  <div className="font-medium text-white">Ver Producciones</div>
+                  <div className="text-xs text-gray-500">Gestionar assets</div>
+                </button>
+                <button 
+                  onClick={() => setActiveTab('settings')}
+                  className="p-4 bg-[#111] hover:bg-[#1a1a1a] border border-[#333] hover:border-green-500 rounded-lg text-left transition-all"
+                >
+                  <div className="text-2xl mb-2">⚙️</div>
+                  <div className="font-medium text-white">Configuración</div>
+                  <div className="text-xs text-gray-500">Hosts y canal</div>
+                </button>
+                <button 
+                  onClick={() => setActiveTab('costs')}
+                  className="p-4 bg-[#111] hover:bg-[#1a1a1a] border border-[#333] hover:border-purple-500 rounded-lg text-left transition-all"
+                >
+                  <div className="text-2xl mb-2">💰</div>
+                  <div className="font-medium text-white">Costos</div>
+                  <div className="text-xs text-gray-500">Analytics y gastos</div>
+                </button>
+                <button 
+                  onClick={() => setActiveTab('cache')}
+                  className="p-4 bg-[#111] hover:bg-[#1a1a1a] border border-[#333] hover:border-yellow-500 rounded-lg text-left transition-all"
+                >
+                  <div className="text-2xl mb-2">💾</div>
+                  <div className="font-medium text-white">Storage</div>
+                  <div className="text-xs text-gray-500">Cache y limpieza</div>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* INSIGHTS TAB */}
         {activeTab === 'insights' && (
@@ -1122,13 +1319,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
         {/* PRODUCTIONS TAB */}
         {activeTab === 'productions' && (
           <div className="space-y-6">
+            {/* Header & Filters */}
             <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
               <div className="flex justify-between items-center mb-4">
                 <h3 className="text-xl font-bold flex items-center gap-2">
                   <span>📦</span>
-                  <span>Productions History</span>
+                  <span>Production Studio</span>
                 </h3>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
                   <button
                     onClick={() => {
                       const input = document.createElement('input');
@@ -1137,102 +1335,44 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                       input.onchange = async (e) => {
                         const file = (e.target as HTMLInputElement).files?.[0];
                         if (!file || !activeChannel || !user) return;
-                        
                         try {
                           const text = await file.text();
                           const imported = await importProduction(text, activeChannel.id, user.email);
                           if (imported) {
-                            toast.success('Production imported successfully!');
-                            // Refresh productions list
-                            if (productionFilter === 'all') {
-                              const allProds = await getAllProductions(activeChannel.id, user.email, 100);
-                              setProductions(allProds);
-                            } else if (productionFilter === 'incomplete') {
-                              const incomplete = await getIncompleteProductions(activeChannel.id, user.email);
-                              setProductions(incomplete);
-                            } else if (productionFilter === 'published') {
-                              // Get published productions
-                              const publishedProds = await getPublishedProductions(activeChannel.id, user.email, 100);
-                              setProductions(publishedProds);
-                            } else {
-                              const allProds = await getAllProductions(activeChannel.id, user.email, 100);
-                              setProductions(allProds.filter(p => p.status === productionFilter));
-                            }
+                            toast.success('Production imported!');
+                            refreshProductions();
                           } else {
-                            toast.error('Failed to import production');
+                            toast.error('Failed to import');
                           }
                         } catch (error) {
-                          console.error('Import error:', error);
-                          toast.error('Failed to import production: Invalid file format');
+                          toast.error('Invalid file format');
                         }
                       };
                       input.click();
                     }}
-                    className="bg-green-600 text-white border border-green-500 hover:bg-green-700 px-3 py-1.5 rounded-lg text-sm font-bold transition-all duration-200 hover:scale-105 active:scale-95"
+                    className="bg-green-600 hover:bg-green-500 px-3 py-1.5 rounded-lg text-sm font-bold"
                   >
-                    📤 Import Production
+                    📤 Import
                   </button>
-                  <button
-                    onClick={() => setProductionFilter('all')}
-                    className={`px-3 py-1 rounded text-sm font-semibold transition-all ${
-                      productionFilter === 'all'
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-[#222] text-gray-400 hover:text-white'
-                    }`}
-                  >
-                    All
-                  </button>
-                  <button
-                    onClick={() => setProductionFilter('incomplete')}
-                    className={`px-3 py-1 rounded text-sm font-semibold transition-all ${
-                      productionFilter === 'incomplete'
-                        ? 'bg-yellow-600 text-white'
-                        : 'bg-[#222] text-gray-400 hover:text-white'
-                    }`}
-                  >
-                    In Progress
-                  </button>
-                  <button
-                    onClick={() => setProductionFilter('completed')}
-                    className={`px-3 py-1 rounded text-sm font-semibold transition-all ${
-                      productionFilter === 'completed'
-                        ? 'bg-green-600 text-white'
-                        : 'bg-[#222] text-gray-400 hover:text-white'
-                    }`}
-                  >
-                    Completed
-                  </button>
-                  <button
-                    onClick={() => setProductionFilter('failed')}
-                    className={`px-3 py-1 rounded text-sm font-semibold transition-all ${
-                      productionFilter === 'failed'
-                        ? 'bg-red-600 text-white'
-                        : 'bg-[#222] text-gray-400 hover:text-white'
-                    }`}
-                  >
-                    Failed
-                  </button>
-                  <button
-                    onClick={() => setProductionFilter('published')}
-                    className={`px-3 py-1 rounded text-sm font-semibold transition-all ${
-                      productionFilter === 'published'
-                        ? 'bg-emerald-600 text-white'
-                        : 'bg-[#222] text-gray-400 hover:text-white'
-                    }`}
-                  >
-                    📺 Published
-                  </button>
+                  {(['all', 'incomplete', 'completed', 'failed', 'published'] as const).map(filter => (
+                    <button
+                      key={filter}
+                      onClick={() => setProductionFilter(filter)}
+                      className={`px-3 py-1 rounded text-sm font-semibold transition-all ${
+                        productionFilter === filter
+                          ? filter === 'incomplete' ? 'bg-yellow-600 text-white'
+                            : filter === 'completed' ? 'bg-green-600 text-white'
+                            : filter === 'failed' ? 'bg-red-600 text-white'
+                            : filter === 'published' ? 'bg-emerald-600 text-white'
+                            : 'bg-blue-600 text-white'
+                          : 'bg-[#222] text-gray-400 hover:text-white'
+                      }`}
+                    >
+                      {filter === 'published' ? '📺 ' : ''}{filter.charAt(0).toUpperCase() + filter.slice(1)}
+                    </button>
+                  ))}
                 </div>
               </div>
-              <p className="text-gray-400 text-sm mb-6">
-                {productionFilter === 'incomplete' 
-                  ? 'Resume productions that were abandoned or are still in progress.'
-                  : productionFilter === 'all'
-                  ? 'View all productions across all statuses.'
-                  : productionFilter === 'published'
-                  ? 'View completed productions that have been published to YouTube.'
-                  : `View ${productionFilter} productions.`}
-              </p>
 
               {isLoadingProductions ? (
                 <div className="space-y-3">
@@ -1246,230 +1386,442 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
               ) : productions.length === 0 ? (
                 <EmptyState
                   icon="📭"
-                  title={`No ${productionFilter === 'all' ? '' : productionFilter === 'incomplete' ? 'Incomplete' : productionFilter === 'published' ? 'Published' : productionFilter} Productions`}
-                  description={productionFilter === 'incomplete' 
-                    ? "All productions have been completed. Start a new production to create content."
-                    : productionFilter === 'published'
-                    ? "No published productions found. Complete a production and publish it to YouTube to see it here."
-                    : `No ${productionFilter} productions found.`}
+                  title={`No ${productionFilter === 'all' ? '' : productionFilter} Productions`}
+                  description="No productions found with this filter."
                 />
               ) : (
-                <div className="space-y-3">
-                  {productions.map((production) => (
-                    <div
-                      key={production.id}
-                      className="bg-[#111] p-4 rounded-lg border border-[#333] hover:border-blue-500 transition-colors"
-                    >
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-2">
-                            <span className={`px-2 py-1 rounded text-xs font-bold ${
-                              production.status === 'in_progress' 
-                                ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
-                                : production.status === 'completed'
-                                ? 'bg-green-500/20 text-green-400 border border-green-500/30'
-                                : production.status === 'failed'
-                                ? 'bg-red-500/20 text-red-400 border border-red-500/30'
-                                : 'bg-gray-500/20 text-gray-400 border border-gray-500/30'
-                            }`}>
-                              {production.status === 'in_progress' ? '🔄 In Progress' 
-                                : production.status === 'completed' ? '✅ Completed'
-                                : production.status === 'failed' ? '❌ Failed'
-                                : '📝 Draft'}
-                            </span>
-                            {production.version && production.version > 1 && (
-                              <span className="px-2 py-1 rounded text-xs font-bold bg-purple-500/20 text-purple-400 border border-purple-500/30">
-                                v{production.version}
-                              </span>
-                            )}
-                            <span className="text-gray-500 text-xs">
-                              {new Date(production.news_date).toLocaleDateString()}
-                            </span>
-                            {production.completed_at && (
-                              <span className="text-gray-500 text-xs">
-                                • {new Date(production.completed_at).toLocaleDateString()}
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-sm text-gray-300 mb-2">
-                            Progress: Step {production.progress_step} of 6
-                          </div>
-                          {production.viral_metadata && (
-                            <div className="text-xs text-gray-400 mb-2">
-                              Title: {production.viral_metadata.title}
+                <div className="space-y-4">
+                  {productions.map((production) => {
+                    const isExpanded = expandedProductions.has(production.id);
+                    const segmentStatus = production.segment_status || {};
+                    const segments = production.segments || [];
+                    const scenes = production.scenes?.scenes || {};
+                    const totalSegments = segments.length || Object.keys(segmentStatus).length;
+                    
+                    // Calculate stats
+                    const audiosDone = Object.values(segmentStatus).filter(s => s?.audio === 'done').length;
+                    const videosDone = Object.values(segmentStatus).filter(s => s?.video === 'done').length;
+                    const audiosFailed = Object.values(segmentStatus).filter(s => s?.audio === 'failed').length;
+                    const videosFailed = Object.values(segmentStatus).filter(s => s?.video === 'failed').length;
+                    const progressPercent = totalSegments > 0 
+                      ? ((audiosDone + videosDone) / (totalSegments * 2)) * 100 
+                      : (production.progress_step / 6) * 100;
+                    
+                    return (
+                      <div
+                        key={production.id}
+                        className={`rounded-xl border overflow-hidden transition-all duration-300 ${
+                          production.status === 'in_progress' 
+                            ? 'bg-gradient-to-br from-[#1a1a2e] to-[#16213e] border-yellow-500/40 shadow-lg shadow-yellow-500/5' 
+                            : production.status === 'completed'
+                            ? 'bg-gradient-to-br from-[#1a2e1a] to-[#162e16] border-green-500/40'
+                            : production.status === 'failed'
+                            ? 'bg-gradient-to-br from-[#2e1a1a] to-[#2e1616] border-red-500/40'
+                            : 'bg-[#111] border-[#333]'
+                        }`}
+                      >
+                        {/* Card Header - Clickable */}
+                        <div 
+                          className="p-4 cursor-pointer hover:bg-white/5 transition-colors"
+                          onClick={() => {
+                            setExpandedProductions(prev => {
+                              const next = new Set(prev);
+                              if (next.has(production.id)) next.delete(production.id);
+                              else next.add(production.id);
+                              return next;
+                            });
+                          }}
+                        >
+                          <div className="flex items-center justify-between">
+                            {/* Left: Status & Info */}
+                            <div className="flex items-center gap-3 flex-1 min-w-0">
+                              <div className={`w-3 h-3 rounded-full flex-shrink-0 ${
+                                production.status === 'in_progress' ? 'bg-yellow-400 animate-pulse' :
+                                production.status === 'completed' ? 'bg-green-400' :
+                                production.status === 'failed' ? 'bg-red-400' : 'bg-gray-400'
+                              }`} />
+                              
+                              <div className="min-w-0 flex-1">
+                                <h4 className="font-bold text-white truncate">
+                                  {production.viral_metadata?.title || `Production ${production.id.slice(0, 8)}`}
+                                </h4>
+                                <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                  <span className="text-xs text-gray-500">
+                                    {new Date(production.news_date).toLocaleDateString()}
+                                  </span>
+                                  {production.version && production.version > 1 && (
+                                    <span className="text-xs bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded">v{production.version}</span>
+                                  )}
+                                  {production.narrative_used && (
+                                    <span className="text-xs bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded">{production.narrative_used}</span>
+                                  )}
+                                </div>
+                              </div>
                             </div>
-                          )}
-                          {production.script && (
-                            <div className="text-xs text-gray-500">
-                              Script: {production.script.length} lines
+                            
+                            {/* Right: Progress indicators */}
+                            <div className="flex items-center gap-4 flex-shrink-0">
+                              {/* Asset pills */}
+                              <div className="hidden md:flex gap-2">
+                                <span className={`text-xs px-2 py-1 rounded flex items-center gap-1 ${
+                                  audiosDone === totalSegments && totalSegments > 0 ? 'bg-green-500/20 text-green-400' : 
+                                  audiosFailed > 0 ? 'bg-red-500/20 text-red-400' : 'bg-gray-500/20 text-gray-400'
+                                }`}>
+                                  🔊 {audiosDone}/{totalSegments}
+                                </span>
+                                <span className={`text-xs px-2 py-1 rounded flex items-center gap-1 ${
+                                  videosDone === totalSegments && totalSegments > 0 ? 'bg-green-500/20 text-green-400' : 
+                                  videosFailed > 0 ? 'bg-red-500/20 text-red-400' : 'bg-gray-500/20 text-gray-400'
+                                }`}>
+                                  🎥 {videosDone}/{totalSegments}
+                                </span>
+                              </div>
+                              
+                              {/* Progress bar */}
+                              <div className="w-24 h-2 bg-[#111] rounded-full overflow-hidden">
+                                <div 
+                                  className={`h-full transition-all ${
+                                    production.status === 'completed' ? 'bg-gradient-to-r from-green-500 to-emerald-400' :
+                                    production.status === 'failed' ? 'bg-red-500' : 'bg-gradient-to-r from-yellow-500 to-orange-400'
+                                  }`}
+                                  style={{ width: `${Math.min(progressPercent, 100)}%` }}
+                                />
+                              </div>
+                              <span className="text-xs font-mono text-gray-400 w-10">{Math.round(progressPercent)}%</span>
+                              
+                              {/* Expand arrow */}
+                              <span className={`text-gray-400 transform transition-transform ${isExpanded ? 'rotate-180' : ''}`}>▼</span>
                             </div>
-                          )}
+                          </div>
                         </div>
-                        <div className="flex gap-2 flex-wrap">
-                          {onResumeProduction && (production.status === 'in_progress' || production.status === 'draft') && (
-                            <button
-                              onClick={() => {
-                                onResumeProduction(production);
-                                onExit(); // Exit dashboard to show production
-                              }}
-                              className="bg-blue-600 text-white border border-blue-500 hover:bg-blue-700 px-3 py-1.5 rounded-lg text-xs font-bold transition-all duration-200 hover:scale-105 active:scale-95"
-                            >
-                              ▶️ Resume
-                            </button>
-                          )}
-                          <button
-                            onClick={async () => {
-                              try {
-                                const jsonData = await exportProduction(production.id);
-                                if (jsonData) {
-                                  const blob = new Blob([jsonData], { type: 'application/json' });
-                                  const url = URL.createObjectURL(blob);
-                                  const a = document.createElement('a');
-                                  a.href = url;
-                                  a.download = `production-${production.id}-${production.news_date}.json`;
-                                  document.body.appendChild(a);
-                                  a.click();
-                                  document.body.removeChild(a);
-                                  URL.revokeObjectURL(url);
-                                  toast.success('Production exported!');
-                                } else {
-                                  toast.error('Failed to export production');
-                                }
-                              } catch (error) {
-                                console.error('Export error:', error);
-                                toast.error('Failed to export production');
-                              }
-                            }}
-                            className="bg-purple-600 text-white border border-purple-500 hover:bg-purple-700 px-3 py-1.5 rounded-lg text-xs font-bold transition-all duration-200 hover:scale-105 active:scale-95"
-                            title="Export production to JSON"
-                          >
-                            📥 Export
-                          </button>
-                          {/* Render button - show for completed OR in_progress with videos */}
-                          {hasVideosForRender(production) && (
-                            <button
-                              onClick={async () => {
-                                const toastId = toast.loading('🎬 Sending to Shotstack...');
-                                try {
-                                  const result = await renderProductionToShotstack(
-                                    production,
-                                    activeChannel?.name,
-                                    config.format // Pass channel aspect ratio
-                                  );
-                                  toast.dismiss(toastId);
-                                  
-                                  if (result.success && result.videoUrl) {
-                                    toast.success('Video rendered successfully!');
-                                    window.open(result.videoUrl, '_blank');
-                                  } else {
-                                    toast.error(`Render failed: ${result.error || 'Unknown error'}`);
-                                  }
-                                } catch (error) {
-                                  toast.dismiss(toastId);
-                                  console.error('Shotstack render error:', error);
-                                  toast.error('Failed to render video');
-                                }
-                              }}
-                              className="bg-cyan-600 text-white border border-cyan-500 hover:bg-cyan-700 px-3 py-1.5 rounded-lg text-xs font-bold transition-all duration-200 hover:scale-105 active:scale-95"
-                              title="Render final video with Shotstack (uses existing assets)"
-                            >
-                              🎬 Render
-                            </button>
-                          )}
-                          <button
-                            onClick={async () => {
-                              try {
-                                const newVersion = await createProductionVersion(production.id, user?.email);
-                                if (newVersion) {
-                                  toast.success(`New version (v${newVersion.version}) created!`);
-                                  // Refresh productions list
-                                  if (activeChannel && user) {
-                                    if (productionFilter === 'all') {
-                                      const allProds = await getAllProductions(activeChannel.id, user.email, 100);
-                                      setProductions(allProds);
-                                    } else if (productionFilter === 'incomplete') {
-                                      const incomplete = await getIncompleteProductions(activeChannel.id, user.email);
-                                      setProductions(incomplete);
-                                    } else if (productionFilter === 'published') {
-                                      // Get published productions
-                                      const publishedProds = await getPublishedProductions(activeChannel.id, user.email, 100);
-                                      setProductions(publishedProds);
-                                    } else {
-                                      const allProds = await getAllProductions(activeChannel.id, user.email, 100);
-                                      setProductions(allProds.filter(p => p.status === productionFilter));
-                                    }
-                                  }
-                                } else {
-                                  toast.error('Failed to create version');
-                                }
-                              } catch (error) {
-                                console.error('Version creation error:', error);
-                                toast.error('Failed to create version');
-                              }
-                            }}
-                            className="bg-orange-600 text-white border border-orange-500 hover:bg-orange-700 px-3 py-1.5 rounded-lg text-xs font-bold transition-all duration-200 hover:scale-105 active:scale-95"
-                            title="Create a new version of this production"
-                          >
-                            🔄 New Version
-                          </button>
-                          <button
-                            onClick={async () => {
-                              if (confirm('Are you sure you want to delete this production? This action cannot be undone.')) {
-                                try {
-                                  const success = await deleteProduction(production.id);
-                                  if (success) {
-                                    toast.success('Production deleted successfully!');
-                                    // Refresh productions list
-                                    if (activeChannel && user) {
-                                      if (productionFilter === 'all') {
-                                        const allProds = await getAllProductions(activeChannel.id, user.email, 100);
-                                        setProductions(allProds);
-                                      } else if (productionFilter === 'incomplete') {
-                                        const incomplete = await getIncompleteProductions(activeChannel.id, user.email);
-                                        setProductions(incomplete);
-                                      } else if (productionFilter === 'published') {
-                                        // Get published productions
-                                        const allProds = await getAllProductions(activeChannel.id, user.email, 100);
-                                        const allVideos = await fetchVideosFromDB(activeChannel.id);
-                                        const publishedVideos = allVideos.filter(v => v.is_posted);
-                                        const publishedProds = allProds.filter(prod => {
-                                          if (prod.status !== 'completed') return false;
-                                          if (!prod.viral_metadata?.title) return false;
-                                          return publishedVideos.some(video => 
-                                            video.title === prod.viral_metadata?.title || 
-                                            video.title.includes(prod.viral_metadata?.title || '') ||
-                                            (prod.viral_metadata?.title && video.title.includes(prod.viral_metadata.title.substring(0, 30)))
-                                          );
-                                        });
-                                        setProductions(publishedProds);
-                                      } else {
-                                        const allProds = await getAllProductions(activeChannel.id, user.email, 100);
-                                        setProductions(allProds.filter(p => p.status === productionFilter));
+                        
+                        {/* Expanded Content - Assets Details */}
+                        {isExpanded && (
+                          <div className="border-t border-[#333]">
+                            {/* Asset Cards Grid */}
+                            <div className="p-4">
+                              <h5 className="text-sm font-bold text-gray-300 mb-3 flex items-center gap-2">
+                                📦 Assets por Segmento
+                                <span className="text-xs font-normal text-gray-500">
+                                  ({totalSegments} segments • {audiosDone} audios • {videosDone} videos)
+                                </span>
+                              </h5>
+                              
+                              {totalSegments === 0 ? (
+                                <div className="text-center py-6 text-gray-500">
+                                  No segments generated yet. Resume production to create assets.
+                                </div>
+                              ) : (
+                                <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2">
+                                  {Array.from({ length: totalSegments }, (_, i) => {
+                                    const status = segmentStatus[i] || { audio: 'pending', video: 'pending' };
+                                    const segment = segments[i];
+                                    const scene = scenes[String(i + 1)];
+                                    const speaker = segment?.speaker || scene?.video_mode || 'Unknown';
+                                    const text = segment?.text || scene?.text || '';
+                                    const duration = segment?.audioDuration;
+                                    const audioId = `audio-${production.id}-${i}`;
+                                    
+                                    // Speaker color
+                                    const isHostA = speaker.toLowerCase().includes('hosta') || speaker.toLowerCase().includes('rusty') || speaker === 'hostA';
+                                    const isHostB = speaker.toLowerCase().includes('hostb') || speaker.toLowerCase().includes('dani') || speaker === 'hostB';
+                                    const speakerColor = isHostA 
+                                      ? 'bg-blue-500/20 text-blue-400 border-blue-500/30'
+                                      : isHostB
+                                      ? 'bg-pink-500/20 text-pink-400 border-pink-500/30'
+                                      : 'bg-gray-500/20 text-gray-400 border-gray-500/30';
+                                    
+                                    return (
+                                      <div 
+                                        key={i} 
+                                        className={`bg-[#0d0d0d] rounded-lg border transition-all hover:border-[#444] ${
+                                          status.audio === 'failed' || status.video === 'failed' 
+                                            ? 'border-red-500/40' 
+                                            : 'border-[#222]'
+                                        }`}
+                                      >
+                                        {/* Segment Header */}
+                                        <div className="p-3 border-b border-[#222]">
+                                          <div className="flex items-center justify-between flex-wrap gap-2">
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                              <span className="text-sm font-bold text-white">#{i + 1}</span>
+                                              <span className={`text-xs px-2 py-0.5 rounded border ${speakerColor}`}>
+                                                🎙️ {speaker}
+                                              </span>
+                                              {scene?.shot && (
+                                                <span className="text-xs bg-purple-500/20 text-purple-400 px-2 py-0.5 rounded">
+                                                  📷 {scene.shot}
+                                                </span>
+                                              )}
+                                              {duration && (
+                                                <span className="text-xs text-gray-500">⏱️ {duration.toFixed(1)}s</span>
+                                              )}
+                                            </div>
+                                            {scene?.title && (
+                                              <span className="text-xs text-gray-500 truncate max-w-[200px]" title={scene.title}>
+                                                "{scene.title}"
+                                              </span>
+                                            )}
+                                          </div>
+                                          
+                                          {/* Text Preview */}
+                                          {text && (
+                                            <p className="text-xs text-gray-400 mt-2 line-clamp-2 italic">
+                                              "{text.substring(0, 150)}{text.length > 150 ? '...' : ''}"
+                                            </p>
+                                          )}
+                                        </div>
+                                        
+                                        {/* Assets Row */}
+                                        <div className="p-3 grid grid-cols-2 gap-3">
+                                          {/* Audio Asset */}
+                                          <div className={`p-2 rounded border ${
+                                            status.audio === 'done' ? 'bg-green-500/5 border-green-500/30' :
+                                            status.audio === 'generating' ? 'bg-yellow-500/5 border-yellow-500/30' :
+                                            status.audio === 'failed' ? 'bg-red-500/5 border-red-500/30' :
+                                            'bg-[#111] border-[#333]'
+                                          }`}>
+                                            <div className="flex items-center justify-between mb-2">
+                                              <span className="text-xs font-medium text-gray-300">🔊 Audio</span>
+                                              <span className={`text-xs px-1.5 py-0.5 rounded ${
+                                                status.audio === 'done' ? 'bg-green-500/20 text-green-400' :
+                                                status.audio === 'generating' ? 'bg-yellow-500/20 text-yellow-400 animate-pulse' :
+                                                status.audio === 'failed' ? 'bg-red-500/20 text-red-400' :
+                                                'bg-gray-500/20 text-gray-500'
+                                              }`}>
+                                                {status.audio === 'done' ? '✓' : status.audio === 'generating' ? '⏳' : status.audio === 'failed' ? '✗' : '○'}
+                                              </span>
+                                            </div>
+                                            
+                                            {/* Audio Controls */}
+                                            <div className="flex gap-1">
+                                              {status.audioUrl && (
+                                                <>
+                                                  <audio 
+                                                    id={audioId} 
+                                                    src={status.audioUrl} 
+                                                    className="hidden"
+                                                    onEnded={() => setPlayingAudio(null)}
+                                                    ref={el => { if (el) audioRefs.current[audioId] = el; }}
+                                                  />
+                                                  <button
+                                                    onClick={(e) => {
+                                                      e.stopPropagation();
+                                                      const audio = audioRefs.current[audioId];
+                                                      if (!audio) return;
+                                                      if (playingAudio === audioId) {
+                                                        audio.pause();
+                                                        setPlayingAudio(null);
+                                                      } else {
+                                                        // Pause any currently playing
+                                                        Object.values(audioRefs.current).forEach(a => a?.pause());
+                                                        audio.play();
+                                                        setPlayingAudio(audioId);
+                                                      }
+                                                    }}
+                                                    className={`flex-1 text-white text-xs py-1 px-2 rounded flex items-center justify-center gap-1 ${
+                                                      playingAudio === audioId ? 'bg-yellow-600' : 'bg-gray-700 hover:bg-gray-600'
+                                                    }`}
+                                                  >
+                                                    {playingAudio === audioId ? '⏸ Pause' : '▶️ Play'}
+                                                  </button>
+                                                  <button
+                                                    onClick={() => window.open(status.audioUrl, '_blank')}
+                                                    className="bg-gray-700 hover:bg-gray-600 text-white text-xs py-1 px-2 rounded"
+                                                    title="Download"
+                                                  >
+                                                    📥
+                                                  </button>
+                                                </>
+                                              )}
+                                              <button
+                                                onClick={async (e) => {
+                                                  e.stopPropagation();
+                                                  if (confirm(`Regenerar audio del segmento ${i + 1}?`)) {
+                                                    await updateSegmentStatus(production.id, i, { audio: 'pending', audioUrl: undefined });
+                                                    toast.success('Audio marcado para regeneración');
+                                                    refreshProductions();
+                                                  }
+                                                }}
+                                                className="bg-orange-600/50 hover:bg-orange-600 text-white text-xs py-1 px-2 rounded"
+                                                title="Regenerate"
+                                              >
+                                                🔄
+                                              </button>
+                                            </div>
+                                          </div>
+                                          
+                                          {/* Video Asset */}
+                                          <div className={`p-2 rounded border ${
+                                            status.video === 'done' ? 'bg-green-500/5 border-green-500/30' :
+                                            status.video === 'generating' ? 'bg-yellow-500/5 border-yellow-500/30' :
+                                            status.video === 'failed' ? 'bg-red-500/5 border-red-500/30' :
+                                            'bg-[#111] border-[#333]'
+                                          }`}>
+                                            <div className="flex items-center justify-between mb-2">
+                                              <span className="text-xs font-medium text-gray-300">🎥 Video</span>
+                                              <span className={`text-xs px-1.5 py-0.5 rounded ${
+                                                status.video === 'done' ? 'bg-green-500/20 text-green-400' :
+                                                status.video === 'generating' ? 'bg-yellow-500/20 text-yellow-400 animate-pulse' :
+                                                status.video === 'failed' ? 'bg-red-500/20 text-red-400' :
+                                                'bg-gray-500/20 text-gray-500'
+                                              }`}>
+                                                {status.video === 'done' ? '✓' : status.video === 'generating' ? '⏳' : status.video === 'failed' ? '✗' : '○'}
+                                              </span>
+                                            </div>
+                                            
+                                            {/* Video Controls */}
+                                            <div className="flex gap-1">
+                                              {status.videoUrl && (
+                                                <button
+                                                  onClick={() => window.open(status.videoUrl, '_blank')}
+                                                  className="flex-1 bg-purple-700 hover:bg-purple-600 text-white text-xs py-1 px-2 rounded flex items-center justify-center gap-1"
+                                                >
+                                                  👁️ Ver
+                                                </button>
+                                              )}
+                                              <button
+                                                onClick={async (e) => {
+                                                  e.stopPropagation();
+                                                  if (status.audio !== 'done') {
+                                                    toast.error('Necesitas el audio primero');
+                                                    return;
+                                                  }
+                                                  if (confirm(`Regenerar video del segmento ${i + 1}?`)) {
+                                                    await updateSegmentStatus(production.id, i, { video: 'pending', videoUrl: undefined });
+                                                    toast.success('Video marcado para regeneración');
+                                                    refreshProductions();
+                                                  }
+                                                }}
+                                                disabled={status.audio !== 'done'}
+                                                className="bg-orange-600/50 hover:bg-orange-600 disabled:bg-gray-700 disabled:text-gray-500 text-white text-xs py-1 px-2 rounded"
+                                                title={status.audio !== 'done' ? 'Audio requerido' : 'Regenerate'}
+                                              >
+                                                🔄
+                                              </button>
+                                            </div>
+                                          </div>
+                                        </div>
+                                        
+                                        {/* Error message */}
+                                        {status.error && (
+                                          <div className="px-3 pb-2">
+                                            <p className="text-xs text-red-400 bg-red-500/10 p-2 rounded">⚠️ {status.error}</p>
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                              
+                              {/* Bulk Actions for failed */}
+                              {(audiosFailed > 0 || videosFailed > 0) && (
+                                <div className="mt-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg flex items-center justify-between">
+                                  <span className="text-sm text-red-300">
+                                    ⚠️ {audiosFailed + videosFailed} assets fallidos
+                                  </span>
+                                  <button
+                                    onClick={async () => {
+                                      for (const [idx, s] of Object.entries(segmentStatus)) {
+                                        if (s?.audio === 'failed') {
+                                          await updateSegmentStatus(production.id, parseInt(idx), { audio: 'pending' });
+                                        }
+                                        if (s?.video === 'failed') {
+                                          await updateSegmentStatus(production.id, parseInt(idx), { video: 'pending' });
+                                        }
                                       }
+                                      toast.success('Assets fallidos marcados para regeneración');
+                                      refreshProductions();
+                                    }}
+                                    className="bg-red-600 hover:bg-red-500 text-white px-3 py-1.5 rounded text-sm font-medium"
+                                  >
+                                    🔄 Regenerar Fallidos
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                            
+                            {/* Action Bar */}
+                            <div className="border-t border-[#333] p-4 bg-[#0a0a0a] flex flex-wrap gap-2">
+                              {onResumeProduction && (production.status === 'in_progress' || production.status === 'draft' || production.status === 'failed') && (
+                                <button
+                                  onClick={() => { onResumeProduction(production); onExit(); }}
+                                  className="bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-lg shadow-blue-500/20"
+                                >
+                                  ▶️ Retomar
+                                </button>
+                              )}
+                              
+                              {hasVideosForRender(production) && (
+                                <button
+                                  onClick={async () => {
+                                    const toastId = toast.loading('🎬 Rendering...');
+                                    const result = await renderProductionToShotstack(production, activeChannel?.name, config.format);
+                                    toast.dismiss(toastId);
+                                    if (result.success && result.videoUrl) {
+                                      toast.success('¡Video listo!');
+                                      window.open(result.videoUrl, '_blank');
+                                    } else {
+                                      toast.error(result.error || 'Error');
                                     }
-                                  } else {
-                                    toast.error('Failed to delete production');
+                                  }}
+                                  className="bg-gradient-to-r from-cyan-600 to-cyan-500 hover:from-cyan-500 hover:to-cyan-400 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-lg shadow-cyan-500/20"
+                                >
+                                  🎬 Render Final
+                                </button>
+                              )}
+                              
+                              <button
+                                onClick={async () => {
+                                  const json = await exportProduction(production.id);
+                                  if (json) {
+                                    const blob = new Blob([json], { type: 'application/json' });
+                                    const url = URL.createObjectURL(blob);
+                                    const a = document.createElement('a');
+                                    a.href = url;
+                                    a.download = `production-${production.id.slice(0, 8)}.json`;
+                                    a.click();
+                                    URL.revokeObjectURL(url);
+                                    toast.success('Exported!');
                                   }
-                                } catch (error) {
-                                  console.error('Delete error:', error);
-                                  toast.error('Failed to delete production');
-                                }
-                              }
-                            }}
-                            className="bg-red-600 text-white border border-red-500 hover:bg-red-700 px-3 py-1.5 rounded-lg text-xs font-bold transition-all duration-200 hover:scale-105 active:scale-95"
-                            title="Delete this production"
-                          >
-                            🗑️ Delete
-                          </button>
-                          {production.status === 'failed' && (
-                            <span className="text-red-400 text-xs flex items-center gap-1">
-                              ✗ Failed
-                            </span>
-                          )}
-                        </div>
+                                }}
+                                className="bg-purple-600 hover:bg-purple-500 text-white px-3 py-2 rounded-lg text-sm font-medium"
+                              >
+                                📥 Export
+                              </button>
+                              
+                              <button
+                                onClick={async () => {
+                                  const newVersion = await createProductionVersion(production.id, user?.email);
+                                  if (newVersion) {
+                                    toast.success(`v${newVersion.version} created!`);
+                                    refreshProductions();
+                                  }
+                                }}
+                                className="bg-orange-600 hover:bg-orange-500 text-white px-3 py-2 rounded-lg text-sm font-medium"
+                              >
+                                🔄 New Version
+                              </button>
+                              
+                              <button
+                                onClick={async () => {
+                                  if (confirm('¿Eliminar producción?')) {
+                                    await deleteProduction(production.id);
+                                    toast.success('Eliminada');
+                                    refreshProductions();
+                                  }
+                                }}
+                                className="bg-red-600/30 hover:bg-red-600 text-red-300 hover:text-white px-3 py-2 rounded-lg text-sm font-medium ml-auto"
+                              >
+                                🗑️ Eliminar
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
