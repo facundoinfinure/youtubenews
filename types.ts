@@ -19,25 +19,23 @@ export interface ScriptLine {
 
 // Narrative Engine Types (v2.0)
 export type NarrativeType = "classic" | "double_conflict" | "hot_take" | "perspective_clash";
-export type VideoMode = "hostA" | "hostB" | "both";
+export type VideoMode = "hostA" | "hostB"; // Removed "both" - each scene focuses on one character for dynamic pacing
 export type ShotType = "medium" | "closeup" | "wide";
 
 export interface Scene {
   // Scene title for lower-third overlay (e.g., "Market Outlook Explained")
   title?: string;
   
-  // For single host scenes (video_mode: hostA or hostB)
+  // Dialogue for this scene (single host only)
   text: string;
   
-  // For both hosts scenes (video_mode: both) - separate dialogues
-  hostA_text?: string;  // Dialogue for Host A (left side)
-  hostB_text?: string;  // Dialogue for Host B (right side)
-  
-  // Audio order for both hosts scenes
-  order?: 'left_first' | 'right_first' | 'meanwhile';  // Who speaks first in the scene
+  // Legacy fields for backwards compatibility (deprecated)
+  hostA_text?: string;
+  hostB_text?: string;
+  order?: 'left_first' | 'right_first' | 'meanwhile';
   
   video_mode: VideoMode;
-  model: "infinite_talk" | "infinite_talk_multi";
+  model: "infinite_talk" | "infinite_talk_multi"; // infinite_talk_multi kept for backwards compat
   shot: ShotType;
 }
 

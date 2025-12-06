@@ -242,12 +242,11 @@ const generateInfiniteTalkVideo = async (
   let useMultiModel: boolean = false;
   
   if (sceneMetadata?.video_mode) {
-    effectiveVideoMode = sceneMetadata.video_mode;
-    videoType = effectiveVideoMode === 'hostA' ? 'host_a' 
-      : effectiveVideoMode === 'hostB' ? 'host_b' 
-      : 'both_hosts';
-    // Use Multi model only for 'both' mode (two characters in frame)
-    useMultiModel = effectiveVideoMode === 'both';
+    // Convert legacy "both" to hostA for backwards compatibility
+    effectiveVideoMode = sceneMetadata.video_mode === 'both' ? 'hostA' : sceneMetadata.video_mode;
+    videoType = effectiveVideoMode === 'hostA' ? 'host_a' : 'host_b';
+    // Always use single character mode (no multi model)
+    useMultiModel = false;
   } else {
     // Fallback to speaker-based detection
     if (speaker === hostAName) {
@@ -259,9 +258,10 @@ const generateInfiniteTalkVideo = async (
       effectiveVideoMode = 'hostB';
       useMultiModel = false;
     } else if (speaker === 'Both' || speaker.includes('Both')) {
-      videoType = 'both_hosts';
-      effectiveVideoMode = 'both';
-      useMultiModel = true;
+      // Convert legacy "Both" speaker to hostA
+      videoType = 'host_a';
+      effectiveVideoMode = 'hostA';
+      useMultiModel = false;
     }
   }
   
@@ -747,80 +747,22 @@ export const generateAudioFromScenes = async (
   for (const [sceneNum, scene] of sceneEntries) {
     const sceneIndex = parseInt(sceneNum) - 1;
     
-    if (scene.video_mode === 'both') {
-      // BOTH HOSTS SCENE: Generate 2 separate audios
-      console.log(`🎬 [Audio v2.0] Scene ${sceneNum}: BOTH hosts - generating 2 audios`);
-      
-      // Get separate dialogues (or fallback to splitting text)
-      let hostAText = (scene.hostA_text || '').trim();
-      let hostBText = (scene.hostB_text || '').trim();
-      
-      // Fallback: if separate texts not provided, split the main text
-      if (!hostAText || !hostBText) {
-        console.warn(`⚠️ [Audio v2.0] Scene ${sceneNum}: Missing separate dialogues, splitting text`);
-        const text = (scene.text || '').trim();
-        if (!text) {
-          console.error(`❌ [Audio v2.0] Scene ${sceneNum}: No text available for BOTH mode`);
-          throw new Error(`Scene ${sceneNum} has no text content for audio generation`);
-        }
-        const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
-        const midpoint = Math.ceil(sentences.length / 2);
-        hostAText = hostAText || sentences.slice(0, midpoint).join(' ').trim();
-        hostBText = hostBText || sentences.slice(midpoint).join(' ').trim();
-      }
-      
-      // Final validation - ensure both have content
-      if (!hostAText) {
-        console.error(`❌ [Audio v2.0] Scene ${sceneNum}: hostA_text is empty`);
-        throw new Error(`Scene ${sceneNum}: Host A text is empty after processing`);
-      }
-      if (!hostBText) {
-        console.error(`❌ [Audio v2.0] Scene ${sceneNum}: hostB_text is empty`);
-        throw new Error(`Scene ${sceneNum}: Host B text is empty after processing`);
-      }
-      
-      console.log(`📝 [Audio v2.0] Scene ${sceneNum} texts - ${hostA.name}: "${hostAText.substring(0, 40)}..." | ${hostB.name}: "${hostBText.substring(0, 40)}..."`);
-      
-      // Generate both audios in parallel
-      const [hostAAudio, hostBAudio] = await Promise.all([
-        generateSingleAudio(hostAText, hostA.voiceName, channelId, `Scene ${sceneNum} - ${hostA.name}`),
-        generateSingleAudio(hostBText, hostB.voiceName, channelId, `Scene ${sceneNum} - ${hostB.name}`)
-      ]);
-      
-      // Calculate total duration for "both" scenes (sum of both audios or max if simultaneous)
-      const hostADuration = hostAAudio.durationSeconds || 0;
-      const hostBDuration = hostBAudio.durationSeconds || 0;
-      // For sequential order, sum durations; for 'meanwhile', use max
-      const totalDuration = scene.order === 'meanwhile' 
-        ? Math.max(hostADuration, hostBDuration)
-        : hostADuration + hostBDuration;
-      
-      // Create segment with BOTH audios
-      segments.push({
-        speaker: 'Both',
-        text: scene.text || `${hostAText} ${hostBText}`,
-        audioBase64: hostAAudio.audioBase64, // Primary audio (for backwards compatibility)
-        hostA_text: hostAText,
-        hostB_text: hostBText,
-        hostA_audioBase64: hostAAudio.audioBase64,
-        hostB_audioBase64: hostBAudio.audioBase64,
-        order: scene.order || 'left_first',
-        video_mode: scene.video_mode,
-        model: scene.model,
-        shot: scene.shot,
-        sceneIndex,
-        sceneTitle: scene.title, // Title for lower-third overlay
-        fromCache: hostAAudio.fromCache && hostBAudio.fromCache,
-        audioDuration: totalDuration // Combined duration for video timing
-      });
-      
-      console.log(`✅ [Audio v2.0] Scene ${sceneNum}: "${scene.title || 'No title'}" - ${hostA.name} (${hostADuration.toFixed(1)}s) + ${hostB.name} (${hostBDuration.toFixed(1)}s), total: ${totalDuration.toFixed(1)}s`);
-      
-    } else {
+    // Legacy "both" scenes are converted to hostA (backwards compatibility)
+    let effectiveVideoMode = scene.video_mode;
+    if (effectiveVideoMode === 'both') {
+      console.warn(`⚠️ [Audio v2.0] Scene ${sceneNum}: Converting legacy "both" mode to hostA`);
+      effectiveVideoMode = 'hostA';
+    }
+    
+    {
       // SINGLE HOST SCENE: Generate 1 audio
-      const speaker = scene.video_mode === 'hostA' ? hostA.name : hostB.name;
-      const character = scene.video_mode === 'hostA' ? hostA : hostB;
-      const sceneText = (scene.text || '').trim();
+      // Use effectiveVideoMode for proper host selection (handles legacy "both" conversion)
+      const speaker = effectiveVideoMode === 'hostA' ? hostA.name : hostB.name;
+      const character = effectiveVideoMode === 'hostA' ? hostA : hostB;
+      // For legacy "both" scenes, try hostA_text first, then fallback to text
+      const sceneText = (scene.video_mode === 'both' && scene.hostA_text) 
+        ? scene.hostA_text.trim() 
+        : (scene.text || '').trim();
       
       // Validate text exists
       if (!sceneText) {
@@ -836,13 +778,13 @@ export const generateAudioFromScenes = async (
         speaker,
         text: sceneText,
         audioBase64: audio.audioBase64,
-        video_mode: scene.video_mode,
-        model: scene.model,
+        video_mode: effectiveVideoMode, // Use effective mode (never "both")
+        model: 'infinite_talk', // Always single model
         shot: scene.shot,
         sceneIndex,
-        sceneTitle: scene.title, // Title for lower-third overlay
+        sceneTitle: scene.title,
         fromCache: audio.fromCache,
-        audioDuration: audio.durationSeconds // Include duration for video timing
+        audioDuration: audio.durationSeconds
       });
       
       console.log(`✅ [Audio v2.0] Scene ${sceneNum}: "${scene.title || 'No title'}" - ${speaker} (${audio.durationSeconds?.toFixed(1) || '?'}s)`);
@@ -1066,25 +1008,15 @@ export const generateVideoSegmentsWithInfiniteTalk = async (
     // Get scene metadata if available (now includes Scene Builder visual prompts)
     const sceneMetadata = sceneMetadataMap.get(globalIndex);
 
-    // Determine which model to use based on scene metadata
-    // This affects which image we need (single host vs two-shot)
-    const useMultiModel = sceneMetadata?.model === 'infinite_talk_multi' || sceneMetadata?.video_mode === 'both';
+    // Always use single model (multi model disabled for dynamic single-character scenes)
+    // Legacy "both" and "infinite_talk_multi" are converted to single host
+    const useMultiModel = false;
 
-    // Determine which image to use based on MODEL and video_mode
-    // CRITICAL: Single model needs single-host image, Multi model needs two-shot image
+    // Determine which image to use based on video_mode
+    // Always use solo image of the speaking host for dynamic single-character scenes
     let imageUrlForSegment: string;
     
-    if (useMultiModel) {
-      // Multi model: MUST use two-shot image (both hosts in frame)
-      if (twoShotUrl) {
-        imageUrlForSegment = twoShotUrl;
-        console.log(`🖼️ [InfiniteTalk Multi] Segment ${globalIndex}: Using two-shot image (both hosts)`);
-      } else {
-        // Fallback if no two-shot available
-        console.warn(`⚠️ [InfiniteTalk Multi] Segment ${globalIndex}: No two-shot image available, using fallback`);
-        imageUrlForSegment = config.referenceImageUrl || hostASoloUrl || hostBSoloUrl || '';
-      }
-    } else {
+    {
       // Single model: Use solo image of the speaking host
       const videoMode = sceneMetadata?.video_mode || (segment.speaker === hostAName ? 'hostA' : 'hostB');
       

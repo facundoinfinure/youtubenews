@@ -97,14 +97,17 @@ const getSceneTypeInfo = (
  * Generate expression hints based on emotional tone
  */
 const getExpressionHint = (
-  videoMode: VideoMode,
+  videoMode: VideoMode | 'both', // Accept legacy 'both' for backwards compat
   emotionalTone: string,
   hostAPersonality: string,
   hostBPersonality: string
 ): string => {
   const toneKeywords = emotionalTone.toLowerCase();
   
-  if (videoMode === 'hostA') {
+  // Convert legacy "both" to hostA
+  const effectiveMode = videoMode === 'both' ? 'hostA' : videoMode;
+  
+  if (effectiveMode === 'hostA') {
     if (toneKeywords.includes('skeptical') || toneKeywords.includes('concern')) {
       return 'raised eyebrow, slight smirk, leaning back skeptically';
     }
@@ -117,21 +120,17 @@ const getExpressionHint = (
     return 'sarcastic half-smile, casual posture, dry humor expression';
   }
   
-  if (videoMode === 'hostB') {
-    if (toneKeywords.includes('optimistic') || toneKeywords.includes('hopeful')) {
-      return 'bright eyes, animated hand gestures, leaning in enthusiastically';
-    }
-    if (toneKeywords.includes('dramatic') || toneKeywords.includes('tension')) {
-      return 'wide eyes, expressive reactions, engaged posture';
-    }
-    if (toneKeywords.includes('conclusion') || toneKeywords.includes('warm')) {
-      return 'warm smile, open body language, nodding affirmatively';
-    }
-    return 'playful expression, energetic gestures, witty smile';
+  // hostB
+  if (toneKeywords.includes('optimistic') || toneKeywords.includes('hopeful')) {
+    return 'bright eyes, animated hand gestures, leaning in enthusiastically';
   }
-  
-  // Both hosts
-  return 'natural podcast banter, occasional glances at each other, complementary reactions';
+  if (toneKeywords.includes('dramatic') || toneKeywords.includes('tension')) {
+    return 'wide eyes, expressive reactions, engaged posture';
+  }
+  if (toneKeywords.includes('conclusion') || toneKeywords.includes('warm')) {
+    return 'warm smile, open body language, nodding affirmatively';
+  }
+  return 'playful expression, energetic gestures, witty smile';
 };
 
 /**
@@ -163,17 +162,16 @@ const buildVisualPrompt = (
     'cool': 'cooler color temperature, more blue/purple accent emphasis'
   };
   
-  const selectedSeedImage = scene.video_mode === 'hostA' 
-    ? seedImages.hostASolo 
-    : scene.video_mode === 'hostB' 
-      ? seedImages.hostBSolo 
-      : seedImages.twoShot;
+  // Convert legacy "both" to hostA for backwards compatibility
+  const effectiveVideoMode = scene.video_mode === 'both' ? 'hostA' : scene.video_mode;
   
-  const speakingHost = scene.video_mode === 'hostA' 
+  const selectedSeedImage = effectiveVideoMode === 'hostA' 
+    ? seedImages.hostASolo 
+    : seedImages.hostBSolo;
+  
+  const speakingHost = effectiveVideoMode === 'hostA' 
     ? `${hostA.name} (${hostA.outfit || 'dark hoodie'})` 
-    : scene.video_mode === 'hostB'
-      ? `${hostB.name} (${hostB.outfit || 'teal blazer'})`
-      : `Both ${hostA.name} and ${hostB.name}`;
+    : `${hostB.name} (${hostB.outfit || 'teal blazer'})`;
 
   return `
 INFINITETALK VISUAL PROMPT
@@ -188,26 +186,16 @@ ${studioSetup}
 Lighting: ${lightingAdjustments[sceneTypeInfo.lightingMood]}
 
 CHARACTER(S) VISIBLE: ${speakingHost}
-${scene.video_mode === 'hostA' ? `
+${effectiveVideoMode === 'hostA' ? `
 HOST A (${hostA.name}):
 - Appearance: ${hostA.visualPrompt}
 - Outfit: ${hostA.outfit || 'dark hoodie'}
 - Expression: ${expressionHint}
-` : scene.video_mode === 'hostB' ? `
+` : `
 HOST B (${hostB.name}):
 - Appearance: ${hostB.visualPrompt}  
 - Outfit: ${hostB.outfit || 'teal blazer and white shirt'}
 - Expression: ${expressionHint}
-` : `
-HOST A (${hostA.name}) - LEFT:
-- Appearance: ${hostA.visualPrompt}
-- Outfit: ${hostA.outfit || 'dark hoodie'}
-
-HOST B (${hostB.name}) - RIGHT:
-- Appearance: ${hostB.visualPrompt}
-- Outfit: ${hostB.outfit || 'teal blazer and white shirt'}
-
-INTERACTION: ${expressionHint}
 `}
 
 EMOTIONAL TONE: ${sceneTypeInfo.emotionalTone}
@@ -336,19 +324,15 @@ Characters:
 - ${appearanceA}
 - ${appearanceB}`;
 
-  const whoAppears =
-    scene.video_mode === "hostA"
-      ? "Only hostA appears in this scene."
-      : scene.video_mode === "hostB"
-        ? "Only hostB appears in this scene."
-        : "Both hostA and hostB appear in this scene.";
+  // Convert legacy "both" to hostA for backwards compatibility
+  const effectiveMode = scene.video_mode === 'both' ? 'hostA' : scene.video_mode;
+  const whoAppears = effectiveMode === "hostA"
+    ? "Only hostA appears in this scene."
+    : "Only hostB appears in this scene.";
 
-  const seedImage =
-    scene.video_mode === "hostA"
-      ? seedImages.hostASolo
-      : scene.video_mode === "hostB"
-        ? seedImages.hostBSolo
-        : seedImages.twoShot;
+  const seedImage = effectiveMode === "hostA"
+    ? seedImages.hostASolo
+    : seedImages.hostBSolo;
 
   return `${basePrompt}
 
