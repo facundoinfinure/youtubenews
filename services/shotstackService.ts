@@ -580,6 +580,7 @@ export const buildPodcastStyleEdit = (
     showBorder?: boolean;
     showVignette?: boolean;
     resolution?: '1080' | 'hd' | 'sd';
+    aspectRatio?: '16:9' | '9:16' | '1:1' | '4:5';
   } = {}
 ): any => {
   // Calculate cumulative start times
@@ -595,7 +596,8 @@ export const buildPodcastStyleEdit = (
   });
 
   const totalDuration = currentStart;
-  console.log(`🎬 [Podcast Composition] Total duration: ${totalDuration}s across ${scenes.length} scenes`);
+  const aspectRatio = options.aspectRatio || '16:9';
+  console.log(`🎬 [Podcast Composition] Total duration: ${totalDuration}s across ${scenes.length} scenes (aspect: ${aspectRatio})`);
 
   // Track 1: Video clips - clean, dynamic, back to back
   // NO transitions, NO overlays - just pure video flow
@@ -615,13 +617,30 @@ export const buildPodcastStyleEdit = (
   const tracks: any[] = [];
   tracks.push({ clips: videoClips });
 
-  // Resolution settings
-  const resolutionMap: Record<string, { width: number; height: number }> = {
-    '1080': { width: 1920, height: 1080 },
-    'hd': { width: 1280, height: 720 },
-    'sd': { width: 854, height: 480 }
+  // Resolution settings based on aspect ratio
+  const resolutionMap: Record<string, Record<string, { width: number; height: number }>> = {
+    '16:9': {
+      '1080': { width: 1920, height: 1080 },
+      'hd': { width: 1280, height: 720 },
+      'sd': { width: 854, height: 480 }
+    },
+    '9:16': {
+      '1080': { width: 1080, height: 1920 },
+      'hd': { width: 720, height: 1280 },
+      'sd': { width: 480, height: 854 }
+    },
+    '1:1': {
+      '1080': { width: 1080, height: 1080 },
+      'hd': { width: 720, height: 720 },
+      'sd': { width: 480, height: 480 }
+    },
+    '4:5': {
+      '1080': { width: 1080, height: 1350 },
+      'hd': { width: 720, height: 900 },
+      'sd': { width: 480, height: 600 }
+    }
   };
-  const size = resolutionMap[options.resolution || '1080'];
+  const size = resolutionMap[aspectRatio]?.[options.resolution || '1080'] || resolutionMap['16:9']['1080'];
 
   return {
     timeline: {
@@ -631,7 +650,8 @@ export const buildPodcastStyleEdit = (
     output: {
       format: 'mp4',
       fps: 25,
-      size
+      size,
+      aspectRatio // Include aspectRatio in output
     }
   };
 };
@@ -648,6 +668,7 @@ export const renderPodcastVideo = async (
     showBorder?: boolean;
     showVignette?: boolean;
     resolution?: '1080' | 'hd' | 'sd';
+    aspectRatio?: '16:9' | '9:16' | '1:1' | '4:5';
   } = {}
 ): Promise<RenderResult> => {
   console.log(`🎙️ [Podcast Render] Starting podcast-style composition...`);
@@ -1062,9 +1083,10 @@ import { Production } from "../types";
  */
 export const renderProductionToShotstack = async (
   production: Production,
-  channelName?: string
+  channelName?: string,
+  aspectRatio?: '16:9' | '9:16' | '1:1' | '4:5'
 ): Promise<RenderResult> => {
-  console.log(`🎬 [Shotstack] Rendering production ${production.id} to final video...`);
+  console.log(`🎬 [Shotstack] Rendering production ${production.id} to final video (aspect: ${aspectRatio || '16:9'})...`);
   
   // Check if we have segment_status with video URLs
   if (!production.segment_status) {
@@ -1120,7 +1142,8 @@ export const renderProductionToShotstack = async (
   return await renderPodcastVideo(scenes, {
     showBorder: false,
     showVignette: false,
-    resolution: '1080'
+    resolution: '1080',
+    aspectRatio: aspectRatio || '16:9'
   });
 };
 

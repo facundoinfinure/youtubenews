@@ -1352,7 +1352,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                                 try {
                                   const result = await renderProductionToShotstack(
                                     production,
-                                    activeChannel?.name
+                                    activeChannel?.name,
+                                    config.format // Pass channel aspect ratio
                                   );
                                   toast.dismiss(toastId);
                                   
