@@ -52,39 +52,39 @@ export const IdleState: React.FC<IdleStateProps> = ({
   };
 
   return (
-    <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0f0f0f] text-center p-8">
-      <div className="max-w-2xl w-full space-y-8">
+    <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0f0f0f] text-center p-4 sm:p-8 overflow-y-auto">
+      <div className="max-w-2xl w-full space-y-4 sm:space-y-8 my-auto">
         {/* Logo */}
         <div
-          className="w-24 h-24 rounded-full flex items-center justify-center shadow-2xl mx-auto"
+          className="w-16 h-16 sm:w-24 sm:h-24 rounded-full flex items-center justify-center shadow-2xl mx-auto"
           style={{ background: `linear-gradient(135deg, ${config.logoColor1}, ${config.logoColor2})` }}
         >
           {isFetching ? (
-            <span className="text-4xl animate-spin">🌍</span>
+            <span className="text-2xl sm:text-4xl animate-spin">🌍</span>
           ) : (
-            <span className="text-4xl">🎥</span>
+            <span className="text-2xl sm:text-4xl">🎥</span>
           )}
         </div>
 
         {/* Title */}
         <div>
-          <h2 className="text-3xl font-bold mb-2">
+          <h2 className="text-xl sm:text-3xl font-bold mb-1 sm:mb-2">
             {isFetching ? "Scanning Markets..." : `${config.channelName} Studio`}
           </h2>
-          <p className="text-gray-400">{config.tagline}</p>
+          <p className="text-gray-400 text-sm sm:text-base">{config.tagline}</p>
         </div>
 
         {/* Content when Idle */}
         {state === AppState.IDLE && (
-          <div className="space-y-6">
+          <div className="space-y-4 sm:space-y-6">
             {/* Date Selector + New Production Button */}
-            <div className="bg-[#1a1a1a] rounded-xl p-6 border border-[#333]">
-              <h3 className="text-lg font-bold mb-4 flex items-center justify-center gap-2">
-                <span className="text-2xl">✨</span> Nueva Producción
+            <div className="bg-[#1a1a1a] rounded-xl p-4 sm:p-6 border border-[#333]">
+              <h3 className="text-base sm:text-lg font-bold mb-3 sm:mb-4 flex items-center justify-center gap-2">
+                <span className="text-xl sm:text-2xl">✨</span> Nueva Producción
               </h3>
               
-              <div className="flex flex-col sm:flex-row items-center gap-4 justify-center">
-                <div className="flex flex-col items-start">
+              <div className="flex flex-col sm:flex-row items-center gap-3 sm:gap-4 justify-center">
+                <div className="flex flex-col items-start w-full sm:w-auto">
                   <label className="text-xs text-gray-500 uppercase tracking-wider font-bold mb-1">
                     Fecha de Noticias
                   </label>
@@ -92,13 +92,13 @@ export const IdleState: React.FC<IdleStateProps> = ({
                     type="date" 
                     value={selectedDate} 
                     onChange={(e) => onDateChange(e.target.value)}
-                    className="bg-[#111] border border-[#333] text-white px-4 py-2 rounded-lg focus:outline-none focus:border-cyan-500" 
+                    className="bg-[#111] border border-[#333] text-white px-3 sm:px-4 py-2 rounded-lg focus:outline-none focus:border-cyan-500 w-full sm:w-auto" 
                   />
                 </div>
 
                 <button 
                   onClick={onStartWizard || onStart} 
-                  className="bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white px-8 py-3 rounded-xl font-bold shadow-lg shadow-cyan-500/20 transition-all hover:scale-105"
+                  className="bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white px-6 sm:px-8 py-2.5 sm:py-3 rounded-xl font-bold shadow-lg shadow-cyan-500/20 transition-all hover:scale-105 w-full sm:w-auto text-sm sm:text-base"
                 >
                   🎬 Iniciar Producción
                 </button>
@@ -107,12 +107,12 @@ export const IdleState: React.FC<IdleStateProps> = ({
 
             {/* Incomplete Productions */}
             {incompleteProductions.length > 0 && (
-              <div className="bg-[#1a1a1a] rounded-xl p-6 border border-[#333]">
-                <h3 className="text-lg font-bold mb-4 flex items-center justify-center gap-2">
-                  <span className="text-2xl">📂</span> Producciones Pendientes
+              <div className="bg-[#1a1a1a] rounded-xl p-4 sm:p-6 border border-[#333]">
+                <h3 className="text-base sm:text-lg font-bold mb-3 sm:mb-4 flex items-center justify-center gap-2">
+                  <span className="text-xl sm:text-2xl">📂</span> Producciones Pendientes
                 </h3>
                 
-                <div className="space-y-3">
+                <div className="space-y-2 sm:space-y-3">
                   {incompleteProductions.slice(0, 3).map((prod) => {
                     const stepInfo = getProductionStepInfo(prod);
                     const progressPercent = (stepInfo.stepNumber / stepInfo.totalSteps) * 100;
@@ -120,20 +120,21 @@ export const IdleState: React.FC<IdleStateProps> = ({
                     return (
                       <div 
                         key={prod.id}
-                        className="bg-[#111] rounded-lg p-4 border border-[#333] hover:border-cyan-500/50 transition-all cursor-pointer group"
+                        className="bg-[#111] rounded-lg p-3 sm:p-4 border border-[#333] hover:border-cyan-500/50 transition-all cursor-pointer group"
                         onClick={() => onResumeProduction?.(prod)}
                       >
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex-1 text-left">
-                            <h4 className="font-medium text-white truncate">
+                        <div className="flex items-center justify-between mb-2 gap-2">
+                          <div className="flex-1 text-left min-w-0">
+                            <h4 className="font-medium text-white truncate text-sm sm:text-base">
                               {prod.viral_metadata?.title || `Producción ${new Date(prod.news_date).toLocaleDateString()}`}
                             </h4>
-                            <p className="text-xs text-gray-400">
+                            <p className="text-[10px] sm:text-xs text-gray-400">
                               {new Date(prod.updated_at).toLocaleDateString()} • {stepInfo.stepName}
                             </p>
                           </div>
-                          <button className="bg-cyan-600/20 hover:bg-cyan-600 text-cyan-400 hover:text-white px-4 py-2 rounded-lg text-sm font-medium opacity-0 group-hover:opacity-100 transition-all">
-                            Retomar →
+                          <button className="bg-cyan-600/20 hover:bg-cyan-600 text-cyan-400 hover:text-white px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium sm:opacity-0 sm:group-hover:opacity-100 transition-all flex-shrink-0">
+                            <span className="hidden sm:inline">Retomar →</span>
+                            <span className="sm:hidden">→</span>
                           </button>
                         </div>
                         

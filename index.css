@@ -90,6 +90,15 @@
     animation: shimmer 1.5s ease-in-out infinite;
   }
 
+  /* Hide scrollbar but keep functionality */
+  .scrollbar-hide {
+    -ms-overflow-style: none;  /* IE and Edge */
+    scrollbar-width: none;  /* Firefox */
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;  /* Chrome, Safari and Opera */
+  }
+
   @keyframes shimmer {
     0% {
       background-position: -200% 0;

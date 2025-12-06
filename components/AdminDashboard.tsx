@@ -414,70 +414,70 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
           </div>
         </div>
 
-        {/* Tabs */}
-        <div className="flex gap-6 mb-8 border-b border-[#272727]">
+        {/* Tabs - Horizontally scrollable on mobile */}
+        <div className="flex gap-2 sm:gap-6 mb-6 sm:mb-8 border-b border-[#272727] overflow-x-auto pb-0 scrollbar-hide -mx-4 px-4 sm:mx-0 sm:px-0">
           <button
             onClick={() => setActiveTab('overview')}
-            className={`pb-3 px-2 border-b-2 font-semibold text-sm transition-all duration-200 ${activeTab === 'overview'
+            className={`pb-3 px-2 sm:px-3 border-b-2 font-semibold text-xs sm:text-sm transition-all duration-200 whitespace-nowrap flex-shrink-0 ${activeTab === 'overview'
               ? 'border-blue-500 text-white'
               : 'border-transparent text-gray-500 hover:text-gray-300'
               }`}
           >
-            🏠 Overview
+            🏠 <span className="hidden sm:inline">Overview</span>
           </button>
           <button
             onClick={() => setActiveTab('insights')}
-            className={`pb-3 px-2 border-b-2 font-semibold text-sm transition-all duration-200 ${activeTab === 'insights'
+            className={`pb-3 px-2 sm:px-3 border-b-2 font-semibold text-xs sm:text-sm transition-all duration-200 whitespace-nowrap flex-shrink-0 ${activeTab === 'insights'
               ? 'border-blue-500 text-white'
               : 'border-transparent text-gray-500 hover:text-gray-300'
               }`}
           >
-            Performance Insights
+            📊 <span className="hidden sm:inline">Insights</span>
           </button>
           <button
             onClick={() => setActiveTab('settings')}
-            className={`pb-3 px-2 border-b-2 font-semibold text-sm transition-all duration-200 ${activeTab === 'settings'
+            className={`pb-3 px-2 sm:px-3 border-b-2 font-semibold text-xs sm:text-sm transition-all duration-200 whitespace-nowrap flex-shrink-0 ${activeTab === 'settings'
               ? 'border-blue-500 text-white'
               : 'border-transparent text-gray-500 hover:text-gray-300'
               }`}
           >
-            Production Settings
+            ⚙️ <span className="hidden sm:inline">Settings</span>
           </button>
           <button
             onClick={() => setActiveTab('productions')}
-            className={`pb-3 px-2 border-b-2 font-semibold text-sm transition-all duration-200 ${activeTab === 'productions'
+            className={`pb-3 px-2 sm:px-3 border-b-2 font-semibold text-xs sm:text-sm transition-all duration-200 whitespace-nowrap flex-shrink-0 ${activeTab === 'productions'
               ? 'border-blue-500 text-white'
               : 'border-transparent text-gray-500 hover:text-gray-300'
               }`}
           >
-            Productions {productions.length > 0 && `(${productions.length})`}
+            🎬 <span className="hidden sm:inline">Productions</span> {productions.length > 0 && `(${productions.length})`}
           </button>
           <button
             onClick={() => setActiveTab('costs')}
-            className={`pb-3 px-2 border-b-2 font-semibold text-sm transition-all duration-200 ${activeTab === 'costs'
+            className={`pb-3 px-2 sm:px-3 border-b-2 font-semibold text-xs sm:text-sm transition-all duration-200 whitespace-nowrap flex-shrink-0 ${activeTab === 'costs'
               ? 'border-blue-500 text-white'
               : 'border-transparent text-gray-500 hover:text-gray-300'
               }`}
           >
-            Costs & Analytics
+            💰 <span className="hidden sm:inline">Costs</span>
           </button>
           <button
             onClick={() => setActiveTab('cache')}
-            className={`pb-3 px-2 border-b-2 font-semibold text-sm transition-all duration-200 ${activeTab === 'cache'
+            className={`pb-3 px-2 sm:px-3 border-b-2 font-semibold text-xs sm:text-sm transition-all duration-200 whitespace-nowrap flex-shrink-0 ${activeTab === 'cache'
               ? 'border-blue-500 text-white'
               : 'border-transparent text-gray-500 hover:text-gray-300'
               }`}
           >
-            Cache & Storage
+            💾 <span className="hidden sm:inline">Cache</span>
           </button>
           <button
             onClick={() => setActiveTab('render')}
-            className={`pb-3 px-2 border-b-2 font-semibold text-sm transition-all duration-200 ${activeTab === 'render'
+            className={`pb-3 px-2 sm:px-3 border-b-2 font-semibold text-xs sm:text-sm transition-all duration-200 whitespace-nowrap flex-shrink-0 ${activeTab === 'render'
               ? 'border-cyan-500 text-white'
               : 'border-transparent text-gray-500 hover:text-gray-300'
               }`}
           >
-            🎬 Render Settings
+            🎞️ <span className="hidden sm:inline">Render</span>
           </button>
         </div>
 

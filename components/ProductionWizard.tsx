@@ -58,44 +58,46 @@ const StepIndicator: React.FC<{
   };
 
   return (
-    <div className="flex items-center justify-between mb-8 px-4">
-      {steps.filter(s => s !== 'done').map((step, index) => {
-        const status = getStepStatus(step);
-        const isCurrent = step === currentStep;
-        const stepNum = index + 1;
-        
-        return (
-          <React.Fragment key={step}>
-            <div className="flex flex-col items-center">
-              <div 
-                className={`
-                  w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm
-                  transition-all duration-300
-                  ${status === 'completed' ? 'bg-green-500 text-white' : ''}
-                  ${status === 'in_progress' || isCurrent ? 'bg-cyan-500 text-white ring-4 ring-cyan-500/30' : ''}
-                  ${status === 'failed' ? 'bg-red-500 text-white' : ''}
-                  ${status === 'pending' && !isCurrent ? 'bg-gray-700 text-gray-400' : ''}
-                `}
-              >
-                {status === 'completed' ? '✓' : stepNum}
+    <div className="overflow-x-auto scrollbar-hide -mx-4 px-4">
+      <div className="flex items-center justify-start sm:justify-between mb-4 sm:mb-8 min-w-max sm:min-w-0 px-2 sm:px-4">
+        {steps.filter(s => s !== 'done').map((step, index) => {
+          const status = getStepStatus(step);
+          const isCurrent = step === currentStep;
+          const stepNum = index + 1;
+          
+          return (
+            <React.Fragment key={step}>
+              <div className="flex flex-col items-center flex-shrink-0">
+                <div 
+                  className={`
+                    w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center font-bold text-xs sm:text-sm
+                    transition-all duration-300
+                    ${status === 'completed' ? 'bg-green-500 text-white' : ''}
+                    ${status === 'in_progress' || isCurrent ? 'bg-cyan-500 text-white ring-2 sm:ring-4 ring-cyan-500/30' : ''}
+                    ${status === 'failed' ? 'bg-red-500 text-white' : ''}
+                    ${status === 'pending' && !isCurrent ? 'bg-gray-700 text-gray-400' : ''}
+                  `}
+                >
+                  {status === 'completed' ? '✓' : stepNum}
+                </div>
+                <span className={`
+                  text-[10px] sm:text-xs mt-1 sm:mt-2 text-center max-w-[50px] sm:max-w-[80px] leading-tight
+                  ${isCurrent ? 'text-cyan-400 font-medium' : 'text-gray-500'}
+                `}>
+                  {getStepDisplayName(step).split(' ').slice(1).join(' ')}
+                </span>
               </div>
-              <span className={`
-                text-xs mt-2 text-center max-w-[80px]
-                ${isCurrent ? 'text-cyan-400 font-medium' : 'text-gray-500'}
-              `}>
-                {getStepDisplayName(step).split(' ').slice(1).join(' ')}
-              </span>
-            </div>
-            
-            {index < steps.length - 2 && (
-              <div className={`
-                flex-1 h-1 mx-2 rounded
-                ${status === 'completed' ? 'bg-green-500' : 'bg-gray-700'}
-              `} />
-            )}
-          </React.Fragment>
-        );
-      })}
+              
+              {index < steps.length - 2 && (
+                <div className={`
+                  w-4 sm:flex-1 h-0.5 sm:h-1 mx-1 sm:mx-2 rounded flex-shrink-0
+                  ${status === 'completed' ? 'bg-green-500' : 'bg-gray-700'}
+                `} />
+              )}
+            </React.Fragment>
+          );
+        })}
+      </div>
     </div>
   );
 };
@@ -1332,28 +1334,28 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-[#0d0d0d] border border-[#333] rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+    <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-2 sm:p-4">
+      <div className="bg-[#0d0d0d] border border-[#333] rounded-xl sm:rounded-2xl max-w-4xl w-full max-h-[95vh] sm:max-h-[90vh] overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="p-6 border-b border-[#333] flex items-center justify-between">
-          <div>
-            <h2 className="text-2xl font-bold text-white flex items-center gap-3">
-              🎬 Production Wizard
+        <div className="p-3 sm:p-6 border-b border-[#333] flex items-center justify-between">
+          <div className="min-w-0 flex-1">
+            <h2 className="text-lg sm:text-2xl font-bold text-white flex items-center gap-2 sm:gap-3">
+              🎬 <span className="truncate">Production Wizard</span>
             </h2>
-            <p className="text-sm text-gray-400 mt-1">
+            <p className="text-xs sm:text-sm text-gray-400 mt-0.5 sm:mt-1 truncate">
               {channel.name} • {new Date(production.news_date).toLocaleDateString()}
             </p>
           </div>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-white text-2xl"
+            className="text-gray-400 hover:text-white text-xl sm:text-2xl p-1 ml-2 flex-shrink-0"
           >
             ×
           </button>
         </div>
         
         {/* Step Indicator */}
-        <div className="p-4 border-b border-[#333] bg-[#111]">
+        <div className="p-2 sm:p-4 border-b border-[#333] bg-[#111]">
           <StepIndicator 
             steps={allSteps} 
             currentStep={wizardState.currentStep}
@@ -1362,7 +1364,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
         </div>
         
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto p-3 sm:p-6">
           {renderStepContent()}
         </div>
       </div>

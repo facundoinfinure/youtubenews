@@ -1988,10 +1988,9 @@ const App: React.FC = () => {
         <div className="flex-grow w-full md:w-[70%] lg:w-[75%] space-y-4">
 
           {/* CONTAINER AREA */}
-          <div className={`w-full bg-black rounded-xl overflow-hidden shadow-lg relative flex flex-col transition-all duration-500 ${config.format === '9:16' ? 'max-w-[400px] mx-auto aspect-[9/16]' : 'aspect-video'}`}>
-
-            {state === AppState.IDLE || state === AppState.FETCHING_NEWS ? (
-              // 1. INPUT PHASE - Now uses IdleState component with wizard integration
+          {/* IdleState gets full-size container, not constrained by video format */}
+          {state === AppState.IDLE || state === AppState.FETCHING_NEWS ? (
+            <div className="w-full bg-black rounded-xl overflow-hidden shadow-lg relative flex flex-col min-h-[500px]">
               <IdleState
                 state={state}
                 config={config}
@@ -2037,8 +2036,11 @@ const App: React.FC = () => {
                   }
                 }}
               />
-
-            ) : state === AppState.SELECTING_NEWS ? (
+            </div>
+          ) : (
+            /* Other states respect video format */
+            <div className={`w-full bg-black rounded-xl overflow-hidden shadow-lg relative flex flex-col transition-all duration-500 ${config.format === '9:16' ? 'max-w-[400px] mx-auto aspect-[9/16]' : 'aspect-video'}`}>
+              {state === AppState.SELECTING_NEWS ? (
               // 2. SELECTION PHASE
               <div className="p-4 bg-[#0a0a0a] h-full overflow-y-auto">
                 <NewsSelector
