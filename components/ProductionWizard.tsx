@@ -595,7 +595,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
     toast.success('Guión aprobado');
   };
 
-  // Step 5: Generate all audios (only pending ones)
+  // Step 5: Generate all audios IN PARALLEL (only pending ones)
   const handleGenerateAudios = async (specificIndex?: number) => {
     const segments = production.segments || [];
     if (segments.length === 0) {
@@ -640,73 +640,91 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
           return !status?.audio || status.audio !== 'done' || !status.audioUrl;
         });
     
-    let currentProduction = { ...production };
-    
+    // Mark all as generating immediately
+    let currentStatus = { ...(production.segment_status || {}) };
     for (const i of indicesToProcess) {
-      const segment = segments[i];
-      setCurrentSegmentIndex(i);
-      
-      try {
-        // Update segment status to generating - update local state immediately
-        const generatingStatus = {
-          ...(currentProduction.segment_status || {}),
-          [i]: { ...(currentProduction.segment_status?.[i] || {}), audio: 'generating' }
-        };
-        currentProduction = { ...currentProduction, segment_status: generatingStatus as any };
-        onUpdateProduction(currentProduction);
-        await updateSegmentStatus(production.id, i, { audio: 'generating' });
+      currentStatus = {
+        ...currentStatus,
+        [i]: { ...currentStatus[i], audio: 'generating' }
+      };
+    }
+    let currentProduction = { ...production, segment_status: currentStatus as any };
+    onUpdateProduction(currentProduction);
+    
+    // Update DB for all generating status
+    await Promise.all(indicesToProcess.map(i => 
+      updateSegmentStatus(production.id, i, { audio: 'generating' })
+    ));
+    
+    toast.success(`🎙️ Generando ${indicesToProcess.length} audios en paralelo...`);
+    
+    // Generate all audios in PARALLEL
+    const results = await Promise.allSettled(
+      indicesToProcess.map(async (i) => {
+        const segment = segments[i];
         
-        const result = await onGenerateAudio(i, segment.text, segment.speaker);
-        
-        // Update segment with audio URL - update local state immediately
-        const updatedSegments = [...(currentProduction.segments || [])];
-        updatedSegments[i] = { ...updatedSegments[i], audioDuration: result.duration, audioUrl: result.audioUrl };
-        
-        const doneStatus = {
-          ...(currentProduction.segment_status || {}),
-          [i]: { ...(currentProduction.segment_status?.[i] || {}), audio: 'done', audioUrl: result.audioUrl }
-        };
-        
-        currentProduction = { 
-          ...currentProduction, 
-          segments: updatedSegments,
-          segment_status: doneStatus as any
-        };
-        
-        // Update both local state and DB
-        onUpdateProduction(currentProduction);
-        await saveProduction(currentProduction);
-        await updateSegmentStatus(production.id, i, {
-          audio: 'done',
-          audioUrl: result.audioUrl
-        });
-        
-        toast.success(`Audio ${i + 1}/${segments.length} generado`);
-        
-      } catch (error) {
-        // Update failed status
-        const failedStatus = {
-          ...(currentProduction.segment_status || {}),
-          [i]: { ...(currentProduction.segment_status?.[i] || {}), audio: 'failed', error: (error as Error).message }
-        };
-        currentProduction = { ...currentProduction, segment_status: failedStatus as any };
-        onUpdateProduction(currentProduction);
-        await updateSegmentStatus(production.id, i, {
-          audio: 'failed',
-          error: (error as Error).message
-        });
-        toast.error(`Error en segmento ${i + 1}: ${(error as Error).message}`);
+        try {
+          const result = await onGenerateAudio(i, segment.text, segment.speaker);
+          
+          // Update this segment as done immediately when it completes
+          await updateSegmentStatus(production.id, i, {
+            audio: 'done',
+            audioUrl: result.audioUrl
+          });
+          
+          return { index: i, success: true, audioUrl: result.audioUrl, duration: result.duration };
+        } catch (error) {
+          // Update this segment as failed immediately
+          await updateSegmentStatus(production.id, i, {
+            audio: 'failed',
+            error: (error as Error).message
+          });
+          
+          return { index: i, success: false, error: (error as Error).message };
+        }
+      })
+    );
+    
+    // Process results and update final production state
+    const finalStatus = { ...(production.segment_status || {}) };
+    const updatedSegments = [...(production.segments || [])];
+    let successCount = 0;
+    let failCount = 0;
+    
+    for (const result of results) {
+      if (result.status === 'fulfilled') {
+        const { index, success, audioUrl, duration, error } = result.value;
+        if (success && audioUrl) {
+          finalStatus[index] = { ...finalStatus[index], audio: 'done', audioUrl };
+          updatedSegments[index] = { ...updatedSegments[index], audioDuration: duration, audioUrl };
+          successCount++;
+          toast.success(`Audio ${index + 1} ✓`);
+        } else {
+          finalStatus[index] = { ...finalStatus[index], audio: 'failed', error };
+          failCount++;
+          toast.error(`Audio ${index + 1} ✗`);
+        }
+      } else {
+        failCount++;
       }
     }
+    
+    currentProduction = { 
+      ...production, 
+      segments: updatedSegments,
+      segment_status: finalStatus as any 
+    };
+    onUpdateProduction(currentProduction);
+    await saveProduction(currentProduction);
     
     setIsLoading(false);
     
     // Check if all completed now
-    const completedCount = Object.values(currentProduction.segment_status || {}).filter(s => s.audio === 'done').length;
+    const totalCompleted = Object.values(finalStatus).filter(s => s.audio === 'done').length;
     
-    if (completedCount === segments.length) {
+    if (totalCompleted === segments.length) {
       await updateStepStatus('audioGenerate', 'completed', {
-        completedSegments: completedCount
+        completedSegments: totalCompleted
       });
       
       // Advance to video generation
@@ -730,10 +748,10 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
       };
       await saveWizardState(newState);
       
-      toast.success('¡Todos los audios generados!');
+      toast.success(`🎉 ¡Todos los audios generados! (${successCount} nuevos)`);
     } else {
-      const pendingCount = segments.length - completedCount;
-      toast(`${completedCount}/${segments.length} audios listos. ${pendingCount} pendientes.`);
+      const pendingCount = segments.length - totalCompleted;
+      toast(`${totalCompleted}/${segments.length} audios listos. ${failCount > 0 ? `${failCount} fallaron.` : ''} ${pendingCount} pendientes.`);
     }
   };
   
@@ -752,7 +770,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
     await handleGenerateAudios(index);
   };
 
-  // Step 6: Generate all videos (only pending ones)
+  // Step 6: Generate all videos IN PARALLEL (only pending ones)
   const handleGenerateVideos = async (specificIndex?: number) => {
     const segments = production.segments || [];
     if (segments.length === 0) {
@@ -797,76 +815,100 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
           return !status?.video || status.video !== 'done' || !status.videoUrl;
         });
     
-    let currentProduction = { ...production };
+    // Check all segments have audio before starting
+    const missingAudio = indicesToProcess.filter(i => !production.segment_status?.[i]?.audioUrl);
+    if (missingAudio.length > 0) {
+      toast.error(`Segmentos ${missingAudio.map(i => i + 1).join(', ')}: No tienen audio. Genera los audios primero.`);
+      setIsLoading(false);
+      return;
+    }
     
+    // Mark all as generating immediately
+    let currentStatus = { ...(production.segment_status || {}) };
     for (const i of indicesToProcess) {
-      const segment = segments[i];
-      setCurrentSegmentIndex(i);
-      
-      // Need audio URL to generate video
-      const existingStatus = currentProduction.segment_status?.[i];
-      if (!existingStatus?.audioUrl) {
-        toast.error(`Segmento ${i + 1}: No hay audio. Genera el audio primero.`);
-        continue;
-      }
-      
-      try {
-        // Update segment status to generating - update local state immediately
-        const generatingStatus = {
-          ...(currentProduction.segment_status || {}),
-          [i]: { ...(currentProduction.segment_status?.[i] || {}), video: 'generating' }
-        };
-        currentProduction = { ...currentProduction, segment_status: generatingStatus as any };
-        onUpdateProduction(currentProduction);
-        await updateSegmentStatus(production.id, i, { video: 'generating' });
+      currentStatus = {
+        ...currentStatus,
+        [i]: { ...currentStatus[i], video: 'generating' }
+      };
+    }
+    let currentProduction = { ...production, segment_status: currentStatus as any };
+    onUpdateProduction(currentProduction);
+    
+    // Update DB for all generating status
+    await Promise.all(indicesToProcess.map(i => 
+      updateSegmentStatus(production.id, i, { video: 'generating' })
+    ));
+    
+    toast.success(`🚀 Generando ${indicesToProcess.length} videos en paralelo...`);
+    
+    // Generate all videos in PARALLEL
+    const results = await Promise.allSettled(
+      indicesToProcess.map(async (i) => {
+        const segment = segments[i];
+        const audioUrl = production.segment_status?.[i]?.audioUrl!;
         
-        const result = await onGenerateVideo(i, existingStatus.audioUrl, segment.speaker);
-        
-        // Update segment with video URL - update local state immediately
-        const doneStatus = {
-          ...(currentProduction.segment_status || {}),
-          [i]: { ...(currentProduction.segment_status?.[i] || {}), video: 'done', videoUrl: result.videoUrl }
-        };
-        
-        currentProduction = { 
-          ...currentProduction, 
-          segment_status: doneStatus as any
-        };
-        
-        // Update both local state and DB
-        onUpdateProduction(currentProduction);
-        await saveProduction(currentProduction);
-        await updateSegmentStatus(production.id, i, {
-          video: 'done',
-          videoUrl: result.videoUrl
-        });
-        
-        toast.success(`Video ${i + 1}/${segments.length} generado`);
-        
-      } catch (error) {
-        // Update failed status
-        const failedStatus = {
-          ...(currentProduction.segment_status || {}),
-          [i]: { ...(currentProduction.segment_status?.[i] || {}), video: 'failed', error: (error as Error).message }
-        };
-        currentProduction = { ...currentProduction, segment_status: failedStatus as any };
-        onUpdateProduction(currentProduction);
-        await updateSegmentStatus(production.id, i, {
-          video: 'failed',
-          error: (error as Error).message
-        });
-        toast.error(`Error en video ${i + 1}: ${(error as Error).message}`);
+        try {
+          const result = await onGenerateVideo(i, audioUrl, segment.speaker);
+          
+          // Update this segment as done immediately when it completes
+          await updateSegmentStatus(production.id, i, {
+            video: 'done',
+            videoUrl: result.videoUrl
+          });
+          
+          return { index: i, success: true, videoUrl: result.videoUrl };
+        } catch (error) {
+          // Update this segment as failed immediately
+          await updateSegmentStatus(production.id, i, {
+            video: 'failed',
+            error: (error as Error).message
+          });
+          
+          return { index: i, success: false, error: (error as Error).message };
+        }
+      })
+    );
+    
+    // Process results and update final production state
+    const finalStatus = { ...(production.segment_status || {}) };
+    let successCount = 0;
+    let failCount = 0;
+    
+    for (const result of results) {
+      if (result.status === 'fulfilled') {
+        const { index, success, videoUrl, error } = result.value;
+        if (success && videoUrl) {
+          finalStatus[index] = { ...finalStatus[index], video: 'done', videoUrl };
+          successCount++;
+          toast.success(`Video ${index + 1} ✓`);
+        } else {
+          finalStatus[index] = { ...finalStatus[index], video: 'failed', error };
+          failCount++;
+          toast.error(`Video ${index + 1} ✗`);
+        }
+      } else {
+        // Promise rejected (shouldn't happen with our try/catch, but just in case)
+        failCount++;
       }
     }
+    
+    // Add already completed videos to count
+    const previouslyCompleted = Object.values(production.segment_status || {})
+      .filter(s => s.video === 'done' && !indicesToProcess.includes(Object.keys(production.segment_status || {}).findIndex(k => production.segment_status?.[parseInt(k)] === s)))
+      .length;
+    
+    currentProduction = { ...production, segment_status: finalStatus as any };
+    onUpdateProduction(currentProduction);
+    await saveProduction(currentProduction);
     
     setIsLoading(false);
     
     // Check if all completed now
-    const completedCount = Object.values(currentProduction.segment_status || {}).filter(s => s.video === 'done').length;
+    const totalCompleted = Object.values(finalStatus).filter(s => s.video === 'done').length;
     
-    if (completedCount === segments.length) {
+    if (totalCompleted === segments.length) {
       await updateStepStatus('videoGenerate', 'completed', {
-        completedSegments: completedCount
+        completedSegments: totalCompleted
       });
       
       const newState: ProductionWizardState = {
@@ -880,10 +922,10 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
       };
       await saveWizardState(newState);
       
-      toast.success('¡Todos los videos generados!');
+      toast.success(`🎉 ¡Todos los videos generados! (${successCount} nuevos)`);
     } else {
-      const pendingCount = segments.length - completedCount;
-      toast(`${completedCount}/${segments.length} videos listos. ${pendingCount} pendientes.`);
+      const pendingCount = segments.length - totalCompleted;
+      toast(`${totalCompleted}/${segments.length} videos listos. ${failCount > 0 ? `${failCount} fallaron.` : ''} ${pendingCount} pendientes.`);
     }
   };
   
