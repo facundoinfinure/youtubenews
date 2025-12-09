@@ -578,6 +578,7 @@ export const buildPodcastStyleEdit = (
     channelName?: string;
     episodeTitle?: string;
     headline?: string;           // Main headline for lower third
+    newsHeadlines?: string[];    // Array of news headlines for ticker
     showBorder?: boolean;
     showVignette?: boolean;
     resolution?: '1080' | 'hd' | 'sd';
@@ -622,6 +623,10 @@ export const buildPodcastStyleEdit = (
         : config.effects.clipEffect as ShotstackEffect;
     }
 
+    // Use specific duration + transition overlap for precise timing
+    // Add extra time to ensure no gaps during transitions
+    const clipDuration = scene.duration + (index < scenes.length - 1 ? transitionDuration * 0.5 : 0);
+
     const clip: any = {
       asset: {
         type: 'video',
@@ -629,7 +634,7 @@ export const buildPodcastStyleEdit = (
         volume: 1 // Use embedded audio
       },
       start: scene.start,
-      length: 'auto'
+      length: clipDuration // Use calculated duration instead of 'auto' to avoid gaps
     };
 
     // Add effect (Ken Burns motion)
@@ -657,6 +662,39 @@ export const buildPodcastStyleEdit = (
   
   // TRACK 1 (Base): Video clips
   tracks.push({ clips: videoClips });
+
+  // === TRANSITION COLOR FLASH TRACK ===
+  // Add subtle color flashes during transitions for a more dynamic look
+  if (config.transition.type !== 'none' && scenesWithTiming.length > 1) {
+    const transitionFlashClips: any[] = [];
+    const flashColor = config.newsStyle?.lowerThird?.primaryColor || '#ff3333';
+    
+    scenesWithTiming.forEach((scene, index) => {
+      if (index > 0) {
+        // Add a brief color flash at each transition point
+        transitionFlashClips.push({
+          asset: {
+            type: 'text',
+            text: '',
+            alignment: { horizontal: 'center', vertical: 'center' },
+            font: { color: '#000000', family: 'Roboto', size: 10, lineHeight: 1 },
+            width: isVertical ? 1080 : 1920,
+            height: isVertical ? 1920 : 1080,
+            background: { color: flashColor }
+          },
+          start: scene.start - 0.1,
+          length: 0.2,
+          opacity: 0.15,
+          position: 'center',
+          transition: { in: 'fade', out: 'fade' }
+        });
+      }
+    });
+    
+    if (transitionFlashClips.length > 0) {
+      tracks.unshift({ clips: transitionFlashClips });
+    }
+  }
 
   // === FORMAT-SPECIFIC OVERLAY PRESETS ===
   // Adjust sizes and positions based on aspect ratio
@@ -888,18 +926,114 @@ export const buildPodcastStyleEdit = (
         }]
       });
     }
+
+    // === NEWS TICKER (Scrolling Headlines) ===
+    if (newsConfig.ticker?.enabled && options.newsHeadlines && options.newsHeadlines.length > 0) {
+      const tickerConfig = newsConfig.ticker;
+      const tickerBgColor = tickerConfig.backgroundColor || '#cc0000';
+      const tickerTextColor = tickerConfig.textColor || '#ffffff';
+      
+      // Ticker positioning based on format
+      const tickerPresets = isVertical
+        ? { y: -0.48, height: 45, fontSize: 16, width: 1080 }
+        : { y: -0.47, height: 50, fontSize: 20, width: 1920 };
+      
+      // Speed settings (how long ticker text takes to scroll across)
+      const speedDurations = { slow: 25, normal: 18, fast: 12 };
+      const scrollDuration = speedDurations[tickerConfig.speed || 'normal'];
+      
+      // Create ticker text (join all headlines with separator)
+      const tickerText = options.newsHeadlines.map(h => `📰 ${h}`).join('   •   ');
+      
+      // Ticker background bar
+      tracks.unshift({
+        clips: [{
+          asset: {
+            type: 'text',
+            text: '',
+            alignment: { horizontal: 'center', vertical: 'center' },
+            font: { color: '#000000', family: 'Roboto', size: 10, lineHeight: 1 },
+            width: tickerPresets.width * 1.1,
+            height: tickerPresets.height,
+            background: { color: tickerBgColor }
+          },
+          start: 2,
+          length: totalDuration - 2,
+          offset: { x: 0, y: tickerPresets.y },
+          position: 'center',
+          transition: { in: 'slideUp' }
+        }]
+      });
+      
+      // Animated ticker text - slides from right to left
+      // We create multiple clips to create continuous scrolling effect
+      const tickerClips: any[] = [];
+      let tickerStartTime = 2.5;
+      
+      while (tickerStartTime < totalDuration - 2) {
+        tickerClips.push({
+          asset: {
+            type: 'text',
+            text: tickerText,
+            alignment: { horizontal: 'left', vertical: 'center' },
+            font: { 
+              color: tickerTextColor, 
+              family: 'Roboto', 
+              size: tickerPresets.fontSize, 
+              lineHeight: 1 
+            },
+            width: tickerPresets.width * 3, // Wide enough for scrolling text
+            height: tickerPresets.height - 10
+          },
+          start: tickerStartTime,
+          length: Math.min(scrollDuration, totalDuration - tickerStartTime - 1),
+          offset: { x: 0, y: tickerPresets.y },
+          position: 'center',
+          effect: 'slideLeftSlow' // Creates scrolling effect
+        });
+        
+        tickerStartTime += scrollDuration - 2; // Overlap for continuous scroll
+      }
+      
+      if (tickerClips.length > 0) {
+        tracks.unshift({ clips: tickerClips });
+      }
+    }
   }
 
   // === HOST NAMES TRACK ===
-  // Show speaker name when they start talking
+  // Show speaker name when they start talking - Professional style with accent color
   if (config.overlays?.showHostNames && scenesWithTiming.length > 0) {
     const hostNameClips: any[] = [];
+    const accentColor = config.newsStyle?.lowerThird?.primaryColor || '#ff0000';
     const hostNamePresets = isVertical 
-      ? { y: -0.30, fontSize: 18, width: 300, height: 45 }
-      : { y: -0.32, fontSize: 22, width: 350, height: 50 };
+      ? { y: -0.28, fontSize: 16, width: 220, height: 38, accentWidth: 6 }
+      : { y: -0.30, fontSize: 20, width: 280, height: 45, accentWidth: 8 };
     
     scenesWithTiming.forEach((scene) => {
       if (scene.speaker) {
+        // Accent bar (colored left border effect)
+        hostNameClips.push({
+          asset: {
+            type: 'text',
+            text: '',
+            alignment: { horizontal: 'center', vertical: 'center' },
+            font: { color: '#000000', family: 'Roboto', size: 10, lineHeight: 1 },
+            width: hostNamePresets.accentWidth,
+            height: hostNamePresets.height,
+            background: { color: accentColor }
+          },
+          start: scene.start + 0.2,
+          length: Math.min(3.5, scene.duration - 0.3),
+          offset: { 
+            x: isVertical ? -0.32 : -0.40, 
+            y: hostNamePresets.y 
+          },
+          position: 'center',
+          transition: { in: 'slideRight', out: 'fade' }
+        });
+        
+        // Name text with dark background
         hostNameClips.push({
           asset: {
             type: 'text',
@@ -907,19 +1041,22 @@ export const buildPodcastStyleEdit = (
             alignment: { horizontal: 'left', vertical: 'center' },
             font: { 
               color: '#ffffff', 
-              family: 'Roboto Medium', 
+              family: 'Oswald', 
               size: hostNamePresets.fontSize, 
               lineHeight: 1 
             },
             width: hostNamePresets.width,
             height: hostNamePresets.height,
-            background: { color: '#1a1a1a' }
+            background: { color: '#111111' }
           },
           start: scene.start + 0.3,
-          length: Math.min(3, scene.duration - 0.5), // Show for max 3 seconds
-          offset: { x: isVertical ? -0.25 : -0.35, y: hostNamePresets.y },
+          length: Math.min(3, scene.duration - 0.5),
+          offset: { 
+            x: isVertical ? -0.22 : -0.32, 
+            y: hostNamePresets.y 
+          },
           position: 'center',
-          transition: { in: 'fade', out: 'fade' }
+          transition: { in: 'slideRight', out: 'fade' }
         });
       }
     });
@@ -1063,11 +1200,45 @@ export const buildPodcastStyleEdit = (
   };
   const size = resolutionMap[aspectRatio]?.[options.resolution || config.output.resolution || '1080'] || resolutionMap['16:9']['1080'];
 
+  // === BUILD TIMELINE WITH FONTS ===
+  const timeline: any = {
+    background: '#0a0a0a', // Slightly lighter than pure black for better transitions
+    tracks
+  };
+
+  // Add custom fonts if configured
+  const fontsToLoad: { src: string }[] = [];
+  
+  // Add configured custom fonts
+  if (config.fonts?.primary) {
+    fontsToLoad.push({ src: config.fonts.primary });
+  }
+  if (config.fonts?.secondary) {
+    fontsToLoad.push({ src: config.fonts.secondary });
+  }
+  if (config.fonts?.accent) {
+    fontsToLoad.push({ src: config.fonts.accent });
+  }
+  
+  // Add default professional fonts (Shotstack hosted)
+  const defaultFonts = [
+    'https://templates.shotstack.io/basic-text-overlay/6ab63510-5d0e-401b-86b0-d46e87df0a91/source.ttf', // Montserrat Bold
+    'https://templates.shotstack.io/breaking-news-channel-template-urgent-announcements-sales/30e1f15f-b0f0-4c6e-bc2c-8a5f3a8478ef/source.ttf', // Oswald
+    'https://templates.shotstack.io/breaking-news-channel-template-urgent-announcements-sales/ef4d1738-75fd-4808-84b9-119a36c79c3b/source.ttf'  // Roboto
+  ];
+  
+  defaultFonts.forEach(fontUrl => {
+    if (!fontsToLoad.some(f => f.src === fontUrl)) {
+      fontsToLoad.push({ src: fontUrl });
+    }
+  });
+  
+  if (fontsToLoad.length > 0) {
+    timeline.fonts = fontsToLoad;
+  }
+
   return {
-    timeline: {
-      background: '#000000',
-      tracks
-    },
+    timeline,
     output: {
       format: 'mp4',
       fps: config.output.fps || 25,
@@ -1098,6 +1269,7 @@ export const renderPodcastVideo = async (
     channelName?: string;
     episodeTitle?: string;
     headline?: string;
+    newsHeadlines?: string[];  // Headlines for news ticker
     showBorder?: boolean;
     showVignette?: boolean;
     resolution?: '1080' | 'hd' | 'sd';
@@ -1579,10 +1751,39 @@ export const renderProductionToShotstack = async (
   // Use viral_metadata title or viral_hook as headline for lower third
   const headline = production.viral_metadata?.title || production.viral_hook || channelName || '';
 
+  // Extract news headlines for ticker from fetched_news or scene titles
+  const newsHeadlines: string[] = [];
+  
+  // Try to get headlines from fetched_news first
+  if (production.fetched_news && production.fetched_news.length > 0) {
+    production.fetched_news.forEach(news => {
+      if (news.headline) {
+        newsHeadlines.push(news.headline);
+      }
+    });
+  }
+  
+  // Fallback: use scene titles if no fetched_news
+  if (newsHeadlines.length === 0) {
+    Object.values(sceneData).forEach((scene: any) => {
+      if (scene?.title) {
+        newsHeadlines.push(scene.title);
+      }
+    });
+  }
+  
+  // Add viral hook as the main headline if available
+  if (production.viral_hook && !newsHeadlines.includes(production.viral_hook)) {
+    newsHeadlines.unshift(production.viral_hook);
+  }
+  
+  console.log(`🎬 [Shotstack] News headlines for ticker: ${newsHeadlines.length} items`);
+
   // Render with full configuration
   return await renderPodcastVideo(scenes, {
     channelName,
     headline,
+    newsHeadlines, // Pass headlines for ticker
     episodeTitle: headline,
     showBorder: false,
     showVignette: false,

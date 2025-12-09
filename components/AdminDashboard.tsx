@@ -213,8 +213,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
   };
 
   // Sync tempConfig when config changes (e.g., when switching channels)
+  // Ensure renderConfig always has defaults applied
   useEffect(() => {
-    setTempConfig(config);
+    setTempConfig({
+      ...config,
+      renderConfig: config.renderConfig ? {
+        ...DEFAULT_RENDER_CONFIG,
+        ...config.renderConfig,
+        // Deep merge nested objects
+        transition: { ...DEFAULT_RENDER_CONFIG.transition, ...config.renderConfig.transition },
+        effects: { ...DEFAULT_RENDER_CONFIG.effects, ...config.renderConfig.effects },
+        output: { ...DEFAULT_RENDER_CONFIG.output, ...config.renderConfig.output },
+        overlays: { ...DEFAULT_RENDER_CONFIG.overlays, ...config.renderConfig.overlays },
+        newsStyle: config.renderConfig.newsStyle ? {
+          ...DEFAULT_RENDER_CONFIG.newsStyle,
+          ...config.renderConfig.newsStyle,
+          lowerThird: { ...DEFAULT_RENDER_CONFIG.newsStyle?.lowerThird, ...config.renderConfig.newsStyle?.lowerThird },
+          ticker: { ...DEFAULT_RENDER_CONFIG.newsStyle?.ticker, ...config.renderConfig.newsStyle?.ticker }
+        } : DEFAULT_RENDER_CONFIG.newsStyle
+      } : DEFAULT_RENDER_CONFIG
+    });
   }, [config]);
 
   useEffect(() => {
@@ -1920,7 +1938,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                                     <button
                                       onClick={async () => {
                                         const toastId = toast.loading('🎬 Re-rendering with current settings...');
-                                        const result = await renderProductionToShotstack(production, activeChannel?.name, config.format, config.renderConfig);
+                                        const result = await renderProductionToShotstack(production, activeChannel?.name, config.format, config.renderConfig || DEFAULT_RENDER_CONFIG);
                                         toast.dismiss(toastId);
                                         if (result.success && result.videoUrl) {
                                           await saveProduction({ 
@@ -2070,7 +2088,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                                     <button
                                       onClick={async () => {
                                         const toastId = toast.loading('🎬 Rendering with professional settings...');
-                                        const result = await renderProductionToShotstack(production, activeChannel?.name, config.format, config.renderConfig);
+                                        const result = await renderProductionToShotstack(production, activeChannel?.name, config.format, config.renderConfig || DEFAULT_RENDER_CONFIG);
                                         toast.dismiss(toastId);
                                         if (result.success && result.videoUrl) {
                                           // Save video URL and mark as completed
@@ -2965,6 +2983,87 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                           />
                           <span className="text-white">Show Channel Name Branding</span>
                         </label>
+
+                        {/* News Ticker Settings */}
+                        <div className="mt-4 pt-4 border-t border-[#333]">
+                          <label className="flex items-center gap-3 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={renderConfig.newsStyle?.ticker?.enabled || false}
+                              onChange={(e) => updateRenderConfig({
+                                newsStyle: { 
+                                  ...renderConfig.newsStyle!,
+                                  ticker: {
+                                    ...(renderConfig.newsStyle?.ticker || DEFAULT_RENDER_CONFIG.newsStyle!.ticker),
+                                    enabled: e.target.checked
+                                  }
+                                }
+                              })}
+                              className="w-5 h-5 accent-orange-500"
+                            />
+                            <span className="text-white">📰 Enable News Ticker (Scrolling Headlines)</span>
+                          </label>
+
+                          {renderConfig.newsStyle?.ticker?.enabled && (
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-3 pl-8">
+                              <div className="space-y-2">
+                                <label className="text-xs text-gray-400 block">Scroll Speed</label>
+                                <select
+                                  value={renderConfig.newsStyle?.ticker?.speed || 'normal'}
+                                  onChange={(e) => updateRenderConfig({
+                                    newsStyle: { 
+                                      ...renderConfig.newsStyle!,
+                                      ticker: { ...renderConfig.newsStyle!.ticker!, speed: e.target.value as any }
+                                    }
+                                  })}
+                                  className="w-full bg-[#111] border border-[#333] rounded px-2 py-1.5 text-white text-sm"
+                                >
+                                  <option value="slow">Slow</option>
+                                  <option value="normal">Normal</option>
+                                  <option value="fast">Fast</option>
+                                </select>
+                              </div>
+
+                              <div className="space-y-2">
+                                <label className="text-xs text-gray-400 block">Background</label>
+                                <div className="flex items-center gap-2">
+                                  <input
+                                    type="color"
+                                    value={renderConfig.newsStyle?.ticker?.backgroundColor || '#cc0000'}
+                                    onChange={(e) => updateRenderConfig({
+                                      newsStyle: { 
+                                        ...renderConfig.newsStyle!,
+                                        ticker: { ...renderConfig.newsStyle!.ticker!, backgroundColor: e.target.value }
+                                      }
+                                    })}
+                                    className="w-10 h-10 rounded cursor-pointer border border-[#333]"
+                                  />
+                                </div>
+                              </div>
+
+                              <div className="space-y-2">
+                                <label className="text-xs text-gray-400 block">Text Color</label>
+                                <div className="flex items-center gap-2">
+                                  <input
+                                    type="color"
+                                    value={renderConfig.newsStyle?.ticker?.textColor || '#ffffff'}
+                                    onChange={(e) => updateRenderConfig({
+                                      newsStyle: { 
+                                        ...renderConfig.newsStyle!,
+                                        ticker: { ...renderConfig.newsStyle!.ticker!, textColor: e.target.value }
+                                      }
+                                    })}
+                                    className="w-10 h-10 rounded cursor-pointer border border-[#333]"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          <p className="text-xs text-gray-500 mt-2 pl-8">
+                            The ticker will show all news headlines from the production scrolling at the bottom.
+                          </p>
+                        </div>
 
                         {/* Preview Box */}
                         <div className="mt-4 p-4 bg-black rounded-lg border border-[#333]">

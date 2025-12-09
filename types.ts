@@ -213,8 +213,24 @@ export interface RenderConfig {
       category?: string;       // e.g., "BREAKING NEWS", "ECONOMÍA", "TECH"
     };
     
+    // News Ticker (scrolling headlines)
+    ticker: {
+      enabled: boolean;
+      speed: 'slow' | 'normal' | 'fast';
+      backgroundColor: string;
+      textColor: string;
+    };
+    
     // Channel branding watermark
     showChannelBranding: boolean;
+  };
+  
+  // === CUSTOM FONTS (v2.5) ===
+  fonts?: {
+    // Custom font URLs (TTF/OTF files)
+    primary?: string;   // Main headlines font URL
+    secondary?: string; // Body text font URL
+    accent?: string;    // Special effects font URL
   };
 }
 
@@ -263,7 +279,19 @@ export const DEFAULT_RENDER_CONFIG: RenderConfig = {
       textColor: '#ffffff',
       category: 'BREAKING NEWS'
     },
+    ticker: {
+      enabled: false,
+      speed: 'normal',
+      backgroundColor: '#cc0000',
+      textColor: '#ffffff'
+    },
     showChannelBranding: true
+  },
+  // Custom fonts defaults (using Shotstack hosted fonts)
+  fonts: {
+    primary: 'https://templates.shotstack.io/basic-text-overlay/6ab63510-5d0e-401b-86b0-d46e87df0a91/source.ttf', // Montserrat Bold
+    secondary: undefined,
+    accent: undefined
   }
 };
 
