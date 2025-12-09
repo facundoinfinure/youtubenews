@@ -730,7 +730,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
     setIsLoading(false);
     
     // Check if all completed now
-    const totalCompleted = Object.values(finalStatus).filter(s => s.audio === 'done').length;
+    const totalCompleted = Object.values(liveStatus).filter((s: any) => s.audio === 'done').length;
     
     if (totalCompleted === segments.length) {
       await updateStepStatus('audioGenerate', 'completed', {
@@ -907,7 +907,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
     setIsLoading(false);
     
     // Check if all completed now
-    const totalCompleted = Object.values(finalStatus).filter(s => s.video === 'done').length;
+    const totalCompleted = Object.values(liveStatus).filter((s: any) => s.video === 'done').length;
     
     if (totalCompleted === segments.length) {
       await updateStepStatus('videoGenerate', 'completed', {
