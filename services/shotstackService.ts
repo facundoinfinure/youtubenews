@@ -903,7 +903,7 @@ export const buildPodcastStyleEdit = (
         hostNameClips.push({
           asset: {
             type: 'text',
-            text: `🎙️ ${scene.speaker.toUpperCase()}`,
+            text: scene.speaker.toUpperCase(),
             alignment: { horizontal: 'left', vertical: 'center' },
             font: { 
               color: '#ffffff', 
@@ -913,7 +913,7 @@ export const buildPodcastStyleEdit = (
             },
             width: hostNamePresets.width,
             height: hostNamePresets.height,
-            background: { color: 'rgba(0,0,0,0.7)' }
+            background: { color: '#1a1a1a' }
           },
           start: scene.start + 0.3,
           length: Math.min(3, scene.duration - 0.5), // Show for max 3 seconds
@@ -955,7 +955,7 @@ export const buildPodcastStyleEdit = (
         stroke: undefined
       },
       boxed: { 
-        background: { color: 'rgba(0,0,0,0.75)' }, 
+        background: { color: '#1a1a1a' }, 
         fontColor: '#ffffff',
         stroke: undefined
       },
