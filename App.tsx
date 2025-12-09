@@ -2461,19 +2461,19 @@ const App: React.FC = () => {
             setWizardProduction(null);
           }}
           onFetchNews={async () => {
-            // Use existing news fetch logic
-            const dateObj = parseLocalDate(selectedDate);
+            // Use the production's news_date, not the current selectedDate
+            const dateObj = parseLocalDate(wizardProduction.news_date);
             const news = await fetchEconomicNews(dateObj, config);
             return news;
           }}
           onGenerateScript={async (newsItems) => {
-            // Use existing script generation logic
+            // Use the production's news_date, not the current selectedDate
             const result = await generateScriptWithScenes(
               newsItems.slice(0, 4),
               config,
               config.preferredNarrative
             );
-            const dateObj = parseLocalDate(selectedDate);
+            const dateObj = parseLocalDate(wizardProduction.news_date);
             const metadata = await generateViralMetadata(
               newsItems.slice(0, 4),
               config,
