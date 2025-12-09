@@ -1349,12 +1349,16 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
               <button
                 onClick={() => handleGenerateAudios()}
                 disabled={isLoading}
-                className="bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 disabled:opacity-50 text-white px-8 py-3 rounded-lg font-bold"
+                className={`${
+                  audioCompleted === audioSegments.length && !isLoading
+                    ? 'bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500'
+                    : 'bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500'
+                } disabled:opacity-50 text-white px-8 py-3 rounded-lg font-bold`}
               >
                 {isLoading 
-                  ? `⏳ Generando ${currentSegmentIndex + 1}/${audioSegments.length}...` 
+                  ? `⏳ Generando ${audioSegments.length - audioCompleted} audios...` 
                   : audioCompleted === audioSegments.length 
-                    ? 'Continuar →' 
+                    ? '✓ Continuar →' 
                     : audioCompleted > 0
                       ? `🎙️ Generar Pendientes (${audioSegments.length - audioCompleted})`
                       : '🎙️ Generar Audios'}
@@ -1420,12 +1424,16 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
               <button
                 onClick={() => handleGenerateVideos()}
                 disabled={isLoading}
-                className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-50 text-white px-8 py-3 rounded-lg font-bold"
+                className={`${
+                  videoCompleted === videoSegments.length && !isLoading
+                    ? 'bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500'
+                    : 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500'
+                } disabled:opacity-50 text-white px-8 py-3 rounded-lg font-bold`}
               >
                 {isLoading 
-                  ? `⏳ Generando ${currentSegmentIndex + 1}/${videoSegments.length}...` 
+                  ? `⏳ Generando ${videoSegments.length - videoCompleted} videos...` 
                   : videoCompleted === videoSegments.length 
-                    ? 'Continuar →' 
+                    ? '✓ Continuar →' 
                     : videoCompleted > 0
                       ? `🎬 Generar Pendientes (${videoSegments.length - videoCompleted})`
                       : '🎬 Generar Videos'}
