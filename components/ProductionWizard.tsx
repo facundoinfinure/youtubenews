@@ -815,40 +815,44 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
       return;
     }
     
+    // Use productionRef for most up-to-date status
+    const currentProd = productionRef.current;
+    
     await updateStepStatus('audioGenerate', 'in_progress', {
       totalSegments: segments.length,
-      completedSegments: Object.values(production.segment_status || {}).filter(s => s.audio === 'done').length
+      completedSegments: Object.values(currentProd.segment_status || {}).filter(s => s.audio === 'done').length
     });
     
     // Determine which segments to process
     const indicesToProcess = specificIndex !== undefined 
       ? [specificIndex] 
       : segments.map((_, i) => i).filter(i => {
-          const status = production.segment_status?.[i];
+          const status = currentProd.segment_status?.[i];
           return !status?.audio || status.audio !== 'done' || !status.audioUrl;
         });
     
     // Mark all as generating immediately
-    let currentStatus = { ...(production.segment_status || {}) };
+    let currentStatus = { ...(currentProd.segment_status || {}) };
     for (const i of indicesToProcess) {
       currentStatus = {
         ...currentStatus,
         [i]: { ...currentStatus[i], audio: 'generating' }
       };
     }
-    let currentProduction = { ...production, segment_status: currentStatus as any };
-    onUpdateProduction(currentProduction);
+    let updatedProduction = { ...currentProd, segment_status: currentStatus as any };
+    setLocalProduction(updatedProduction);
+    onUpdateProduction(updatedProduction);
     
     // Update DB for all generating status
     await Promise.all(indicesToProcess.map(i => 
-      updateSegmentStatus(production.id, i, { audio: 'generating' })
+      updateSegmentStatus(currentProd.id, i, { audio: 'generating' })
     ));
     
     toast.success(`🎙️ Generando ${indicesToProcess.length} audios en paralelo...`);
     
     // Shared state objects for real-time updates
-    const liveStatus: Record<number, any> = { ...(production.segment_status || {}) };
-    const liveSegments = [...(production.segments || [])];
+    const liveStatus: Record<number, any> = { ...(currentProd.segment_status || {}) };
+    const liveSegments = [...(currentProd.segments || [])];
     let successCount = 0;
     let failCount = 0;
     
@@ -866,14 +870,16 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
           successCount++;
           
           // Update UI in real-time
-          onUpdateProduction({ 
-            ...production, 
+          const updated = { 
+            ...productionRef.current, 
             segments: [...liveSegments],
             segment_status: { ...liveStatus } as any 
-          });
+          };
+          setLocalProduction(updated);
+          onUpdateProduction(updated);
           
           // Update DB
-          await updateSegmentStatus(production.id, i, {
+          await updateSegmentStatus(currentProd.id, i, {
             audio: 'done',
             audioUrl: result.audioUrl
           });
@@ -886,13 +892,15 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
           failCount++;
           
           // Update UI in real-time
-          onUpdateProduction({ 
-            ...production, 
+          const updated = { 
+            ...productionRef.current, 
             segment_status: { ...liveStatus } as any 
-          });
+          };
+          setLocalProduction(updated);
+          onUpdateProduction(updated);
           
           // Update DB
-          await updateSegmentStatus(production.id, i, {
+          await updateSegmentStatus(currentProd.id, i, {
             audio: 'failed',
             error: (error as Error).message
           });
@@ -904,12 +912,13 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
     );
     
     // Final save to DB with all updates
-    currentProduction = { 
-      ...production, 
+    const finalProduction = { 
+      ...productionRef.current, 
       segments: liveSegments,
       segment_status: liveStatus as any 
     };
-    await saveProduction(currentProduction);
+    setLocalProduction(finalProduction);
+    await saveProduction(finalProduction);
     
     setIsLoading(false);
     
@@ -996,21 +1005,24 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
       return;
     }
     
+    // Use productionRef for most up-to-date status
+    const currentProd = productionRef.current;
+    
     await updateStepStatus('videoGenerate', 'in_progress', {
       totalSegments: segments.length,
-      completedSegments: Object.values(production.segment_status || {}).filter(s => s.video === 'done').length
+      completedSegments: Object.values(currentProd.segment_status || {}).filter(s => s.video === 'done').length
     });
     
     // Determine which segments to process
     const indicesToProcess = specificIndex !== undefined 
       ? [specificIndex] 
       : segments.map((_, i) => i).filter(i => {
-          const status = production.segment_status?.[i];
+          const status = currentProd.segment_status?.[i];
           return !status?.video || status.video !== 'done' || !status.videoUrl;
         });
     
-    // Check all segments have audio before starting
-    const missingAudio = indicesToProcess.filter(i => !production.segment_status?.[i]?.audioUrl);
+    // Check all segments have audio before starting - use current production ref
+    const missingAudio = indicesToProcess.filter(i => !currentProd.segment_status?.[i]?.audioUrl);
     if (missingAudio.length > 0) {
       toast.error(`Segmentos ${missingAudio.map(i => i + 1).join(', ')}: No tienen audio. Genera los audios primero.`);
       setIsLoading(false);
@@ -1018,25 +1030,26 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
     }
     
     // Mark all as generating immediately
-    let currentStatus = { ...(production.segment_status || {}) };
+    let currentStatus = { ...(currentProd.segment_status || {}) };
     for (const i of indicesToProcess) {
       currentStatus = {
         ...currentStatus,
         [i]: { ...currentStatus[i], video: 'generating' }
       };
     }
-    let currentProduction = { ...production, segment_status: currentStatus as any };
-    onUpdateProduction(currentProduction);
+    let updatedProduction = { ...currentProd, segment_status: currentStatus as any };
+    setLocalProduction(updatedProduction);
+    onUpdateProduction(updatedProduction);
     
     // Update DB for all generating status
     await Promise.all(indicesToProcess.map(i => 
-      updateSegmentStatus(production.id, i, { video: 'generating' })
+      updateSegmentStatus(currentProd.id, i, { video: 'generating' })
     ));
     
     toast.success(`🚀 Generando ${indicesToProcess.length} videos en paralelo...`);
     
     // Shared state object for real-time updates
-    const liveStatus: Record<number, any> = { ...(production.segment_status || {}) };
+    const liveStatus: Record<number, any> = { ...(currentProd.segment_status || {}) };
     let successCount = 0;
     let failCount = 0;
     
@@ -1044,7 +1057,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
     await Promise.allSettled(
       indicesToProcess.map(async (i) => {
         const segment = segments[i];
-        const audioUrl = production.segment_status?.[i]?.audioUrl!;
+        const audioUrl = currentProd.segment_status?.[i]?.audioUrl!;
         
         try {
           const result = await onGenerateVideo(i, audioUrl, segment.speaker);
@@ -1054,10 +1067,12 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
           successCount++;
           
           // Update UI in real-time
-          onUpdateProduction({ ...production, segment_status: { ...liveStatus } as any });
+          const updated = { ...productionRef.current, segment_status: { ...liveStatus } as any };
+          setLocalProduction(updated);
+          onUpdateProduction(updated);
           
           // Update DB
-          await updateSegmentStatus(production.id, i, {
+          await updateSegmentStatus(currentProd.id, i, {
             video: 'done',
             videoUrl: result.videoUrl
           });
@@ -1070,10 +1085,12 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
           failCount++;
           
           // Update UI in real-time
-          onUpdateProduction({ ...production, segment_status: { ...liveStatus } as any });
+          const updated = { ...productionRef.current, segment_status: { ...liveStatus } as any };
+          setLocalProduction(updated);
+          onUpdateProduction(updated);
           
           // Update DB
-          await updateSegmentStatus(production.id, i, {
+          await updateSegmentStatus(currentProd.id, i, {
             video: 'failed',
             error: (error as Error).message
           });
@@ -1085,8 +1102,9 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
     );
     
     // Final save to DB with all updates
-    currentProduction = { ...production, segment_status: liveStatus as any };
-    await saveProduction(currentProduction);
+    const finalProduction = { ...productionRef.current, segment_status: liveStatus as any };
+    setLocalProduction(finalProduction);
+    await saveProduction(finalProduction);
     
     setIsLoading(false);
     
@@ -1139,17 +1157,20 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
     });
     
     try {
-      const result = await renderProductionToShotstack(production, channel.name, config.format);
+      // Use productionRef for most up-to-date data
+      const currentProd = productionRef.current;
+      const result = await renderProductionToShotstack(currentProd, channel.name, config.format);
       
       if (result.success && result.videoUrl) {
         const updatedProduction: Production = {
-          ...production,
+          ...currentProd,
           final_video_url: result.videoUrl,
           final_video_poster: result.posterUrl,
           status: 'completed',
           completed_at: new Date().toISOString()
         };
         await saveProduction(updatedProduction);
+        setLocalProduction(updatedProduction);
         onUpdateProduction(updatedProduction);
         
         await updateStepStatus('renderFinal', 'completed', {

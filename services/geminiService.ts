@@ -43,9 +43,9 @@ import {
   generateImageWithDALLE,
   checkOpenAIConfig,
   createTitleVariantFallback,
-  analyzeScriptForShorts,
-  ScriptAnalysis
+  analyzeScriptForShorts
 } from "./openaiService";
+import type { ScriptAnalysis } from "./openaiService";
 import { 
   fetchNewsWithSerpAPI,
   fetchTrendingWithSerpAPI,

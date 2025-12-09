@@ -663,6 +663,10 @@ export const buildPodcastStyleEdit = (
   // TRACK 1 (Base): Video clips
   tracks.push({ clips: videoClips });
 
+  // === FORMAT-SPECIFIC SETTINGS ===
+  // Determine if vertical format BEFORE using it
+  const isVertical = aspectRatio === '9:16' || aspectRatio === '4:5';
+
   // === TRANSITION COLOR FLASH TRACK ===
   // Add subtle color flashes during transitions for a more dynamic look
   if (config.transition.type !== 'none' && scenesWithTiming.length > 1) {
@@ -698,7 +702,6 @@ export const buildPodcastStyleEdit = (
 
   // === FORMAT-SPECIFIC OVERLAY PRESETS ===
   // Adjust sizes and positions based on aspect ratio
-  const isVertical = aspectRatio === '9:16' || aspectRatio === '4:5';
   const overlayPresets = isVertical ? {
     // 9:16 / 4:5 (Vertical - Shorts/Reels/TikTok)
     lowerThird: {
