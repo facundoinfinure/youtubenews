@@ -1005,8 +1005,11 @@ export const generateVideoSegmentsWithInfiniteTalk = async (
       return { index: globalIndex, url: null, reason: 'missing_audio' };
     }
     
+    // Use originalIndex if provided (for single segment regeneration), otherwise use globalIndex
+    const sceneIndex = (segment as any).originalIndex ?? globalIndex;
+    
     // Get scene metadata if available (now includes Scene Builder visual prompts)
-    const sceneMetadata = sceneMetadataMap.get(globalIndex);
+    const sceneMetadata = sceneMetadataMap.get(sceneIndex);
 
     // Always use single model (multi model disabled for dynamic single-character scenes)
     // Legacy "both" and "infinite_talk_multi" are converted to single host
@@ -1018,29 +1021,32 @@ export const generateVideoSegmentsWithInfiniteTalk = async (
     
     {
       // Single model: Use solo image of the speaking host
+      // IMPORTANT: Use sceneMetadata.video_mode first, then fall back to speaker name matching
       const videoMode = sceneMetadata?.video_mode || (segment.speaker === hostAName ? 'hostA' : 'hostB');
+      
+      console.log(`🎭 [InfiniteTalk] Segment ${sceneIndex}: video_mode=${videoMode}, speaker=${segment.speaker}, hostA=${hostAName}, hostB=${hostBName}`);
       
       if (videoMode === 'hostA' && hostASoloUrl) {
         imageUrlForSegment = hostASoloUrl;
-        console.log(`🖼️ [InfiniteTalk Single] Segment ${globalIndex}: Using Host A solo image`);
+        console.log(`🖼️ [InfiniteTalk Single] Segment ${sceneIndex}: Using Host A solo image (video_mode: hostA)`);
       } else if (videoMode === 'hostB' && hostBSoloUrl) {
         imageUrlForSegment = hostBSoloUrl;
-        console.log(`🖼️ [InfiniteTalk Single] Segment ${globalIndex}: Using Host B solo image`);
+        console.log(`🖼️ [InfiniteTalk Single] Segment ${sceneIndex}: Using Host B solo image (video_mode: hostB)`);
       } else if (segment.speaker === hostAName && hostASoloUrl) {
         imageUrlForSegment = hostASoloUrl;
-        console.log(`🖼️ [InfiniteTalk Single] Segment ${globalIndex}: Using Host A solo image (by speaker)`);
+        console.log(`🖼️ [InfiniteTalk Single] Segment ${sceneIndex}: Using Host A solo image (by speaker name: ${segment.speaker})`);
       } else if (segment.speaker === hostBName && hostBSoloUrl) {
         imageUrlForSegment = hostBSoloUrl;
-        console.log(`🖼️ [InfiniteTalk Single] Segment ${globalIndex}: Using Host B solo image (by speaker)`);
+        console.log(`🖼️ [InfiniteTalk Single] Segment ${sceneIndex}: Using Host B solo image (by speaker name: ${segment.speaker})`);
       } else {
         // Fallback: use any available solo image or two-shot
         imageUrlForSegment = hostASoloUrl || hostBSoloUrl || twoShotUrl || config.referenceImageUrl || '';
-        console.warn(`⚠️ [InfiniteTalk Single] Segment ${globalIndex}: Using fallback image`);
+        console.warn(`⚠️ [InfiniteTalk Single] Segment ${sceneIndex}: Using fallback image (no match for video_mode=${videoMode}, speaker=${segment.speaker})`);
       }
     }
 
     if (!imageUrlForSegment) {
-      console.error(`❌ [InfiniteTalk] Segment ${globalIndex}: No image available`);
+      console.error(`❌ [InfiniteTalk] Segment ${sceneIndex}: No image available`);
       return { index: globalIndex, url: null, reason: 'no_image' };
     }
 
@@ -1052,7 +1058,7 @@ export const generateVideoSegmentsWithInfiniteTalk = async (
     // Get audio duration for accurate video timing
     const segmentDuration = segment.audioDuration;
 
-    console.log(`🎬 [InfiniteTalk] Starting segment ${globalIndex + 1}/${segments.length}...`);
+    console.log(`🎬 [InfiniteTalk] Starting segment ${sceneIndex + 1}/${segments.length} (scene index: ${sceneIndex})...`);
 
     // Use retry logic for video generation
     const { retryVideoGeneration } = await import('./retryUtils');
@@ -1061,7 +1067,7 @@ export const generateVideoSegmentsWithInfiniteTalk = async (
         const videoResult = await generateInfiniteTalkVideo({
           channelId,
           productionId,
-          segmentIndex: globalIndex,
+          segmentIndex: sceneIndex,  // Use the correct scene index
           audioUrl,
           referenceImageUrl: imageUrlForSegment,
           speaker: segment.speaker,
@@ -1092,12 +1098,13 @@ export const generateVideoSegmentsWithInfiniteTalk = async (
     );
 
     if (result) {
-      console.log(`✅ [InfiniteTalk] Segment ${globalIndex + 1}/${segments.length} complete`);
+      console.log(`✅ [InfiniteTalk] Segment ${sceneIndex + 1} complete`);
     } else {
-      failedIndices.push(globalIndex);
+      failedIndices.push(sceneIndex);
     }
 
-    return { index: globalIndex, url: result };
+    // Return globalIndex for array placement, but use sceneIndex for scene metadata
+    return { index: globalIndex, url: result, sceneIndex };
   });
 
   // Wait for ALL videos to complete in parallel

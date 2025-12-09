@@ -2549,14 +2549,20 @@ const App: React.FC = () => {
             // Generate video for a single segment
             const segment = wizardProduction?.segments?.[segmentIndex];
             
+            // Get the correct video_mode from scenes for this specific segment
+            const sceneData = wizardProduction?.scenes?.scenes?.[String(segmentIndex + 1)];
+            const videoMode = sceneData?.video_mode || (speaker === config.characters.hostA.name ? 'hostA' : 'hostB');
+            
             // Use WaveSpeed/InfiniteTalk to generate video
+            // IMPORTANT: Pass originalIndex so the correct scene metadata is used
             const videoUrls = await generateVideoSegmentsWithInfiniteTalk(
               [{
                 speaker: speaker,
                 text: segment?.text || '',
                 audioBase64: '',
-                audioUrl: audioUrl
-              }],
+                audioUrl: audioUrl,
+                originalIndex: segmentIndex  // Pass the real segment index
+              } as any],
               config,
               activeChannel?.id || '',
               wizardProduction?.id,
