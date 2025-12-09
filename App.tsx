@@ -2039,7 +2039,7 @@ const App: React.FC = () => {
           {/* CONTAINER AREA */}
           {/* IdleState gets full-size container, not constrained by video format */}
           {state === AppState.IDLE || state === AppState.FETCHING_NEWS ? (
-            <div className="w-full bg-black rounded-xl overflow-hidden shadow-lg relative flex flex-col min-h-[500px]">
+            <div className="w-full bg-black rounded-xl overflow-hidden shadow-lg relative flex flex-col min-h-[80vh]">
               <IdleState
                 state={state}
                 config={config}

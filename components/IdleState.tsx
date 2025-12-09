@@ -8,6 +8,7 @@
 
 import React from 'react';
 import { ChannelConfig, AppState, Production, getStepDisplayName, getStepNumber } from '../types';
+import { parseLocalDate } from '../utils/dateUtils';
 
 interface IdleStateProps {
   state: AppState;
@@ -126,7 +127,7 @@ export const IdleState: React.FC<IdleStateProps> = ({
                         <div className="flex items-center justify-between mb-2 gap-2">
                           <div className="flex-1 text-left min-w-0">
                             <h4 className="font-medium text-white truncate text-sm sm:text-base">
-                              {prod.viral_metadata?.title || `Producción ${new Date(prod.news_date).toLocaleDateString()}`}
+                              {prod.viral_metadata?.title || `Producción ${parseLocalDate(prod.news_date).toLocaleDateString()}`}
                             </h4>
                             <p className="text-[10px] sm:text-xs text-gray-400">
                               {new Date(prod.updated_at).toLocaleDateString()} • {stepInfo.stepName}

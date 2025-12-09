@@ -20,6 +20,7 @@ import {
 import { saveProduction, updateSegmentStatus } from '../services/supabaseService';
 import { uploadVideoToYouTube } from '../services/youtubeService';
 import { renderProductionToShotstack } from '../services/shotstackService';
+import { parseLocalDate } from '../utils/dateUtils';
 
 // =============================================================================================
 // TYPES
@@ -1857,7 +1858,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
               🎬 <span className="truncate">Production Wizard</span>
             </h2>
             <p className="text-xs sm:text-sm text-gray-400 mt-0.5 sm:mt-1 truncate">
-              {channel.name} • {new Date(production.news_date).toLocaleDateString()}
+              {channel.name} • {parseLocalDate(production.news_date).toLocaleDateString()}
             </p>
           </div>
           <button

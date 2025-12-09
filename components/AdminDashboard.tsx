@@ -7,6 +7,7 @@ import { generateSeedImage } from '../services/geminiService';
 import { CostTracker } from '../services/CostTracker';
 import { ContentCache } from '../services/ContentCache';
 import { VideoListSkeleton, AnalyticsCardSkeleton, EmptyState } from './LoadingStates';
+import { parseLocalDate } from '../utils/dateUtils';
 import { getStorageUsage, cleanupOldFiles } from '../services/storageManager';
 import { renderProductionToShotstack, hasVideosForRender } from '../services/shotstackService';
 
@@ -1531,7 +1532,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                                 </h4>
                                 <div className="flex items-center gap-2 mt-1 flex-wrap">
                                   <span className="text-xs text-gray-500">
-                                    {new Date(production.news_date).toLocaleDateString()}
+                                    {parseLocalDate(production.news_date).toLocaleDateString()}
                                   </span>
                                   {production.version && production.version > 1 && (
                                     <span className="text-xs bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded">v{production.version}</span>
