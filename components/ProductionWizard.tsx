@@ -376,6 +376,62 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
     'audio_generate', 'video_generate', 'render_final', 'publish', 'done'
   ];
 
+  // Save wizard state to production - ONLY updates wizard_state, not other fields
+  // IMPORTANT: This must be defined before functions that use it
+  const saveWizardState = useCallback(async (newState: ProductionWizardState) => {
+    setWizardState(newState);
+    
+    // Only update wizard-specific fields to avoid overwriting other data like scenes
+    const partialUpdate: Partial<Production> = {
+      id: production.id,
+      wizard_state: newState,
+      fetched_news: fetchedNews,
+      selected_news_ids: selectedNewsIds,
+      updated_at: new Date().toISOString(),
+      last_checkpoint_at: new Date().toISOString()
+    };
+    
+    await saveProduction(partialUpdate as Production);
+    
+    // Merge with current production to preserve all fields
+    const updatedProduction: Production = {
+      ...production,
+      ...partialUpdate
+    };
+    onUpdateProduction(updatedProduction);
+  }, [production, fetchedNews, selectedNewsIds, onUpdateProduction]);
+
+  // Update a specific step's status
+  const updateStepStatus = useCallback(async (
+    step: keyof Omit<ProductionWizardState, 'currentStep'>,
+    status: SubStepStatus,
+    data?: any
+  ) => {
+    const newState: ProductionWizardState = {
+      ...wizardState,
+      [step]: {
+        ...wizardState[step],
+        status,
+        ...(status === 'in_progress' ? { startedAt: new Date().toISOString() } : {}),
+        ...(status === 'completed' ? { completedAt: new Date().toISOString() } : {}),
+        ...(data ? { data: { ...(wizardState[step] as any).data, ...data } } : {})
+      }
+    };
+    await saveWizardState(newState);
+  }, [wizardState, saveWizardState]);
+
+  // Move to next step
+  const goToNextStep = useCallback(async () => {
+    const nextStep = getNextProductionStep(wizardState.currentStep);
+    if (nextStep) {
+      const newState: ProductionWizardState = {
+        ...wizardState,
+        currentStep: nextStep
+      };
+      await saveWizardState(newState);
+    }
+  }, [wizardState, saveWizardState]);
+
   // Helper to check if step can be navigated to
   const canNavigateToStep = useCallback((step: ProductionStep): boolean => {
     // Always allow going to current step
@@ -454,61 +510,6 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
     const timer = setTimeout(detectPendingWork, 500);
     return () => clearTimeout(timer);
   }, [production.id]); // Only on production change
-
-  // Save wizard state to production - ONLY updates wizard_state, not other fields
-  const saveWizardState = useCallback(async (newState: ProductionWizardState) => {
-    setWizardState(newState);
-    
-    // Only update wizard-specific fields to avoid overwriting other data like scenes
-    const partialUpdate: Partial<Production> = {
-      id: production.id,
-      wizard_state: newState,
-      fetched_news: fetchedNews,
-      selected_news_ids: selectedNewsIds,
-      updated_at: new Date().toISOString(),
-      last_checkpoint_at: new Date().toISOString()
-    };
-    
-    await saveProduction(partialUpdate as Production);
-    
-    // Merge with current production to preserve all fields
-    const updatedProduction: Production = {
-      ...production,
-      ...partialUpdate
-    };
-    onUpdateProduction(updatedProduction);
-  }, [production, fetchedNews, selectedNewsIds, onUpdateProduction]);
-
-  // Update a specific step's status
-  const updateStepStatus = useCallback(async (
-    step: keyof Omit<ProductionWizardState, 'currentStep'>,
-    status: SubStepStatus,
-    data?: any
-  ) => {
-    const newState: ProductionWizardState = {
-      ...wizardState,
-      [step]: {
-        ...wizardState[step],
-        status,
-        ...(status === 'in_progress' ? { startedAt: new Date().toISOString() } : {}),
-        ...(status === 'completed' ? { completedAt: new Date().toISOString() } : {}),
-        ...(data ? { data: { ...(wizardState[step] as any).data, ...data } } : {})
-      }
-    };
-    await saveWizardState(newState);
-  }, [wizardState, saveWizardState]);
-
-  // Move to next step
-  const goToNextStep = useCallback(async () => {
-    const nextStep = getNextProductionStep(wizardState.currentStep);
-    if (nextStep) {
-      const newState: ProductionWizardState = {
-        ...wizardState,
-        currentStep: nextStep
-      };
-      await saveWizardState(newState);
-    }
-  }, [wizardState, saveWizardState]);
 
   // =============================================================================================
   // STEP HANDLERS
