@@ -2463,7 +2463,26 @@ const App: React.FC = () => {
           onFetchNews={async () => {
             // Use the production's news_date, not the current selectedDate
             const dateObj = parseLocalDate(wizardProduction.news_date);
-            const news = await fetchEconomicNews(dateObj, config);
+            
+            // First check if news exists in database for this date
+            let news = await getNewsByDate(dateObj, activeChannel.id);
+            
+            if (news.length > 0) {
+              console.log(`📰 Found ${news.length} cached news items for ${dateObj.toLocaleDateString()}`);
+              return news;
+            }
+            
+            // No cached news for this date - fetch from API
+            console.log(`📡 No cached news for ${dateObj.toLocaleDateString()}, fetching from API...`);
+            news = await fetchEconomicNews(dateObj, config);
+            
+            // Save to database for future use
+            if (news.length > 0) {
+              await saveNewsToDB(dateObj, news, activeChannel.id);
+              // Re-fetch from DB to get proper IDs
+              news = await getNewsByDate(dateObj, activeChannel.id);
+            }
+            
             return news;
           }}
           onGenerateScript={async (newsItems) => {
