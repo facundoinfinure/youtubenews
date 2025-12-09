@@ -21,6 +21,7 @@ import { saveProduction, updateSegmentStatus } from '../services/supabaseService
 import { uploadVideoToYouTube } from '../services/youtubeService';
 import { renderProductionToShotstack } from '../services/shotstackService';
 import { parseLocalDate } from '../utils/dateUtils';
+import { analyzeScriptForShorts, ScriptAnalysis } from '../services/geminiService';
 
 // =============================================================================================
 // TYPES
@@ -368,7 +369,8 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
     production.wizard_state || createEmptyWizardState()
   );
   
-  // Local state
+  // Local state - use localProduction to avoid stale prop issues during navigation
+  const [localProduction, setLocalProduction] = useState<Production>(production);
   const [fetchedNews, setFetchedNews] = useState<NewsItem[]>(production.fetched_news || []);
   const [selectedNewsIds, setSelectedNewsIds] = useState<string[]>(production.selected_news_ids || []);
   const [isLoading, setIsLoading] = useState(false);
@@ -380,10 +382,19 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
     detail?: string;
     progress?: number; // 0-100
   } | null>(null);
+  
+  // Script analysis for YouTube Shorts
+  const [scriptAnalysis, setScriptAnalysis] = useState<ScriptAnalysis | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   // Ref to always have the latest production (avoids stale closures)
-  const productionRef = React.useRef(production);
-  productionRef.current = production;
+  const productionRef = React.useRef(localProduction);
+  productionRef.current = localProduction;
+  
+  // Sync localProduction when prop changes from parent
+  useEffect(() => {
+    setLocalProduction(production);
+  }, [production]);
 
   // Sync wizard state when production prop changes (e.g., when production is loaded/updated externally)
   useEffect(() => {
@@ -485,16 +496,16 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
       case 'news_fetch': return true;
       case 'news_select': return fetchedNews.length > 0;
       case 'script_generate': return selectedNewsIds.length > 0;
-      case 'script_review': return !!production.scenes?.scenes;
-      case 'audio_generate': return !!production.segments?.length;
+      case 'script_review': return !!localProduction.scenes?.scenes;
+      case 'audio_generate': return !!localProduction.segments?.length;
       case 'video_generate': 
-        return Object.values(production.segment_status || {}).some(s => s?.audio === 'done');
+        return Object.values(localProduction.segment_status || {}).some(s => s?.audio === 'done');
       case 'render_final':
-        return Object.values(production.segment_status || {}).some(s => s?.video === 'done');
-      case 'publish': return !!production.final_video_url;
+        return Object.values(localProduction.segment_status || {}).some(s => s?.video === 'done');
+      case 'publish': return !!localProduction.final_video_url;
       default: return false;
     }
-  }, [wizardState, fetchedNews, selectedNewsIds, production]);
+  }, [wizardState, fetchedNews, selectedNewsIds, localProduction]);
 
   // Handle step click navigation
   const handleStepClick = useCallback(async (step: ProductionStep) => {
@@ -690,6 +701,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
       };
       
       await saveProduction(updatedProduction);
+      setLocalProduction(updatedProduction); // Update local state immediately
       onUpdateProduction(updatedProduction);
       
       await updateStepStatus('scriptGenerate', 'completed', {
@@ -1386,7 +1398,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
 
       // Step 3: Generate Script
       case 'script_generate':
-        const hasExistingScript = production.scenes?.scenes && Object.keys(production.scenes.scenes).length > 0;
+        const hasExistingScript = localProduction.scenes?.scenes && Object.keys(localProduction.scenes.scenes).length > 0;
         return (
           <div className="space-y-6">
             <div className="text-center py-8">
@@ -1401,7 +1413,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
             {hasExistingScript && (
               <div className="bg-green-900/20 border border-green-500/30 p-4 rounded-lg">
                 <p className="text-green-400">
-                  ✓ Ya tienes un guión con {Object.keys(production.scenes!.scenes).length} escenas. 
+                  ✓ Ya tienes un guión con {Object.keys(localProduction.scenes!.scenes).length} escenas. 
                   Puedes usarlo o regenerar uno nuevo.
                 </p>
               </div>
@@ -1486,7 +1498,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
 
       // Step 4: Review Script
       case 'script_review':
-        const scenes = production.scenes?.scenes || {};
+        const scenes = localProduction.scenes?.scenes || {};
         return (
           <div className="space-y-6">
             <div className="flex items-center justify-between">
@@ -1496,14 +1508,141 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
               </span>
             </div>
             
-            {production.viral_metadata && (
-              <div className="bg-gradient-to-r from-purple-900/30 to-pink-900/30 p-4 rounded-lg border border-purple-500/30">
-                <h4 className="text-purple-400 font-bold mb-2">📺 Título del Video</h4>
-                <p className="text-white text-lg">{production.viral_metadata.title}</p>
+            {localProduction.viral_metadata && (
+              <div className="bg-gradient-to-r from-purple-900/30 to-pink-900/30 p-4 rounded-lg border border-purple-500/30 flex items-center justify-between">
+                <div>
+                  <h4 className="text-purple-400 font-bold mb-1">📺 Título del Video</h4>
+                  <p className="text-white text-lg">{localProduction.viral_metadata.title}</p>
+                </div>
+                {localProduction.viral_metadata.title && (
+                  <button className="text-purple-400 hover:text-purple-300 p-2" title="Editar título">✏️</button>
+                )}
               </div>
             )}
             
-            <div className="space-y-3 max-h-[350px] overflow-y-auto pr-2">
+            {/* Script Analysis for YouTube Shorts */}
+            {Object.keys(scenes).length > 0 && (
+              <div className="bg-[#1a1a1a] p-4 rounded-lg border border-[#333]">
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-sm font-bold text-gray-300 flex items-center gap-2">
+                    <span>📊</span> Análisis para YouTube Shorts
+                  </h4>
+                  <button
+                    onClick={async () => {
+                      if (isAnalyzing) return;
+                      setIsAnalyzing(true);
+                      try {
+                        const analysis = await analyzeScriptForShorts(
+                          scenes,
+                          config.characters.hostA.name,
+                          config.characters.hostB.name
+                        );
+                        setScriptAnalysis(analysis);
+                        toast.success('Análisis completado');
+                      } catch (error) {
+                        toast.error('Error al analizar');
+                      } finally {
+                        setIsAnalyzing(false);
+                      }
+                    }}
+                    disabled={isAnalyzing}
+                    className="text-xs bg-cyan-600/20 hover:bg-cyan-600 text-cyan-400 hover:text-white px-3 py-1 rounded transition-all disabled:opacity-50"
+                  >
+                    {isAnalyzing ? '⏳ Analizando...' : scriptAnalysis ? '🔄 Re-analizar' : '🎯 Analizar Script'}
+                  </button>
+                </div>
+                
+                {scriptAnalysis ? (
+                  <div className="space-y-3">
+                    {/* Overall Score */}
+                    <div className="flex items-center gap-3">
+                      <div className={`text-3xl font-bold ${
+                        scriptAnalysis.overallScore >= 80 ? 'text-green-400' :
+                        scriptAnalysis.overallScore >= 60 ? 'text-yellow-400' : 'text-red-400'
+                      }`}>
+                        {scriptAnalysis.overallScore}
+                      </div>
+                      <div className="flex-1">
+                        <div className="text-xs text-gray-400 mb-1">Score General</div>
+                        <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
+                          <div 
+                            className={`h-full transition-all ${
+                              scriptAnalysis.overallScore >= 80 ? 'bg-green-500' :
+                              scriptAnalysis.overallScore >= 60 ? 'bg-yellow-500' : 'bg-red-500'
+                            }`}
+                            style={{ width: `${scriptAnalysis.overallScore}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {/* Individual Scores */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div className="bg-[#111] p-2 rounded">
+                        <div className="text-xs text-gray-500 mb-1">🎯 Hook</div>
+                        <div className={`text-lg font-bold ${scriptAnalysis.hookScore >= 70 ? 'text-green-400' : 'text-yellow-400'}`}>
+                          {scriptAnalysis.hookScore}%
+                        </div>
+                        <div className="text-[10px] text-gray-500 line-clamp-1">{scriptAnalysis.hookFeedback}</div>
+                      </div>
+                      <div className="bg-[#111] p-2 rounded">
+                        <div className="text-xs text-gray-500 mb-1">⏱️ Retención</div>
+                        <div className={`text-lg font-bold ${scriptAnalysis.retentionScore >= 70 ? 'text-green-400' : 'text-yellow-400'}`}>
+                          {scriptAnalysis.retentionScore}%
+                        </div>
+                        <div className="text-[10px] text-gray-500 line-clamp-1">{scriptAnalysis.retentionFeedback}</div>
+                      </div>
+                      <div className="bg-[#111] p-2 rounded">
+                        <div className="text-xs text-gray-500 mb-1">🔄 Ritmo</div>
+                        <div className={`text-lg font-bold ${scriptAnalysis.pacingScore >= 70 ? 'text-green-400' : 'text-yellow-400'}`}>
+                          {scriptAnalysis.pacingScore}%
+                        </div>
+                        <div className="text-[10px] text-gray-500 line-clamp-1">{scriptAnalysis.pacingFeedback}</div>
+                      </div>
+                      <div className="bg-[#111] p-2 rounded">
+                        <div className="text-xs text-gray-500 mb-1">💬 Engagement</div>
+                        <div className={`text-lg font-bold ${scriptAnalysis.engagementScore >= 70 ? 'text-green-400' : 'text-yellow-400'}`}>
+                          {scriptAnalysis.engagementScore}%
+                        </div>
+                        <div className="text-[10px] text-gray-500 line-clamp-1">{scriptAnalysis.engagementFeedback}</div>
+                      </div>
+                    </div>
+                    
+                    {/* Suggestions & Strengths */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <div className="text-xs text-gray-500 mb-1">💡 Sugerencias</div>
+                        <ul className="text-xs text-yellow-300 space-y-1">
+                          {scriptAnalysis.suggestions.slice(0, 3).map((s, i) => (
+                            <li key={i} className="flex items-start gap-1">
+                              <span>•</span>
+                              <span>{s}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div>
+                        <div className="text-xs text-gray-500 mb-1">✅ Fortalezas</div>
+                        <ul className="text-xs text-green-300 space-y-1">
+                          {scriptAnalysis.strengths.slice(0, 2).map((s, i) => (
+                            <li key={i} className="flex items-start gap-1">
+                              <span>•</span>
+                              <span>{s}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-500 text-center py-2">
+                    Haz clic en "Analizar Script" para ver qué tan efectivo es tu guión para YouTube Shorts
+                  </p>
+                )}
+              </div>
+            )}
+            
+            <div className="space-y-3 max-h-[250px] overflow-y-auto pr-2">
               {Object.entries(scenes).map(([key, scene]) => (
                 <div key={key} className="bg-[#1a1a1a] p-4 rounded-lg border border-[#333]">
                   <div className="flex items-center gap-2 mb-2">
@@ -1548,9 +1687,9 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
 
       // Step 5: Generate Audios
       case 'audio_generate':
-        const audioSegments = production.segments || [];
-        const audioCompleted = Object.values(production.segment_status || {}).filter(s => s.audio === 'done').length;
-        const audioFailed = Object.values(production.segment_status || {}).filter(s => s.audio === 'failed').length;
+        const audioSegments = localProduction.segments || [];
+        const audioCompleted = Object.values(localProduction.segment_status || {}).filter(s => s.audio === 'done').length;
+        const audioFailed = Object.values(localProduction.segment_status || {}).filter(s => s.audio === 'failed').length;
         return (
           <div className="space-y-6">
             <div className="flex items-center justify-between">
@@ -1579,7 +1718,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
             {audioFailed > 0 && !isLoading && (
               <button
                 onClick={async () => {
-                  const failedIndices = Object.entries(production.segment_status || {})
+                  const failedIndices = Object.entries(localProduction.segment_status || {})
                     .filter(([_, s]) => s.audio === 'failed')
                     .map(([i]) => parseInt(i));
                   
@@ -1596,7 +1735,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
             
             <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2">
               {audioSegments.map((segment, i) => {
-                const status = production.segment_status?.[i];
+                const status = localProduction.segment_status?.[i];
                 return (
                   <SegmentProgressCard
                     key={i}
@@ -1650,9 +1789,9 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
 
       // Step 6: Generate Videos
       case 'video_generate':
-        const videoSegments = production.segments || [];
-        const videoCompleted = Object.values(production.segment_status || {}).filter(s => s.video === 'done').length;
-        const videoFailed = Object.values(production.segment_status || {}).filter(s => s.video === 'failed').length;
+        const videoSegments = localProduction.segments || [];
+        const videoCompleted = Object.values(localProduction.segment_status || {}).filter(s => s.video === 'done').length;
+        const videoFailed = Object.values(localProduction.segment_status || {}).filter(s => s.video === 'failed').length;
         return (
           <div className="space-y-6">
             <div className="flex items-center justify-between">
@@ -1680,7 +1819,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
             {videoFailed > 0 && !isLoading && (
               <button
                 onClick={async () => {
-                  const failedIndices = Object.entries(production.segment_status || {})
+                  const failedIndices = Object.entries(localProduction.segment_status || {})
                     .filter(([_, s]) => s.video === 'failed')
                     .map(([i]) => parseInt(i));
                   
@@ -1697,7 +1836,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
             
             <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2">
               {videoSegments.map((segment, i) => {
-                const status = production.segment_status?.[i];
+                const status = localProduction.segment_status?.[i];
                 return (
                   <SegmentProgressCard
                     key={i}

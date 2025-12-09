@@ -295,6 +295,24 @@ export const DEFAULT_RENDER_CONFIG: RenderConfig = {
   }
 };
 
+// Default ethical guardrails configuration
+export const DEFAULT_ETHICAL_GUARDRAILS = {
+  enabled: true,
+  sensitiveTopics: {
+    deaths: 'empathetic' as const,     // Show empathy for victims
+    violence: 'critical' as const,      // Critical of perpetrators
+    politics: 'satirical' as const,     // Allow political satire
+    health: 'cautious' as const         // Be careful with health claims
+  },
+  humorRules: {
+    targetCompanies: true,              // ✅ Can satirize companies
+    targetPoliticians: true,            // ✅ Can satirize politicians
+    targetInstitutions: true,           // ✅ Can criticize institutions
+    neverTargetVictims: true            // ❌ NEVER joke about victims
+  },
+  customInstructions: ''
+};
+
 export interface ChannelConfig {
   channelName: string;
   tagline: string;
@@ -330,6 +348,30 @@ export interface ChannelConfig {
   preferredNarrative?: NarrativeType; // Optional preferred narrative (auto-selection if not set)
   // Render settings (v2.3)
   renderConfig?: RenderConfig; // Shotstack render configuration
+  
+  // Ethical Guardrails (v2.6) - Content moderation rules
+  ethicalGuardrails?: {
+    enabled: boolean;
+    
+    // How to handle sensitive topics
+    sensitiveTopics: {
+      deaths: 'empathetic' | 'factual' | 'avoid'; // Deaths/tragedies
+      violence: 'critical' | 'factual' | 'avoid'; // Violence
+      politics: 'satirical' | 'neutral' | 'avoid'; // Politics
+      health: 'cautious' | 'factual' | 'avoid'; // Health topics
+    };
+    
+    // Rules for humor/satire
+    humorRules: {
+      targetCompanies: boolean;      // Allow satirizing companies
+      targetPoliticians: boolean;    // Allow satirizing politicians  
+      targetInstitutions: boolean;   // Allow criticizing institutions
+      neverTargetVictims: boolean;   // Never make jokes about victims (always enforced)
+    };
+    
+    // Custom instructions for AI
+    customInstructions?: string;
+  };
 }
 
 export interface Channel {

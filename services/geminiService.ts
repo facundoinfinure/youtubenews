@@ -42,7 +42,9 @@ import {
   generateTTSAudio,
   generateImageWithDALLE,
   checkOpenAIConfig,
-  createTitleVariantFallback
+  createTitleVariantFallback,
+  analyzeScriptForShorts,
+  ScriptAnalysis
 } from "./openaiService";
 import { 
   fetchNewsWithSerpAPI,
@@ -1778,3 +1780,7 @@ export const getCompositionStatus = () => {
       : 'Configure Shotstack API key for video composition'
   };
 };
+
+// Re-export script analysis for YouTube Shorts
+export { analyzeScriptForShorts };
+export type { ScriptAnalysis };

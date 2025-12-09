@@ -195,6 +195,32 @@ CRITICAL:
 - Keep dialogue SHORT (40-80 words) for dynamic, fast-paced delivery
 `.trim();
 
+  // Build ethical guardrails prompt from config
+  const ethicalGuardrails = config.ethicalGuardrails?.enabled !== false ? `
+ETHICAL GUARDRAILS (CRITICAL):
+${config.ethicalGuardrails?.sensitiveTopics?.deaths === 'empathetic' 
+  ? '- When covering deaths/tragedies: Express genuine empathy for victims. Never make jokes about the deceased. Criticism is OK for negligent parties/companies.'
+  : config.ethicalGuardrails?.sensitiveTopics?.deaths === 'factual'
+  ? '- When covering deaths/tragedies: Report factually without emotional commentary or humor.'
+  : '- Avoid covering deaths/tragedies unless essential to the story.'}
+${config.ethicalGuardrails?.sensitiveTopics?.violence === 'critical'
+  ? '- When covering violence: Critically analyze causes and responsible parties. No glorification.'
+  : config.ethicalGuardrails?.sensitiveTopics?.violence === 'factual'
+  ? '- When covering violence: Report factually without sensationalism.'
+  : '- Minimize coverage of violent events.'}
+${config.ethicalGuardrails?.sensitiveTopics?.politics === 'satirical'
+  ? '- Politics: Satirical commentary is encouraged. Mock politicians and policies, not voters.'
+  : config.ethicalGuardrails?.sensitiveTopics?.politics === 'neutral'
+  ? '- Politics: Maintain balanced, neutral coverage without taking sides.'
+  : '- Avoid political topics when possible.'}
+${config.ethicalGuardrails?.humorRules?.targetCompanies ? '- OK to satirize/criticize companies and corporations.' : '- Be neutral when discussing companies.'}
+${config.ethicalGuardrails?.humorRules?.targetPoliticians ? '- OK to satirize politicians and public figures.' : '- Be respectful of political figures.'}
+${config.ethicalGuardrails?.humorRules?.targetInstitutions ? '- OK to criticize institutions and organizations.' : '- Be neutral about institutions.'}
+- NEVER make jokes about individual victims, deceased persons, or their families. This is non-negotiable.
+- Sarcasm about corporate negligence is ENCOURAGED when they harm people.
+${config.ethicalGuardrails?.customInstructions ? `- Additional rules: ${config.ethicalGuardrails.customInstructions}` : ''}
+`.trim() : '';
+
   const systemPrompt = `
 You are the head writer of "${config.channelName}", a daily business/markets podcast hosted by two animated chimpanzees.
 
@@ -204,7 +230,7 @@ ${narrativeInstructions}
 
 ${dialogueRules}
 
-${metadataRules}
+${ethicalGuardrails ? ethicalGuardrails + '\n\n' : ''}${metadataRules}
 
 ${outputFormat}
 `.trim();
@@ -936,4 +962,146 @@ export const checkOpenAIConfig = (): { configured: boolean; message: string } =>
     configured: false,
     message: `❌ No proxy URL configured. Set VITE_BACKEND_URL or deploy to Vercel.`
   };
+};
+
+// ====================
+// Script Analysis for YouTube Shorts
+// ====================
+
+export interface ScriptAnalysis {
+  hookScore: number;            // 0-100: How attention-grabbing is the opening?
+  hookFeedback: string;
+  retentionScore: number;       // 0-100: Will viewers watch the whole thing?
+  retentionFeedback: string;
+  pacingScore: number;          // 0-100: Is the rhythm dynamic enough?
+  pacingFeedback: string;
+  engagementScore: number;      // 0-100: Does it encourage interaction?
+  engagementFeedback: string;
+  overallScore: number;         // Weighted average
+  suggestions: string[];        // Actionable improvements
+  strengths: string[];          // What's working well
+}
+
+/**
+ * Analyze a script for YouTube Shorts effectiveness
+ * Uses AI to evaluate hook, retention, pacing, and engagement
+ */
+export const analyzeScriptForShorts = async (
+  scenes: Record<string, { title?: string; text: string; video_mode: string }>,
+  hostAName: string,
+  hostBName: string
+): Promise<ScriptAnalysis> => {
+  console.log(`📊 [Script Analysis] Analyzing script for YouTube Shorts effectiveness...`);
+  
+  // Prepare script text for analysis
+  const sceneTexts = Object.entries(scenes).map(([key, scene]) => ({
+    scene: parseInt(key),
+    speaker: scene.video_mode === 'hostA' ? hostAName : hostBName,
+    title: scene.title,
+    text: scene.text
+  }));
+  
+  const fullScript = sceneTexts.map(s => `[Scene ${s.scene} - ${s.speaker}]: ${s.text}`).join('\n\n');
+  const firstScene = sceneTexts[0]?.text || '';
+  const lastScene = sceneTexts[sceneTexts.length - 1]?.text || '';
+  
+  const systemPrompt = `You are a YouTube Shorts expert analyzing scripts for viral potential.
+
+Analyze the following script and rate it on these criteria (0-100 scale):
+
+1. HOOK SCORE (First 3 seconds)
+   - Does it grab attention immediately?
+   - Is there a question, shock value, or curiosity gap?
+   - Would viewers stop scrolling?
+
+2. RETENTION SCORE (Will they watch to the end?)
+   - Is there momentum throughout?
+   - Are there dead spots?
+   - Does each scene add value?
+
+3. PACING SCORE (Dynamic delivery)
+   - Is there good alternation between speakers?
+   - Are scenes the right length (40-80 words)?
+   - Does the rhythm vary?
+
+4. ENGAGEMENT SCORE (Will they interact?)
+   - Is there a call to action?
+   - Does it invite comments/opinions?
+   - Is it shareable?
+
+Return JSON:
+{
+  "hookScore": number,
+  "hookFeedback": "1 sentence explaining the hook effectiveness",
+  "retentionScore": number,
+  "retentionFeedback": "1 sentence about retention",
+  "pacingScore": number,
+  "pacingFeedback": "1 sentence about pacing",
+  "engagementScore": number,
+  "engagementFeedback": "1 sentence about engagement",
+  "suggestions": ["suggestion 1", "suggestion 2", "suggestion 3"],
+  "strengths": ["strength 1", "strength 2"]
+}`;
+
+  const userPrompt = `FULL SCRIPT:
+${fullScript}
+
+FIRST SCENE (The Hook - First 3 seconds):
+${firstScene}
+
+LAST SCENE (The Close):
+${lastScene}
+
+METADATA:
+- Total scenes: ${sceneTexts.length}
+- Speakers: ${hostAName}, ${hostBName}
+- Approximate word count: ${fullScript.split(/\s+/).length}`;
+
+  try {
+    const response = await openaiRequest('chat/completions', {
+      model: 'gpt-4o-mini', // Use mini for cost efficiency
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
+      response_format: { type: 'json_object' },
+      temperature: 0.3
+    }, { timeout: 20000 });
+
+    CostTracker.track('script_analysis', 'gpt-4o-mini', 0.001);
+
+    const result = JSON.parse(response.choices[0].message.content);
+    
+    // Calculate overall score (weighted average)
+    const overallScore = Math.round(
+      (result.hookScore * 0.35) +      // Hook is most important for Shorts
+      (result.retentionScore * 0.30) +
+      (result.pacingScore * 0.20) +
+      (result.engagementScore * 0.15)
+    );
+
+    console.log(`✅ [Script Analysis] Analysis complete. Overall: ${overallScore}/100`);
+
+    return {
+      ...result,
+      overallScore
+    };
+  } catch (error) {
+    console.error(`❌ [Script Analysis] Failed:`, (error as Error).message);
+    
+    // Return basic analysis on failure
+    return {
+      hookScore: 70,
+      hookFeedback: 'Analysis unavailable - check script manually',
+      retentionScore: 70,
+      retentionFeedback: 'Analysis unavailable',
+      pacingScore: 70,
+      pacingFeedback: 'Analysis unavailable',
+      engagementScore: 70,
+      engagementFeedback: 'Analysis unavailable',
+      overallScore: 70,
+      suggestions: ['Unable to analyze - review script manually'],
+      strengths: ['Script generated successfully']
+    };
+  }
 };

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
-import { ChannelConfig, CharacterProfile, StoredVideo, Channel, UserProfile, Production, RenderConfig, DEFAULT_RENDER_CONFIG, ShotstackTransitionType, ShotstackEffectType, ShotstackFilterType } from '../types';
+import { ChannelConfig, CharacterProfile, StoredVideo, Channel, UserProfile, Production, RenderConfig, DEFAULT_RENDER_CONFIG, DEFAULT_ETHICAL_GUARDRAILS, ShotstackTransitionType, ShotstackEffectType, ShotstackFilterType } from '../types';
 import { fetchVideosFromDB, saveConfigToDB, getAllChannels, saveChannel, getChannelById, uploadImageToStorage, getIncompleteProductions, getAllProductions, getPublishedProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction, updateSegmentStatus, saveProduction, saveVideoToDB, connectYouTube } from '../services/supabaseService';
 import { uploadVideoToYouTube } from '../services/youtubeService';
 import { generateSeedImage } from '../services/geminiService';
@@ -1395,6 +1395,241 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                   💡 Generate or upload reference images for each host. These images help maintain visual consistency across all video segments.
                   The prompts are still used for scene-specific variations.
                 </p>
+              </div>
+            </div>
+
+            {/* Ethical Guardrails (v2.6) */}
+            <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
+              <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+                <span className="text-red-500">🛡️</span> Ethical Guardrails
+              </h3>
+              <p className="text-sm text-gray-400 mb-4">
+                Configure how the AI handles sensitive topics and humor. These rules ensure content remains appropriate while maintaining your channel's style.
+              </p>
+
+              <div className="space-y-6">
+                {/* Enable/Disable */}
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={tempConfig.ethicalGuardrails?.enabled ?? true}
+                    onChange={(e) => setTempConfig({
+                      ...tempConfig,
+                      ethicalGuardrails: {
+                        ...DEFAULT_ETHICAL_GUARDRAILS,
+                        ...tempConfig.ethicalGuardrails,
+                        enabled: e.target.checked
+                      }
+                    })}
+                    className="w-5 h-5 accent-red-500"
+                  />
+                  <span className="text-white font-medium">Enable Ethical Guardrails</span>
+                </label>
+
+                {(tempConfig.ethicalGuardrails?.enabled ?? true) && (
+                  <>
+                    {/* Sensitive Topics */}
+                    <div className="border border-[#333] rounded-lg p-4">
+                      <h4 className="text-sm font-bold text-gray-300 mb-3">📰 Sensitive Topic Handling</h4>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        {/* Deaths */}
+                        <div className="space-y-1">
+                          <label className="text-xs text-gray-400 block">Deaths/Tragedies</label>
+                          <select
+                            value={tempConfig.ethicalGuardrails?.sensitiveTopics?.deaths || 'empathetic'}
+                            onChange={(e) => setTempConfig({
+                              ...tempConfig,
+                              ethicalGuardrails: {
+                                ...DEFAULT_ETHICAL_GUARDRAILS,
+                                ...tempConfig.ethicalGuardrails,
+                                sensitiveTopics: {
+                                  ...DEFAULT_ETHICAL_GUARDRAILS.sensitiveTopics,
+                                  ...tempConfig.ethicalGuardrails?.sensitiveTopics,
+                                  deaths: e.target.value as any
+                                }
+                              }
+                            })}
+                            className="w-full bg-[#111] border border-[#333] rounded px-2 py-1.5 text-white text-sm"
+                          >
+                            <option value="empathetic">😢 Empathetic</option>
+                            <option value="factual">📋 Factual Only</option>
+                            <option value="avoid">🚫 Avoid Topic</option>
+                          </select>
+                        </div>
+
+                        {/* Violence */}
+                        <div className="space-y-1">
+                          <label className="text-xs text-gray-400 block">Violence</label>
+                          <select
+                            value={tempConfig.ethicalGuardrails?.sensitiveTopics?.violence || 'critical'}
+                            onChange={(e) => setTempConfig({
+                              ...tempConfig,
+                              ethicalGuardrails: {
+                                ...DEFAULT_ETHICAL_GUARDRAILS,
+                                ...tempConfig.ethicalGuardrails,
+                                sensitiveTopics: {
+                                  ...DEFAULT_ETHICAL_GUARDRAILS.sensitiveTopics,
+                                  ...tempConfig.ethicalGuardrails?.sensitiveTopics,
+                                  violence: e.target.value as any
+                                }
+                              }
+                            })}
+                            className="w-full bg-[#111] border border-[#333] rounded px-2 py-1.5 text-white text-sm"
+                          >
+                            <option value="critical">⚖️ Critical Analysis</option>
+                            <option value="factual">📋 Factual Only</option>
+                            <option value="avoid">🚫 Avoid Topic</option>
+                          </select>
+                        </div>
+
+                        {/* Politics */}
+                        <div className="space-y-1">
+                          <label className="text-xs text-gray-400 block">Politics</label>
+                          <select
+                            value={tempConfig.ethicalGuardrails?.sensitiveTopics?.politics || 'satirical'}
+                            onChange={(e) => setTempConfig({
+                              ...tempConfig,
+                              ethicalGuardrails: {
+                                ...DEFAULT_ETHICAL_GUARDRAILS,
+                                ...tempConfig.ethicalGuardrails,
+                                sensitiveTopics: {
+                                  ...DEFAULT_ETHICAL_GUARDRAILS.sensitiveTopics,
+                                  ...tempConfig.ethicalGuardrails?.sensitiveTopics,
+                                  politics: e.target.value as any
+                                }
+                              }
+                            })}
+                            className="w-full bg-[#111] border border-[#333] rounded px-2 py-1.5 text-white text-sm"
+                          >
+                            <option value="satirical">🎭 Satirical</option>
+                            <option value="neutral">⚖️ Neutral</option>
+                            <option value="avoid">🚫 Avoid Topic</option>
+                          </select>
+                        </div>
+
+                        {/* Health */}
+                        <div className="space-y-1">
+                          <label className="text-xs text-gray-400 block">Health Topics</label>
+                          <select
+                            value={tempConfig.ethicalGuardrails?.sensitiveTopics?.health || 'cautious'}
+                            onChange={(e) => setTempConfig({
+                              ...tempConfig,
+                              ethicalGuardrails: {
+                                ...DEFAULT_ETHICAL_GUARDRAILS,
+                                ...tempConfig.ethicalGuardrails,
+                                sensitiveTopics: {
+                                  ...DEFAULT_ETHICAL_GUARDRAILS.sensitiveTopics,
+                                  ...tempConfig.ethicalGuardrails?.sensitiveTopics,
+                                  health: e.target.value as any
+                                }
+                              }
+                            })}
+                            className="w-full bg-[#111] border border-[#333] rounded px-2 py-1.5 text-white text-sm"
+                          >
+                            <option value="cautious">⚠️ Cautious</option>
+                            <option value="factual">📋 Factual Only</option>
+                            <option value="avoid">🚫 Avoid Topic</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Humor Rules */}
+                    <div className="border border-[#333] rounded-lg p-4">
+                      <h4 className="text-sm font-bold text-gray-300 mb-3">😂 Humor & Satire Rules</h4>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={tempConfig.ethicalGuardrails?.humorRules?.targetCompanies ?? true}
+                            onChange={(e) => setTempConfig({
+                              ...tempConfig,
+                              ethicalGuardrails: {
+                                ...DEFAULT_ETHICAL_GUARDRAILS,
+                                ...tempConfig.ethicalGuardrails,
+                                humorRules: {
+                                  ...DEFAULT_ETHICAL_GUARDRAILS.humorRules,
+                                  ...tempConfig.ethicalGuardrails?.humorRules,
+                                  targetCompanies: e.target.checked
+                                }
+                              }
+                            })}
+                            className="w-4 h-4 accent-green-500"
+                          />
+                          <span className="text-sm text-gray-300">🏢 Companies</span>
+                        </label>
+
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={tempConfig.ethicalGuardrails?.humorRules?.targetPoliticians ?? true}
+                            onChange={(e) => setTempConfig({
+                              ...tempConfig,
+                              ethicalGuardrails: {
+                                ...DEFAULT_ETHICAL_GUARDRAILS,
+                                ...tempConfig.ethicalGuardrails,
+                                humorRules: {
+                                  ...DEFAULT_ETHICAL_GUARDRAILS.humorRules,
+                                  ...tempConfig.ethicalGuardrails?.humorRules,
+                                  targetPoliticians: e.target.checked
+                                }
+                              }
+                            })}
+                            className="w-4 h-4 accent-green-500"
+                          />
+                          <span className="text-sm text-gray-300">🏛️ Politicians</span>
+                        </label>
+
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={tempConfig.ethicalGuardrails?.humorRules?.targetInstitutions ?? true}
+                            onChange={(e) => setTempConfig({
+                              ...tempConfig,
+                              ethicalGuardrails: {
+                                ...DEFAULT_ETHICAL_GUARDRAILS,
+                                ...tempConfig.ethicalGuardrails,
+                                humorRules: {
+                                  ...DEFAULT_ETHICAL_GUARDRAILS.humorRules,
+                                  ...tempConfig.ethicalGuardrails?.humorRules,
+                                  targetInstitutions: e.target.checked
+                                }
+                              }
+                            })}
+                            className="w-4 h-4 accent-green-500"
+                          />
+                          <span className="text-sm text-gray-300">🏫 Institutions</span>
+                        </label>
+
+                        <div className="flex items-center gap-2 bg-red-900/20 px-3 py-1 rounded border border-red-500/30">
+                          <span className="text-red-400">🚫</span>
+                          <span className="text-sm text-red-300">Never victims</span>
+                        </div>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-2">
+                        ✅ Checked = OK to satirize | The AI will NEVER make jokes about individual victims
+                      </p>
+                    </div>
+
+                    {/* Custom Instructions */}
+                    <div>
+                      <label className="text-sm text-gray-400 block mb-1">Custom AI Instructions (optional)</label>
+                      <textarea
+                        value={tempConfig.ethicalGuardrails?.customInstructions || ''}
+                        onChange={(e) => setTempConfig({
+                          ...tempConfig,
+                          ethicalGuardrails: {
+                            ...DEFAULT_ETHICAL_GUARDRAILS,
+                            ...tempConfig.ethicalGuardrails,
+                            customInstructions: e.target.value
+                          }
+                        })}
+                        className="w-full bg-[#111] border border-[#333] p-2 rounded text-white h-20"
+                        placeholder="Add any specific ethical guidelines for your channel..."
+                      />
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 
