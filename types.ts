@@ -187,6 +187,10 @@ export interface RenderConfig {
     showDate: boolean;
     showHostNames: boolean;
     showLiveIndicator: boolean;
+    // Subtitles
+    showSubtitles: boolean;
+    subtitleStyle: 'minimal' | 'boxed' | 'outline';
+    subtitlePosition: 'bottom' | 'center' | 'top';
   };
   
   // Background Music
@@ -240,7 +244,10 @@ export const DEFAULT_RENDER_CONFIG: RenderConfig = {
     showBreakingNews: false,
     showDate: true,
     showHostNames: true,
-    showLiveIndicator: false
+    showLiveIndicator: false,
+    showSubtitles: false,
+    subtitleStyle: 'boxed',
+    subtitlePosition: 'bottom'
   },
   backgroundMusic: {
     enabled: false,

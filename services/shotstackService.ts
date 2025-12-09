@@ -560,6 +560,7 @@ export interface PodcastScene {
   title: string;
   duration: number; // Duration in seconds (from video metadata or estimate)
   speaker?: string; // Optional speaker name
+  text?: string;    // Optional text/dialogue for subtitles
 }
 
 /**
@@ -657,9 +658,37 @@ export const buildPodcastStyleEdit = (
   // TRACK 1 (Base): Video clips
   tracks.push({ clips: videoClips });
 
+  // === FORMAT-SPECIFIC OVERLAY PRESETS ===
+  // Adjust sizes and positions based on aspect ratio
+  const isVertical = aspectRatio === '9:16' || aspectRatio === '4:5';
+  const overlayPresets = isVertical ? {
+    // 9:16 / 4:5 (Vertical - Shorts/Reels/TikTok)
+    lowerThird: {
+      banner: { width: 1000, height: 100, y: -0.42 },
+      badge: { width: 280, height: 70, x: 0, y: -0.36, fontSize: 24 },
+      headline: { width: 900, height: 80, x: 0, y: -0.42, fontSize: 26 }
+    },
+    date: { x: 0.38, y: 0.46, fontSize: 18 },
+    live: { x: -0.38, y: 0.46, fontSize: 20 },
+    branding: { x: 0.38, y: 0.42, fontSize: 16 },
+    breakingNews: { width: 500, height: 50, y: 0.38, fontSize: 24 }
+  } : {
+    // 16:9 (Landscape - YouTube)
+    lowerThird: {
+      banner: { width: 1920, height: 120, y: -0.42 },
+      badge: { width: 350, height: 90, x: -0.35, y: -0.42, fontSize: 36 },
+      headline: { width: 1100, height: 90, x: 0.12, y: -0.42, fontSize: 34 }
+    },
+    date: { x: 0.44, y: 0.46, fontSize: 22 },
+    live: { x: -0.44, y: 0.46, fontSize: 24 },
+    branding: { x: 0.44, y: 0.42, fontSize: 18 },
+    breakingNews: { width: 550, height: 55, y: 0.44, fontSize: 30 }
+  };
+
   // === NEWS-STYLE OVERLAYS ===
   if (config.newsStyle?.enabled) {
     const newsConfig = config.newsStyle;
+    const presets = overlayPresets;
     
     // TRACK 2: Lower Third Banner (if enabled)
     if (newsConfig.lowerThird?.enabled) {
@@ -677,56 +706,79 @@ export const buildPodcastStyleEdit = (
             text: '',
             alignment: { horizontal: 'center', vertical: 'center' },
             font: { color: '#000000', family: 'Montserrat SemiBold', size: 24, lineHeight: 1 },
-            width: 2200,
-            height: 162,
+            width: presets.lowerThird.banner.width,
+            height: presets.lowerThird.banner.height,
             background: { color: primaryColor }
           },
           start: 0.4,
           length: totalDuration,
-          offset: { x: 0, y: -0.39 },
+          offset: { x: 0, y: presets.lowerThird.banner.y },
           position: 'center',
-          transition: { in: 'slideRight' }
+          transition: { in: 'slideUp' }
         }]
       });
 
-      // Category badge background (black box)
-      tracks.unshift({
-        clips: [{
-          asset: {
-            type: 'text',
-            text: '',
-            alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: '#000000', family: 'Montserrat SemiBold', size: 24, lineHeight: 1 },
-            width: 430,
-            height: 120,
-            background: { color: secondaryColor }
-          },
-          start: 0.8,
-          length: totalDuration,
-          offset: { x: -0.38, y: -0.39 },
-          position: 'center',
-          transition: { in: 'slideRight' }
-        }]
-      });
+      // Category badge background (colored box) - positioned above the banner for vertical
+      if (isVertical) {
+        // For vertical: badge on TOP of banner
+        tracks.unshift({
+          clips: [{
+            asset: {
+              type: 'text',
+              text: category,
+              alignment: { horizontal: 'center', vertical: 'center' },
+              font: { color: textColor, family: 'Oswald', size: presets.lowerThird.badge.fontSize, lineHeight: 1 },
+              width: presets.lowerThird.badge.width,
+              height: presets.lowerThird.badge.height,
+              background: { color: secondaryColor }
+            },
+            start: 0.6,
+            length: totalDuration,
+            offset: { x: presets.lowerThird.badge.x, y: presets.lowerThird.badge.y },
+            position: 'center',
+            transition: { in: 'slideUp' }
+          }]
+        });
+      } else {
+        // For landscape: badge on LEFT side of banner
+        tracks.unshift({
+          clips: [{
+            asset: {
+              type: 'text',
+              text: '',
+              alignment: { horizontal: 'center', vertical: 'center' },
+              font: { color: '#000000', family: 'Montserrat SemiBold', size: 24, lineHeight: 1 },
+              width: presets.lowerThird.badge.width,
+              height: presets.lowerThird.badge.height,
+              background: { color: secondaryColor }
+            },
+            start: 0.6,
+            length: totalDuration,
+            offset: { x: presets.lowerThird.badge.x, y: presets.lowerThird.badge.y },
+            position: 'center',
+            transition: { in: 'slideRight' }
+          }]
+        });
 
-      // Category text (e.g., "BREAKING NEWS")
-      tracks.unshift({
-        clips: [{
-          asset: {
-            type: 'text',
-            text: category,
-            alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: textColor, family: 'Oswald', size: 42, lineHeight: 1 },
-            width: 400,
-            height: 100
-          },
-          start: 1,
-          length: totalDuration,
-          offset: { x: -0.38, y: -0.39 },
-          position: 'center',
-          transition: { in: 'slideRight' }
-        }]
-      });
+        // Category text (e.g., "BREAKING NEWS") - only for landscape
+        tracks.unshift({
+          clips: [{
+            asset: {
+              type: 'text',
+              text: category,
+              alignment: { horizontal: 'center', vertical: 'center' },
+              font: { color: textColor, family: 'Oswald', size: presets.lowerThird.badge.fontSize, lineHeight: 1 },
+              width: presets.lowerThird.badge.width - 20,
+              height: presets.lowerThird.badge.height - 10
+            },
+            start: 0.8,
+            length: totalDuration,
+            offset: { x: presets.lowerThird.badge.x, y: presets.lowerThird.badge.y },
+            position: 'center',
+            transition: { in: 'slideRight' }
+          }]
+        });
+      }
 
       // Headline text
       if (headline) {
@@ -735,16 +787,16 @@ export const buildPodcastStyleEdit = (
             asset: {
               type: 'text',
               text: headline,
-              alignment: { horizontal: 'left', vertical: 'center' },
-              font: { color: textColor, family: 'Roboto Medium', size: 40, lineHeight: 1 },
-              width: 1200,
-              height: 120
+              alignment: { horizontal: isVertical ? 'center' : 'left', vertical: 'center' },
+              font: { color: textColor, family: 'Roboto Medium', size: presets.lowerThird.headline.fontSize, lineHeight: 1.1 },
+              width: presets.lowerThird.headline.width,
+              height: presets.lowerThird.headline.height
             },
-            start: 1.2,
+            start: 1,
             length: totalDuration,
-            offset: { x: 0.15, y: -0.39 },
+            offset: { x: presets.lowerThird.headline.x, y: presets.lowerThird.headline.y },
             position: 'center',
-            transition: { in: 'slideRight' }
+            transition: { in: isVertical ? 'slideUp' : 'slideRight' }
           }]
         });
       }
@@ -759,13 +811,13 @@ export const buildPodcastStyleEdit = (
             type: 'text',
             text: dateText,
             alignment: { horizontal: 'right', vertical: 'center' },
-            font: { color: '#ffffff', family: 'Roboto', size: 24, lineHeight: 1 },
-            width: 300,
-            height: 50
+            font: { color: '#ffffff', family: 'Roboto', size: presets.date.fontSize, lineHeight: 1 },
+            width: 200,
+            height: 40
           },
           start: 1.5,
           length: totalDuration,
-          offset: { x: 0.42, y: 0.44 },
+          offset: { x: presets.date.x, y: presets.date.y },
           position: 'center',
           transition: { in: 'fade' }
         }]
@@ -780,13 +832,13 @@ export const buildPodcastStyleEdit = (
             type: 'text',
             text: '🔴 LIVE',
             alignment: { horizontal: 'left', vertical: 'center' },
-            font: { color: '#ff0000', family: 'Roboto Bold', size: 28, lineHeight: 1 },
-            width: 150,
-            height: 50
+            font: { color: '#ff0000', family: 'Roboto Bold', size: presets.live.fontSize, lineHeight: 1 },
+            width: 120,
+            height: 40
           },
           start: 0.5,
           length: totalDuration,
-          offset: { x: -0.42, y: 0.44 },
+          offset: { x: presets.live.x, y: presets.live.y },
           position: 'center',
           transition: { in: 'fade' }
         }]
@@ -802,14 +854,14 @@ export const buildPodcastStyleEdit = (
             type: 'text',
             text: breakingText,
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: '#ffffff', family: 'Oswald', size: 36, lineHeight: 1 },
-            width: 600,
-            height: 60,
+            font: { color: '#ffffff', family: 'Oswald', size: presets.breakingNews.fontSize, lineHeight: 1 },
+            width: presets.breakingNews.width,
+            height: presets.breakingNews.height,
             background: { color: '#cc0000' }
           },
           start: 0,
           length: 5, // Show for 5 seconds at start
-          offset: { x: 0, y: 0.42 },
+          offset: { x: 0, y: presets.breakingNews.y },
           position: 'center',
           transition: { in: 'slideDown', out: 'fade' }
         }]
@@ -824,17 +876,165 @@ export const buildPodcastStyleEdit = (
             type: 'text',
             text: options.channelName.toUpperCase(),
             alignment: { horizontal: 'right', vertical: 'center' },
-            font: { color: '#ffcc00', family: 'Oswald', size: 20, lineHeight: 1 },
-            width: 200,
-            height: 40
+            font: { color: '#ffcc00', family: 'Oswald', size: presets.branding.fontSize, lineHeight: 1 },
+            width: 180,
+            height: 35
           },
           start: 2,
           length: totalDuration,
-          offset: { x: 0.42, y: 0.40 },
+          offset: { x: presets.branding.x, y: presets.branding.y },
           position: 'center',
           transition: { in: 'fade' }
         }]
       });
+    }
+  }
+
+  // === HOST NAMES TRACK ===
+  // Show speaker name when they start talking
+  if (config.overlays?.showHostNames && scenesWithTiming.length > 0) {
+    const hostNameClips: any[] = [];
+    const hostNamePresets = isVertical 
+      ? { y: -0.30, fontSize: 18, width: 300, height: 45 }
+      : { y: -0.32, fontSize: 22, width: 350, height: 50 };
+    
+    scenesWithTiming.forEach((scene) => {
+      if (scene.speaker) {
+        hostNameClips.push({
+          asset: {
+            type: 'text',
+            text: `🎙️ ${scene.speaker.toUpperCase()}`,
+            alignment: { horizontal: 'left', vertical: 'center' },
+            font: { 
+              color: '#ffffff', 
+              family: 'Roboto Medium', 
+              size: hostNamePresets.fontSize, 
+              lineHeight: 1 
+            },
+            width: hostNamePresets.width,
+            height: hostNamePresets.height,
+            background: { color: 'rgba(0,0,0,0.7)' }
+          },
+          start: scene.start + 0.3,
+          length: Math.min(3, scene.duration - 0.5), // Show for max 3 seconds
+          offset: { x: isVertical ? -0.25 : -0.35, y: hostNamePresets.y },
+          position: 'center',
+          transition: { in: 'fade', out: 'fade' }
+        });
+      }
+    });
+    
+    if (hostNameClips.length > 0) {
+      tracks.unshift({ clips: hostNameClips });
+    }
+  }
+
+  // === SUBTITLES TRACK ===
+  // Generate subtitle clips from scene text/dialogue
+  if (config.overlays?.showSubtitles && scenesWithTiming.length > 0) {
+    const subtitleClips: any[] = [];
+    const subtitleStyle = config.overlays.subtitleStyle || 'boxed';
+    const subtitlePosition = config.overlays.subtitlePosition || 'bottom';
+    
+    // Position presets based on format and position setting
+    const positionY = {
+      bottom: isVertical ? -0.25 : -0.28,
+      center: 0,
+      top: isVertical ? 0.35 : 0.38
+    }[subtitlePosition];
+    
+    const subtitlePresets = isVertical 
+      ? { fontSize: 22, width: 900, height: 120, maxChars: 50 }
+      : { fontSize: 28, width: 1400, height: 100, maxChars: 70 };
+    
+    // Style configurations
+    const styleConfig = {
+      minimal: { 
+        background: undefined, 
+        fontColor: '#ffffff',
+        stroke: undefined
+      },
+      boxed: { 
+        background: { color: 'rgba(0,0,0,0.75)' }, 
+        fontColor: '#ffffff',
+        stroke: undefined
+      },
+      outline: { 
+        background: undefined, 
+        fontColor: '#ffffff',
+        stroke: { color: '#000000', width: 2 }
+      }
+    }[subtitleStyle];
+    
+    scenesWithTiming.forEach((scene) => {
+      if (scene.text) {
+        // Split long text into chunks for readability
+        const words = scene.text.split(' ');
+        let currentChunk = '';
+        let chunkStart = scene.start;
+        const wordsPerSecond = 2.5; // Average speaking rate
+        const chunks: { text: string; start: number; duration: number }[] = [];
+        
+        words.forEach((word, idx) => {
+          const testChunk = currentChunk ? `${currentChunk} ${word}` : word;
+          
+          if (testChunk.length > subtitlePresets.maxChars || idx === words.length - 1) {
+            // Finalize current chunk
+            const finalText = testChunk.length > subtitlePresets.maxChars ? currentChunk : testChunk;
+            if (finalText) {
+              const wordCount = finalText.split(' ').length;
+              const chunkDuration = Math.max(1.5, wordCount / wordsPerSecond);
+              chunks.push({
+                text: finalText,
+                start: chunkStart,
+                duration: chunkDuration
+              });
+              chunkStart += chunkDuration;
+            }
+            currentChunk = testChunk.length > subtitlePresets.maxChars ? word : '';
+          } else {
+            currentChunk = testChunk;
+          }
+        });
+        
+        // Create subtitle clips for each chunk
+        chunks.forEach((chunk) => {
+          if (chunk.start < scene.start + scene.duration) {
+            const clipDuration = Math.min(chunk.duration, scene.start + scene.duration - chunk.start);
+            
+            const subtitleAsset: any = {
+              type: 'text',
+              text: chunk.text,
+              alignment: { horizontal: 'center', vertical: 'center' },
+              font: { 
+                color: styleConfig.fontColor, 
+                family: 'Roboto', 
+                size: subtitlePresets.fontSize, 
+                lineHeight: 1.2 
+              },
+              width: subtitlePresets.width,
+              height: subtitlePresets.height
+            };
+            
+            if (styleConfig.background) {
+              subtitleAsset.background = styleConfig.background;
+            }
+            
+            subtitleClips.push({
+              asset: subtitleAsset,
+              start: chunk.start,
+              length: clipDuration,
+              offset: { x: 0, y: positionY },
+              position: 'center',
+              transition: { in: 'fade', out: 'fade' }
+            });
+          }
+        });
+      }
+    });
+    
+    if (subtitleClips.length > 0) {
+      tracks.unshift({ clips: subtitleClips });
     }
   }
 
@@ -1364,7 +1564,8 @@ export const renderProductionToShotstack = async (
       video_url: status.videoUrl,
       title,
       duration: segment?.audioDuration || estimatedDuration,
-      speaker
+      speaker,
+      text // Include text for subtitles
     });
   }
 

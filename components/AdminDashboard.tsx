@@ -2706,6 +2706,70 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                     )}
                   </div>
 
+                  {/* Subtitles */}
+                  <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
+                    <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+                      <span className="text-xl">💬</span> Subtitles
+                    </h3>
+                    <p className="text-sm text-gray-400 mb-4">
+                      Display the dialogue text as subtitles during playback.
+                    </p>
+                    
+                    <div className="space-y-4">
+                      <label className="flex items-center gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={renderConfig.overlays.showSubtitles || false}
+                          onChange={(e) => updateRenderConfig({
+                            overlays: { ...renderConfig.overlays, showSubtitles: e.target.checked }
+                          })}
+                          className="w-5 h-5 accent-green-500"
+                        />
+                        <span className="text-white font-medium">Enable Subtitles</span>
+                      </label>
+
+                      {renderConfig.overlays.showSubtitles && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pl-8">
+                          <div className="space-y-2">
+                            <label className="text-sm text-gray-400 block">Subtitle Style</label>
+                            <select
+                              value={renderConfig.overlays.subtitleStyle || 'boxed'}
+                              onChange={(e) => updateRenderConfig({
+                                overlays: { ...renderConfig.overlays, subtitleStyle: e.target.value as any }
+                              })}
+                              className="w-full bg-[#111] border border-[#333] rounded-lg px-3 py-2 text-white"
+                            >
+                              <option value="minimal">Minimal (Text only)</option>
+                              <option value="boxed">Boxed (Dark background) ⭐</option>
+                              <option value="outline">Outline (Text with stroke)</option>
+                            </select>
+                          </div>
+
+                          <div className="space-y-2">
+                            <label className="text-sm text-gray-400 block">Position</label>
+                            <select
+                              value={renderConfig.overlays.subtitlePosition || 'bottom'}
+                              onChange={(e) => updateRenderConfig({
+                                overlays: { ...renderConfig.overlays, subtitlePosition: e.target.value as any }
+                              })}
+                              className="w-full bg-[#111] border border-[#333] rounded-lg px-3 py-2 text-white"
+                            >
+                              <option value="bottom">Bottom ⭐</option>
+                              <option value="center">Center</option>
+                              <option value="top">Top</option>
+                            </select>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="mt-3 p-3 bg-green-900/20 border border-green-500/30 rounded-lg">
+                        <p className="text-xs text-green-300">
+                          💡 Subtitles will display the dialogue from each segment. The text is automatically chunked for readability.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
                   {/* Background Music */}
                   <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
                     <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
@@ -2998,6 +3062,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                             renderConfig.overlays.showDate && '📅',
                             renderConfig.overlays.showHostNames && '🎙️',
                             renderConfig.overlays.showLiveIndicator && '📡',
+                            renderConfig.overlays.showSubtitles && '💬',
                             renderConfig.newsStyle?.showChannelBranding && '🏷️'
                           ].filter(Boolean).join(' ') || 'None'}
                         </div>
