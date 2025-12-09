@@ -1508,49 +1508,85 @@ const App: React.FC = () => {
       setCurrentProductionId(fullProduction.id);
       setSelectedDate(fullProduction.news_date);
 
-      // Ensure wizard_state exists, create one if missing (for older productions)
+      // IMPROVED: Better wizard_state initialization with comprehensive analysis
       if (!fullProduction.wizard_state) {
-        // Determine the current step based on existing data
+        // Analyze existing data to determine state
+        const hasNews = (fullProduction.fetched_news?.length || 0) > 0;
+        const hasSelection = (fullProduction.selected_news_ids?.length || 0) > 0;
+        const hasScenes = !!fullProduction.scenes?.scenes;
+        const hasSegments = (fullProduction.segments?.length || 0) > 0;
+        
+        const segmentStatus = fullProduction.segment_status || {};
+        const audioStatuses = Object.values(segmentStatus).map(s => s?.audio);
+        const videoStatuses = Object.values(segmentStatus).map(s => s?.video);
+        
+        const allAudiosDone = hasSegments && audioStatuses.length > 0 && audioStatuses.every(s => s === 'done');
+        const allVideosDone = hasSegments && videoStatuses.length > 0 && videoStatuses.every(s => s === 'done');
+        const anyAudioDone = audioStatuses.some(s => s === 'done');
+        const anyVideoDone = videoStatuses.some(s => s === 'done');
+        const anyAudioPending = audioStatuses.some(s => s === 'pending' || !s);
+        const anyVideoPending = videoStatuses.some(s => s === 'pending' || !s);
+        
+        // Determine optimal starting step - prioritize pending regenerations
         let currentStep: ProductionStep = 'news_fetch';
         
-        if (fullProduction.fetched_news?.length || fullProduction.selected_news_ids?.length) {
-          currentStep = 'news_select';
-        }
-        if (fullProduction.selected_news_ids?.length && fullProduction.scenes?.scenes) {
-          currentStep = 'script_review';
-        }
-        if (fullProduction.segments?.length) {
-          const hasAnyAudio = Object.values(fullProduction.segment_status || {}).some(s => s?.audio === 'done');
-          if (hasAnyAudio) {
+        if (fullProduction.youtube_id) {
+          // Already published - check for pending work, otherwise done
+          if (anyAudioPending && hasSegments) {
             currentStep = 'audio_generate';
-          }
-          const hasAnyVideo = Object.values(fullProduction.segment_status || {}).some(s => s?.video === 'done');
-          if (hasAnyVideo) {
+          } else if (anyVideoPending && anyAudioDone) {
             currentStep = 'video_generate';
+          } else {
+            currentStep = 'done';
           }
-        }
-        if (fullProduction.final_video_url) {
-          currentStep = 'publish';
+        } else if (fullProduction.final_video_url) {
+          // Has video but not published - check for pending work
+          if (anyAudioPending && hasSegments) {
+            currentStep = 'audio_generate';
+          } else if (anyVideoPending && anyAudioDone) {
+            currentStep = 'video_generate';
+          } else {
+            currentStep = 'publish';
+          }
+        } else if (allVideosDone) {
+          currentStep = 'render_final';
+        } else if (anyVideoDone || allAudiosDone) {
+          currentStep = anyVideoPending ? 'video_generate' : 'render_final';
+        } else if (anyAudioDone || hasSegments) {
+          currentStep = 'audio_generate';
+        } else if (hasScenes) {
+          currentStep = 'script_review';
+        } else if (hasSelection) {
+          currentStep = 'script_generate';
+        } else if (hasNews) {
+          currentStep = 'news_select';
         }
         
         fullProduction.wizard_state = {
           currentStep,
-          newsFetch: { status: fullProduction.fetched_news?.length ? 'completed' : 'pending' },
-          newsSelect: { status: fullProduction.selected_news_ids?.length ? 'completed' : 'pending' },
-          scriptGenerate: { status: fullProduction.scenes?.scenes ? 'completed' : 'pending' },
-          scriptReview: { status: fullProduction.scenes?.scenes ? 'completed' : 'pending' },
-          audioGenerate: { status: 'pending' },
-          videoGenerate: { status: 'pending' },
+          newsFetch: { status: hasNews ? 'completed' : 'pending' },
+          newsSelect: { status: hasSelection ? 'completed' : 'pending' },
+          scriptGenerate: { status: hasScenes ? 'completed' : 'pending' },
+          scriptReview: { status: hasSegments ? 'completed' : 'pending' },
+          audioGenerate: { status: allAudiosDone ? 'completed' : anyAudioDone ? 'in_progress' : 'pending' },
+          videoGenerate: { status: allVideosDone ? 'completed' : anyVideoDone ? 'in_progress' : 'pending' },
           renderFinal: { status: fullProduction.final_video_url ? 'completed' : 'pending' },
           publish: { status: fullProduction.youtube_id ? 'completed' : 'pending' }
         };
+        
+        // Save the computed wizard_state to DB
+        await saveProduction({ id: fullProduction.id, wizard_state: fullProduction.wizard_state });
       }
 
       // Open the wizard with the production
       setWizardProduction(fullProduction);
       setShowWizard(true);
       
-      logger.info('production', 'Production opened in wizard', { id: fullProduction.id });
+      logger.info('production', 'Production opened in wizard', { 
+        id: fullProduction.id,
+        step: fullProduction.wizard_state?.currentStep,
+        status: fullProduction.status
+      });
     } catch (error) {
       logger.error('production', 'Error resuming production', { error: (error as Error).message });
       toast.error('Failed to resume production');

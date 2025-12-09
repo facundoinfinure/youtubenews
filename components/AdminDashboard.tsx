@@ -1906,6 +1906,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                                   
                                   {/* Action Buttons for Completed */}
                                   <div className="flex flex-wrap gap-2">
+                                    {/* Edit in Wizard - for regenerating segments */}
+                                    {onResumeProduction && (
+                                      <button
+                                        onClick={() => { onResumeProduction(production); onExit(); }}
+                                        className="bg-purple-600 hover:bg-purple-500 text-white px-4 py-2 rounded-lg text-sm font-medium"
+                                      >
+                                        🔧 Editar en Wizard
+                                      </button>
+                                    )}
+                                    
                                     {/* Re-render */}
                                     <button
                                       onClick={async () => {

@@ -40,14 +40,16 @@ interface ProductionWizardProps {
 }
 
 // =============================================================================================
-// STEP INDICATOR COMPONENT
+// STEP INDICATOR COMPONENT - with clickable navigation
 // =============================================================================================
 
 const StepIndicator: React.FC<{
   steps: ProductionStep[];
   currentStep: ProductionStep;
   wizardState: ProductionWizardState;
-}> = ({ steps, currentStep, wizardState }) => {
+  onStepClick?: (step: ProductionStep) => void;
+  canNavigate?: (step: ProductionStep) => boolean;
+}> = ({ steps, currentStep, wizardState, onStepClick, canNavigate }) => {
   const getStepStatus = (step: ProductionStep): SubStepStatus => {
     const stepKey = step.replace('_', '') as keyof ProductionWizardState;
     const stepState = wizardState[stepKey as keyof Omit<ProductionWizardState, 'currentStep'>];
@@ -64,11 +66,13 @@ const StepIndicator: React.FC<{
           const status = getStepStatus(step);
           const isCurrent = step === currentStep;
           const stepNum = index + 1;
+          const isNavigable = canNavigate?.(step) ?? (status === 'completed');
           
           return (
             <React.Fragment key={step}>
               <div className="flex flex-col items-center flex-shrink-0">
                 <div 
+                  onClick={() => isNavigable && onStepClick?.(step)}
                   className={`
                     w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center font-bold text-xs sm:text-sm
                     transition-all duration-300
@@ -76,14 +80,20 @@ const StepIndicator: React.FC<{
                     ${status === 'in_progress' || isCurrent ? 'bg-cyan-500 text-white ring-2 sm:ring-4 ring-cyan-500/30' : ''}
                     ${status === 'failed' ? 'bg-red-500 text-white' : ''}
                     ${status === 'pending' && !isCurrent ? 'bg-gray-700 text-gray-400' : ''}
+                    ${isNavigable && !isCurrent ? 'cursor-pointer hover:ring-2 hover:ring-white/30 hover:scale-110' : ''}
                   `}
+                  title={isNavigable ? `Ir a: ${getStepDisplayName(step)}` : undefined}
                 >
                   {status === 'completed' ? '✓' : stepNum}
                 </div>
-                <span className={`
-                  text-[10px] sm:text-xs mt-1 sm:mt-2 text-center max-w-[50px] sm:max-w-[80px] leading-tight
-                  ${isCurrent ? 'text-cyan-400 font-medium' : 'text-gray-500'}
-                `}>
+                <span 
+                  onClick={() => isNavigable && onStepClick?.(step)}
+                  className={`
+                    text-[10px] sm:text-xs mt-1 sm:mt-2 text-center max-w-[50px] sm:max-w-[80px] leading-tight
+                    ${isCurrent ? 'text-cyan-400 font-medium' : 'text-gray-500'}
+                    ${isNavigable && !isCurrent ? 'cursor-pointer hover:text-white' : ''}
+                  `}
+                >
                   {getStepDisplayName(step).split(' ').slice(1).join(' ')}
                 </span>
               </div>
@@ -365,6 +375,85 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
     'news_fetch', 'news_select', 'script_generate', 'script_review',
     'audio_generate', 'video_generate', 'render_final', 'publish', 'done'
   ];
+
+  // Helper to check if step can be navigated to
+  const canNavigateToStep = useCallback((step: ProductionStep): boolean => {
+    // Always allow going to current step
+    if (step === wizardState.currentStep) return true;
+    
+    // Get step statuses
+    const stepStates: Record<string, SubStepStatus> = {
+      'news_fetch': wizardState.newsFetch.status,
+      'news_select': wizardState.newsSelect.status,
+      'script_generate': wizardState.scriptGenerate.status,
+      'script_review': wizardState.scriptReview.status,
+      'audio_generate': wizardState.audioGenerate.status,
+      'video_generate': wizardState.videoGenerate.status,
+      'render_final': wizardState.renderFinal.status,
+      'publish': wizardState.publish.status,
+    };
+    
+    // Allow navigation to completed steps
+    if (stepStates[step] === 'completed') return true;
+    
+    // Check prerequisites for forward navigation
+    switch (step) {
+      case 'news_fetch': return true;
+      case 'news_select': return fetchedNews.length > 0;
+      case 'script_generate': return selectedNewsIds.length > 0;
+      case 'script_review': return !!production.scenes?.scenes;
+      case 'audio_generate': return !!production.segments?.length;
+      case 'video_generate': 
+        return Object.values(production.segment_status || {}).some(s => s?.audio === 'done');
+      case 'render_final':
+        return Object.values(production.segment_status || {}).some(s => s?.video === 'done');
+      case 'publish': return !!production.final_video_url;
+      default: return false;
+    }
+  }, [wizardState, fetchedNews, selectedNewsIds, production]);
+
+  // Handle step click navigation
+  const handleStepClick = useCallback(async (step: ProductionStep) => {
+    if (!canNavigateToStep(step)) {
+      toast.error('No puedes navegar a este paso aún');
+      return;
+    }
+    
+    if (step === wizardState.currentStep) return; // Already on this step
+    
+    const newState: ProductionWizardState = {
+      ...wizardState,
+      currentStep: step
+    };
+    await saveWizardState(newState);
+    toast.success(`Navegando a: ${getStepDisplayName(step)}`);
+  }, [wizardState, canNavigateToStep, saveWizardState]);
+
+  // Auto-detect and navigate to pending regenerations on mount
+  useEffect(() => {
+    const detectPendingWork = () => {
+      if (!production.segment_status) return;
+      
+      const statuses = Object.entries(production.segment_status);
+      const audiosPending = statuses.filter(([_, s]) => s.audio === 'pending').map(([i]) => parseInt(i));
+      const videosPending = statuses.filter(([_, s]) => s.video === 'pending' && s.audio === 'done').map(([i]) => parseInt(i));
+      
+      // If there are pending audios and we're past audio step, go back
+      if (audiosPending.length > 0 && ['video_generate', 'render_final', 'publish', 'done'].includes(wizardState.currentStep)) {
+        toast(`📌 ${audiosPending.length} audio(s) pendiente(s) de regeneración`, { icon: '🎙️' });
+        setWizardState(prev => ({ ...prev, currentStep: 'audio_generate' }));
+      }
+      // If there are pending videos and we're past video step
+      else if (videosPending.length > 0 && ['render_final', 'publish', 'done'].includes(wizardState.currentStep)) {
+        toast(`📌 ${videosPending.length} video(s) pendiente(s) de regeneración`, { icon: '🎬' });
+        setWizardState(prev => ({ ...prev, currentStep: 'video_generate' }));
+      }
+    };
+    
+    // Run detection after a short delay to allow state to settle
+    const timer = setTimeout(detectPendingWork, 500);
+    return () => clearTimeout(timer);
+  }, [production.id]); // Only on production change
 
   // Save wizard state to production - ONLY updates wizard_state, not other fields
   const saveWizardState = useCallback(async (newState: ProductionWizardState) => {
@@ -1336,13 +1425,21 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
       case 'audio_generate':
         const audioSegments = production.segments || [];
         const audioCompleted = Object.values(production.segment_status || {}).filter(s => s.audio === 'done').length;
+        const audioFailed = Object.values(production.segment_status || {}).filter(s => s.audio === 'failed').length;
         return (
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <h3 className="text-xl font-bold text-white">Generar Audios</h3>
-              <span className="text-sm text-gray-400">
-                {audioCompleted} / {audioSegments.length} completados
-              </span>
+              <div className="flex items-center gap-3">
+                {audioFailed > 0 && (
+                  <span className="text-sm text-red-400 bg-red-500/10 px-2 py-1 rounded">
+                    {audioFailed} fallido(s)
+                  </span>
+                )}
+                <span className="text-sm text-gray-400">
+                  {audioCompleted} / {audioSegments.length} completados
+                </span>
+              </div>
             </div>
             
             {/* Progress bar */}
@@ -1352,6 +1449,25 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
                 style={{ width: `${(audioCompleted / audioSegments.length) * 100}%` }}
               />
             </div>
+            
+            {/* Regenerate All Failed button */}
+            {audioFailed > 0 && !isLoading && (
+              <button
+                onClick={async () => {
+                  const failedIndices = Object.entries(production.segment_status || {})
+                    .filter(([_, s]) => s.audio === 'failed')
+                    .map(([i]) => parseInt(i));
+                  
+                  toast.success(`🔄 Regenerando ${failedIndices.length} audio(s) fallido(s)...`);
+                  for (const i of failedIndices) {
+                    await handleRegenerateAudio(i);
+                  }
+                }}
+                className="w-full bg-red-600/30 hover:bg-red-600 text-red-300 hover:text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+              >
+                🔄 Regenerar {audioFailed} Audio(s) Fallido(s)
+              </button>
+            )}
             
             <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2">
               {audioSegments.map((segment, i) => {
@@ -1411,13 +1527,21 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
       case 'video_generate':
         const videoSegments = production.segments || [];
         const videoCompleted = Object.values(production.segment_status || {}).filter(s => s.video === 'done').length;
+        const videoFailed = Object.values(production.segment_status || {}).filter(s => s.video === 'failed').length;
         return (
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <h3 className="text-xl font-bold text-white">Generar Videos</h3>
-              <span className="text-sm text-gray-400">
-                {videoCompleted} / {videoSegments.length} completados
-              </span>
+              <div className="flex items-center gap-3">
+                {videoFailed > 0 && (
+                  <span className="text-sm text-red-400 bg-red-500/10 px-2 py-1 rounded">
+                    {videoFailed} fallido(s)
+                  </span>
+                )}
+                <span className="text-sm text-gray-400">
+                  {videoCompleted} / {videoSegments.length} completados
+                </span>
+              </div>
             </div>
             
             <div className="h-3 bg-gray-700 rounded-full overflow-hidden">
@@ -1426,6 +1550,25 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
                 style={{ width: `${(videoCompleted / videoSegments.length) * 100}%` }}
               />
             </div>
+            
+            {/* Regenerate All Failed button */}
+            {videoFailed > 0 && !isLoading && (
+              <button
+                onClick={async () => {
+                  const failedIndices = Object.entries(production.segment_status || {})
+                    .filter(([_, s]) => s.video === 'failed')
+                    .map(([i]) => parseInt(i));
+                  
+                  toast.success(`🔄 Regenerando ${failedIndices.length} video(s) fallido(s)...`);
+                  for (const i of failedIndices) {
+                    await handleRegenerateVideo(i);
+                  }
+                }}
+                className="w-full bg-red-600/30 hover:bg-red-600 text-red-300 hover:text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+              >
+                🔄 Regenerar {videoFailed} Video(s) Fallido(s)
+              </button>
+            )}
             
             <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2">
               {videoSegments.map((segment, i) => {
@@ -1724,12 +1867,14 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
           </button>
         </div>
         
-        {/* Step Indicator */}
+        {/* Step Indicator - with clickable navigation */}
         <div className="p-2 sm:p-4 border-b border-[#333] bg-[#111]">
           <StepIndicator 
             steps={allSteps} 
             currentStep={wizardState.currentStep}
             wizardState={wizardState}
+            onStepClick={handleStepClick}
+            canNavigate={canNavigateToStep}
           />
         </div>
         
