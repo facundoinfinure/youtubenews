@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
-import { AppState, ChannelConfig, NewsItem, BroadcastSegment, VideoAssets, ViralMetadata, UserProfile, Channel, ScriptLine, StoredVideo, ScriptWithScenes, NarrativeType, Production, ProductionWizardState } from './types';
+import { AppState, ChannelConfig, NewsItem, BroadcastSegment, VideoAssets, ViralMetadata, UserProfile, Channel, ScriptLine, StoredVideo, ScriptWithScenes, NarrativeType, Production, ProductionWizardState, ProductionStep } from './types';
 import { signInWithGoogle, getSession, signOut, getAllChannels, saveChannel, getChannelById, saveVideoToDB, getNewsByDate, saveNewsToDB, markNewsAsSelected, deleteVideoFromDB, supabase, fetchVideosFromDB, saveProduction, getIncompleteProductions, getProductionById, updateProductionStatus, uploadAudioToStorage, uploadImageToStorage, getAudioFromStorage, findCachedScript, findCachedScriptWithScenes, findCachedAudio, getAllProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction, verifyStorageBucket, getCompletedProductionsWithVideoInfo, ProductionWithVideoInfo, getUsedNewsIdsForDate, saveCheckpoint, getLastCheckpoint, markStepFailed, saveCachedAudio, updateSegmentStatus, getSegmentsNeedingRegeneration, getDefaultChannelConfig } from './services/supabaseService';
 import { fetchEconomicNews, generateScript, generateScriptWithScenes, convertScenesToScriptLines, generateSegmentedAudio, generateSegmentedAudioWithCache, generateAudioFromScenes, ExtendedBroadcastSegment, setFindCachedAudioFunction, generateBroadcastVisuals, generateViralMetadata, generateThumbnail, generateThumbnailVariants, generateViralHook, generateVideoSegmentsWithInfiniteTalk, composeVideoWithShotstack, isCompositionAvailable, getCompositionStatus } from './services/geminiService';
 import { uploadVideoToYouTube, deleteVideoFromYouTube } from './services/youtubeService';
@@ -1489,7 +1489,7 @@ const App: React.FC = () => {
     }
   };
 
-  // Function to resume a production
+  // Function to resume a production - ALWAYS opens the wizard
   const resumeProduction = async (production: any) => {
     if (!activeChannel) {
       toast.error('No active channel selected');
@@ -1506,38 +1506,51 @@ const App: React.FC = () => {
 
       // Set current production ID so it's excluded from used news calculation
       setCurrentProductionId(fullProduction.id);
-
-      // Restore news selection (we need to fetch news items by IDs)
-      const dateObj = parseLocalDate(fullProduction.news_date);
       setSelectedDate(fullProduction.news_date);
-      const allNewsItems = await getNewsByDate(dateObj, activeChannel.id);
-      
-      // Get used news IDs (excluding current production)
-      const usedIds = await getUsedNewsIdsForDate(dateObj, activeChannel.id, fullProduction.id);
-      setUsedNewsIds(new Set(usedIds));
 
-      // Restore checkpoint data if available
-      const checkpoint = await getLastCheckpoint(fullProduction.id);
-      if (checkpoint) {
-        logger.debug('production', 'Restored checkpoint data', { keys: Object.keys(checkpoint) });
-      }
-      
-      // Match selected news by IDs (UUIDs) if available, otherwise fall back to headlines for backward compatibility
-      const selected = allNewsItems.filter(n => {
-        if (n.id && fullProduction.selected_news_ids) {
-          return fullProduction.selected_news_ids.includes(n.id);
+      // Ensure wizard_state exists, create one if missing (for older productions)
+      if (!fullProduction.wizard_state) {
+        // Determine the current step based on existing data
+        let currentStep: ProductionStep = 'news_fetch';
+        
+        if (fullProduction.fetched_news?.length || fullProduction.selected_news_ids?.length) {
+          currentStep = 'news_select';
         }
-        // Fallback: match by headline for old productions that stored headlines
-        return fullProduction.selected_news_ids?.includes(n.headline);
-      });
-      
-      setSelectedNews(selected);
-      setAllNews(allNewsItems);
+        if (fullProduction.selected_news_ids?.length && fullProduction.scenes?.scenes) {
+          currentStep = 'script_review';
+        }
+        if (fullProduction.segments?.length) {
+          const hasAnyAudio = Object.values(fullProduction.segment_status || {}).some(s => s?.audio === 'done');
+          if (hasAnyAudio) {
+            currentStep = 'audio_generate';
+          }
+          const hasAnyVideo = Object.values(fullProduction.segment_status || {}).some(s => s?.video === 'done');
+          if (hasAnyVideo) {
+            currentStep = 'video_generate';
+          }
+        }
+        if (fullProduction.final_video_url) {
+          currentStep = 'publish';
+        }
+        
+        fullProduction.wizard_state = {
+          currentStep,
+          newsFetch: { status: fullProduction.fetched_news?.length ? 'completed' : 'pending' },
+          newsSelect: { status: fullProduction.selected_news_ids?.length ? 'completed' : 'pending' },
+          scriptGenerate: { status: fullProduction.scenes?.scenes ? 'completed' : 'pending' },
+          scriptReview: { status: fullProduction.scenes?.scenes ? 'completed' : 'pending' },
+          audioGenerate: { status: 'pending' },
+          videoGenerate: { status: 'pending' },
+          renderFinal: { status: fullProduction.final_video_url ? 'completed' : 'pending' },
+          publish: { status: fullProduction.youtube_id ? 'completed' : 'pending' }
+        };
+      }
 
-      // Start production with resume data
-      await startProduction(selected, fullProduction);
+      // Open the wizard with the production
+      setWizardProduction(fullProduction);
+      setShowWizard(true);
       
-      toast.success('Production resumed!');
+      logger.info('production', 'Production opened in wizard', { id: fullProduction.id });
     } catch (error) {
       logger.error('production', 'Error resuming production', { error: (error as Error).message });
       toast.error('Failed to resume production');

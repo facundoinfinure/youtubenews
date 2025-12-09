@@ -219,8 +219,12 @@ const SegmentProgressCard: React.FC<{
   videoUrl?: string;
   onRegenerateAudio?: () => void;
   onRegenerateVideo?: () => void;
-}> = ({ index, segment, audioStatus, videoStatus, audioUrl, videoUrl, onRegenerateAudio, onRegenerateVideo }) => (
-  <div className="bg-[#1a1a1a] rounded-lg border border-[#333] p-4">
+  isGenerating?: boolean;
+  showVideoStatus?: boolean;
+}> = ({ index, segment, audioStatus, videoStatus, audioUrl, videoUrl, onRegenerateAudio, onRegenerateVideo, isGenerating = false, showVideoStatus = true }) => (
+  <div className={`bg-[#1a1a1a] rounded-lg border p-4 transition-all ${
+    audioStatus === 'in_progress' ? 'border-cyan-500/50 shadow-lg shadow-cyan-500/10' : 'border-[#333]'
+  }`}>
     <div className="flex items-center justify-between mb-2">
       <span className="text-sm font-medium text-white">
         #{index + 1} - {segment.speaker}
@@ -230,41 +234,60 @@ const SegmentProgressCard: React.FC<{
         <span className={`
           text-xs px-2 py-1 rounded flex items-center gap-1
           ${audioStatus === 'completed' ? 'bg-green-500/20 text-green-400' : ''}
-          ${audioStatus === 'in_progress' ? 'bg-cyan-500/20 text-cyan-400' : ''}
+          ${audioStatus === 'in_progress' ? 'bg-cyan-500/20 text-cyan-400 animate-pulse' : ''}
           ${audioStatus === 'failed' ? 'bg-red-500/20 text-red-400' : ''}
           ${audioStatus === 'pending' ? 'bg-gray-500/20 text-gray-400' : ''}
         `}>
-          🎙️ {audioStatus === 'completed' ? '✓' : audioStatus === 'in_progress' ? '...' : audioStatus}
+          🎙️ {audioStatus === 'completed' ? '✓' : audioStatus === 'in_progress' ? '⏳' : audioStatus === 'failed' ? '✗' : 'pending'}
         </span>
         
-        {/* Video Status */}
-        <span className={`
-          text-xs px-2 py-1 rounded flex items-center gap-1
-          ${videoStatus === 'completed' ? 'bg-green-500/20 text-green-400' : ''}
-          ${videoStatus === 'in_progress' ? 'bg-purple-500/20 text-purple-400' : ''}
-          ${videoStatus === 'failed' ? 'bg-red-500/20 text-red-400' : ''}
-          ${videoStatus === 'pending' ? 'bg-gray-500/20 text-gray-400' : ''}
-        `}>
-          🎬 {videoStatus === 'completed' ? '✓' : videoStatus === 'in_progress' ? '...' : videoStatus}
-        </span>
+        {/* Video Status - only show if requested */}
+        {showVideoStatus && (
+          <span className={`
+            text-xs px-2 py-1 rounded flex items-center gap-1
+            ${videoStatus === 'completed' ? 'bg-green-500/20 text-green-400' : ''}
+            ${videoStatus === 'in_progress' ? 'bg-purple-500/20 text-purple-400 animate-pulse' : ''}
+            ${videoStatus === 'failed' ? 'bg-red-500/20 text-red-400' : ''}
+            ${videoStatus === 'pending' ? 'bg-gray-500/20 text-gray-400' : ''}
+          `}>
+            🎬 {videoStatus === 'completed' ? '✓' : videoStatus === 'in_progress' ? '⏳' : videoStatus === 'failed' ? '✗' : 'pending'}
+          </span>
+        )}
       </div>
     </div>
     
     <p className="text-sm text-gray-400 line-clamp-2">{segment.text}</p>
     
     {/* Actions */}
-    <div className="flex gap-2 mt-3">
+    <div className="flex items-center gap-2 mt-3 flex-wrap">
+      {/* Audio Player - show when completed */}
       {audioStatus === 'completed' && audioUrl && (
-        <audio src={audioUrl} controls className="h-8 flex-1" />
+        <audio src={audioUrl} controls className="h-8 flex-1 min-w-[150px]" />
       )}
-      {audioStatus === 'failed' && onRegenerateAudio && (
+      
+      {/* Regenerate Audio Button - show when completed or failed, but not while generating */}
+      {(audioStatus === 'completed' || audioStatus === 'failed') && onRegenerateAudio && !isGenerating && (
         <button 
           onClick={onRegenerateAudio}
-          className="text-xs bg-red-600/30 hover:bg-red-600 text-red-300 px-2 py-1 rounded"
+          className={`text-xs px-2 py-1 rounded flex items-center gap-1 ${
+            audioStatus === 'failed' 
+              ? 'bg-red-600/30 hover:bg-red-600 text-red-300' 
+              : 'bg-gray-600/30 hover:bg-gray-600 text-gray-300'
+          }`}
         >
-          🔄 Retry Audio
+          🔄 {audioStatus === 'failed' ? 'Reintentar' : 'Regenerar'}
         </button>
       )}
+      
+      {/* In Progress Indicator */}
+      {audioStatus === 'in_progress' && (
+        <div className="flex items-center gap-2 text-cyan-400 text-sm">
+          <span className="animate-spin">⏳</span>
+          <span>Generando audio...</span>
+        </div>
+      )}
+      
+      {/* Video Link - show when completed */}
       {videoStatus === 'completed' && videoUrl && (
         <a 
           href={videoUrl} 
@@ -275,12 +298,18 @@ const SegmentProgressCard: React.FC<{
           👁️ Ver Video
         </a>
       )}
-      {videoStatus === 'failed' && onRegenerateVideo && (
+      
+      {/* Regenerate Video Button */}
+      {(videoStatus === 'completed' || videoStatus === 'failed') && onRegenerateVideo && !isGenerating && (
         <button 
           onClick={onRegenerateVideo}
-          className="text-xs bg-red-600/30 hover:bg-red-600 text-red-300 px-2 py-1 rounded"
+          className={`text-xs px-2 py-1 rounded ${
+            videoStatus === 'failed' 
+              ? 'bg-red-600/30 hover:bg-red-600 text-red-300' 
+              : 'bg-gray-600/30 hover:bg-gray-600 text-gray-300'
+          }`}
         >
-          🔄 Retry Video
+          🔄 {videoStatus === 'failed' ? 'Reintentar Video' : 'Regenerar Video'}
         </button>
       )}
     </div>
@@ -314,18 +343,32 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [currentSegmentIndex, setCurrentSegmentIndex] = useState(0);
 
+  // Sync wizard state when production prop changes (e.g., when production is loaded/updated externally)
+  useEffect(() => {
+    if (production.wizard_state) {
+      setWizardState(production.wizard_state);
+    }
+    if (production.fetched_news) {
+      setFetchedNews(production.fetched_news);
+    }
+    if (production.selected_news_ids) {
+      setSelectedNewsIds(production.selected_news_ids);
+    }
+  }, [production.id]); // Only sync when production ID changes (loading a different production)
+
   // All wizard steps
   const allSteps: ProductionStep[] = [
     'news_fetch', 'news_select', 'script_generate', 'script_review',
     'audio_generate', 'video_generate', 'render_final', 'publish', 'done'
   ];
 
-  // Save wizard state to production
+  // Save wizard state to production - ONLY updates wizard_state, not other fields
   const saveWizardState = useCallback(async (newState: ProductionWizardState) => {
     setWizardState(newState);
     
-    const updatedProduction: Production = {
-      ...production,
+    // Only update wizard-specific fields to avoid overwriting other data like scenes
+    const partialUpdate: Partial<Production> = {
+      id: production.id,
       wizard_state: newState,
       fetched_news: fetchedNews,
       selected_news_ids: selectedNewsIds,
@@ -333,7 +376,13 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
       last_checkpoint_at: new Date().toISOString()
     };
     
-    await saveProduction(updatedProduction);
+    await saveProduction(partialUpdate as Production);
+    
+    // Merge with current production to preserve all fields
+    const updatedProduction: Production = {
+      ...production,
+      ...partialUpdate
+    };
     onUpdateProduction(updatedProduction);
   }, [production, fetchedNews, selectedNewsIds, onUpdateProduction]);
 
@@ -546,8 +595,8 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
     toast.success('Guión aprobado');
   };
 
-  // Step 5: Generate all audios
-  const handleGenerateAudios = async () => {
+  // Step 5: Generate all audios (only pending ones)
+  const handleGenerateAudios = async (specificIndex?: number) => {
     const segments = production.segments || [];
     if (segments.length === 0) {
       toast.error('No hay segmentos para generar');
@@ -555,62 +604,93 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
     }
     
     setIsLoading(true);
-    await updateStepStatus('audioGenerate', 'in_progress', {
-      totalSegments: segments.length,
-      completedSegments: 0
+    
+    // If all audios are already done and no specific index, just advance
+    const allDone = segments.every((_, i) => {
+      const status = production.segment_status?.[i];
+      return status?.audio === 'done' && status?.audioUrl;
     });
     
-    let completedCount = 0;
-    const segmentProgress: Record<number, { status: SubStepStatus }> = {};
+    if (allDone && specificIndex === undefined) {
+      // Advance to video generation
+      const newState: ProductionWizardState = {
+        ...wizardState,
+        currentStep: 'video_generate',
+        audioGenerate: {
+          ...wizardState.audioGenerate,
+          status: 'completed',
+          completedAt: new Date().toISOString()
+        }
+      };
+      await saveWizardState(newState);
+      setIsLoading(false);
+      return;
+    }
     
-    for (let i = 0; i < segments.length; i++) {
+    await updateStepStatus('audioGenerate', 'in_progress', {
+      totalSegments: segments.length,
+      completedSegments: Object.values(production.segment_status || {}).filter(s => s.audio === 'done').length
+    });
+    
+    // Determine which segments to process
+    const indicesToProcess = specificIndex !== undefined 
+      ? [specificIndex] 
+      : segments.map((_, i) => i).filter(i => {
+          const status = production.segment_status?.[i];
+          return !status?.audio || status.audio !== 'done' || !status.audioUrl;
+        });
+    
+    let currentProduction = { ...production };
+    
+    for (const i of indicesToProcess) {
       const segment = segments[i];
       setCurrentSegmentIndex(i);
       
-      // Skip if already done
-      const existingStatus = production.segment_status?.[i];
-      if (existingStatus?.audio === 'done' && existingStatus?.audioUrl) {
-        completedCount++;
-        segmentProgress[i] = { status: 'completed' };
-        continue;
-      }
-      
-      segmentProgress[i] = { status: 'in_progress' };
-      
       try {
-        // Update segment status to generating
+        // Update segment status to generating - update local state immediately
+        const generatingStatus = {
+          ...(currentProduction.segment_status || {}),
+          [i]: { ...(currentProduction.segment_status?.[i] || {}), audio: 'generating' }
+        };
+        currentProduction = { ...currentProduction, segment_status: generatingStatus as any };
+        onUpdateProduction(currentProduction);
         await updateSegmentStatus(production.id, i, { audio: 'generating' });
         
         const result = await onGenerateAudio(i, segment.text, segment.speaker);
         
-        // Update segment with audio URL
+        // Update segment with audio URL - update local state immediately
+        const updatedSegments = [...(currentProduction.segments || [])];
+        updatedSegments[i] = { ...updatedSegments[i], audioDuration: result.duration, audioUrl: result.audioUrl };
+        
+        const doneStatus = {
+          ...(currentProduction.segment_status || {}),
+          [i]: { ...(currentProduction.segment_status?.[i] || {}), audio: 'done', audioUrl: result.audioUrl }
+        };
+        
+        currentProduction = { 
+          ...currentProduction, 
+          segments: updatedSegments,
+          segment_status: doneStatus as any
+        };
+        
+        // Update both local state and DB
+        onUpdateProduction(currentProduction);
+        await saveProduction(currentProduction);
         await updateSegmentStatus(production.id, i, {
           audio: 'done',
           audioUrl: result.audioUrl
         });
         
-        // Update production segments with duration
-        const updatedSegments = [...(production.segments || [])];
-        updatedSegments[i] = { ...updatedSegments[i], audioDuration: result.duration, audioUrl: result.audioUrl };
-        
-        const updatedProduction: Production = {
-          ...production,
-          segments: updatedSegments
-        };
-        await saveProduction(updatedProduction);
-        onUpdateProduction(updatedProduction);
-        
-        completedCount++;
-        segmentProgress[i] = { status: 'completed' };
-        
-        // Update wizard progress
-        await updateStepStatus('audioGenerate', 'in_progress', {
-          completedSegments: completedCount,
-          segmentProgress
-        });
+        toast.success(`Audio ${i + 1}/${segments.length} generado`);
         
       } catch (error) {
-        segmentProgress[i] = { status: 'failed' };
+        // Update failed status
+        const failedStatus = {
+          ...(currentProduction.segment_status || {}),
+          [i]: { ...(currentProduction.segment_status?.[i] || {}), audio: 'failed', error: (error as Error).message }
+        };
+        currentProduction = { ...currentProduction, segment_status: failedStatus as any };
+        onUpdateProduction(currentProduction);
         await updateSegmentStatus(production.id, i, {
           audio: 'failed',
           error: (error as Error).message
@@ -621,11 +701,12 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
     
     setIsLoading(false);
     
-    // Check if all completed
+    // Check if all completed now
+    const completedCount = Object.values(currentProduction.segment_status || {}).filter(s => s.audio === 'done').length;
+    
     if (completedCount === segments.length) {
       await updateStepStatus('audioGenerate', 'completed', {
-        completedSegments: completedCount,
-        segmentProgress
+        completedSegments: completedCount
       });
       
       // Advance to video generation
@@ -651,12 +732,28 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
       
       toast.success('¡Todos los audios generados!');
     } else {
-      toast.error(`${segments.length - completedCount} audios fallaron. Puedes reintentar.`);
+      const pendingCount = segments.length - completedCount;
+      toast(`${completedCount}/${segments.length} audios listos. ${pendingCount} pendientes.`);
     }
   };
+  
+  // Regenerate a single audio
+  const handleRegenerateAudio = async (index: number) => {
+    // Mark as pending first
+    const pendingStatus = {
+      ...(production.segment_status || {}),
+      [index]: { ...(production.segment_status?.[index] || {}), audio: 'pending', audioUrl: undefined }
+    };
+    const updatedProduction = { ...production, segment_status: pendingStatus as any };
+    onUpdateProduction(updatedProduction);
+    await updateSegmentStatus(production.id, index, { audio: 'pending', audioUrl: undefined });
+    
+    // Now generate just this one
+    await handleGenerateAudios(index);
+  };
 
-  // Step 6: Generate all videos
-  const handleGenerateVideos = async () => {
+  // Step 6: Generate all videos (only pending ones)
+  const handleGenerateVideos = async (specificIndex?: number) => {
     const segments = production.segments || [];
     if (segments.length === 0) {
       toast.error('No hay segmentos para generar');
@@ -664,54 +761,96 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
     }
     
     setIsLoading(true);
-    await updateStepStatus('videoGenerate', 'in_progress', {
-      totalSegments: segments.length,
-      completedSegments: 0
+    
+    // If all videos are already done and no specific index, just advance
+    const allDone = segments.every((_, i) => {
+      const status = production.segment_status?.[i];
+      return status?.video === 'done' && status?.videoUrl;
     });
     
-    let completedCount = 0;
-    const segmentProgress: Record<number, { status: SubStepStatus }> = {};
+    if (allDone && specificIndex === undefined) {
+      // Advance to render step
+      const newState: ProductionWizardState = {
+        ...wizardState,
+        currentStep: 'render_final',
+        videoGenerate: {
+          ...wizardState.videoGenerate,
+          status: 'completed',
+          completedAt: new Date().toISOString()
+        }
+      };
+      await saveWizardState(newState);
+      setIsLoading(false);
+      return;
+    }
     
-    for (let i = 0; i < segments.length; i++) {
+    await updateStepStatus('videoGenerate', 'in_progress', {
+      totalSegments: segments.length,
+      completedSegments: Object.values(production.segment_status || {}).filter(s => s.video === 'done').length
+    });
+    
+    // Determine which segments to process
+    const indicesToProcess = specificIndex !== undefined 
+      ? [specificIndex] 
+      : segments.map((_, i) => i).filter(i => {
+          const status = production.segment_status?.[i];
+          return !status?.video || status.video !== 'done' || !status.videoUrl;
+        });
+    
+    let currentProduction = { ...production };
+    
+    for (const i of indicesToProcess) {
       const segment = segments[i];
       setCurrentSegmentIndex(i);
       
-      // Skip if already done
-      const existingStatus = production.segment_status?.[i];
-      if (existingStatus?.video === 'done' && existingStatus?.videoUrl) {
-        completedCount++;
-        segmentProgress[i] = { status: 'completed' };
-        continue;
-      }
-      
       // Need audio URL to generate video
+      const existingStatus = currentProduction.segment_status?.[i];
       if (!existingStatus?.audioUrl) {
-        segmentProgress[i] = { status: 'failed' };
+        toast.error(`Segmento ${i + 1}: No hay audio. Genera el audio primero.`);
         continue;
       }
-      
-      segmentProgress[i] = { status: 'in_progress' };
       
       try {
+        // Update segment status to generating - update local state immediately
+        const generatingStatus = {
+          ...(currentProduction.segment_status || {}),
+          [i]: { ...(currentProduction.segment_status?.[i] || {}), video: 'generating' }
+        };
+        currentProduction = { ...currentProduction, segment_status: generatingStatus as any };
+        onUpdateProduction(currentProduction);
         await updateSegmentStatus(production.id, i, { video: 'generating' });
         
         const result = await onGenerateVideo(i, existingStatus.audioUrl, segment.speaker);
         
+        // Update segment with video URL - update local state immediately
+        const doneStatus = {
+          ...(currentProduction.segment_status || {}),
+          [i]: { ...(currentProduction.segment_status?.[i] || {}), video: 'done', videoUrl: result.videoUrl }
+        };
+        
+        currentProduction = { 
+          ...currentProduction, 
+          segment_status: doneStatus as any
+        };
+        
+        // Update both local state and DB
+        onUpdateProduction(currentProduction);
+        await saveProduction(currentProduction);
         await updateSegmentStatus(production.id, i, {
           video: 'done',
           videoUrl: result.videoUrl
         });
         
-        completedCount++;
-        segmentProgress[i] = { status: 'completed' };
-        
-        await updateStepStatus('videoGenerate', 'in_progress', {
-          completedSegments: completedCount,
-          segmentProgress
-        });
+        toast.success(`Video ${i + 1}/${segments.length} generado`);
         
       } catch (error) {
-        segmentProgress[i] = { status: 'failed' };
+        // Update failed status
+        const failedStatus = {
+          ...(currentProduction.segment_status || {}),
+          [i]: { ...(currentProduction.segment_status?.[i] || {}), video: 'failed', error: (error as Error).message }
+        };
+        currentProduction = { ...currentProduction, segment_status: failedStatus as any };
+        onUpdateProduction(currentProduction);
         await updateSegmentStatus(production.id, i, {
           video: 'failed',
           error: (error as Error).message
@@ -722,10 +861,12 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
     
     setIsLoading(false);
     
+    // Check if all completed now
+    const completedCount = Object.values(currentProduction.segment_status || {}).filter(s => s.video === 'done').length;
+    
     if (completedCount === segments.length) {
       await updateStepStatus('videoGenerate', 'completed', {
-        completedSegments: completedCount,
-        segmentProgress
+        completedSegments: completedCount
       });
       
       const newState: ProductionWizardState = {
@@ -741,8 +882,24 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
       
       toast.success('¡Todos los videos generados!');
     } else {
-      toast.error(`${segments.length - completedCount} videos fallaron. Puedes reintentar.`);
+      const pendingCount = segments.length - completedCount;
+      toast(`${completedCount}/${segments.length} videos listos. ${pendingCount} pendientes.`);
     }
+  };
+  
+  // Regenerate a single video
+  const handleRegenerateVideo = async (index: number) => {
+    // Mark as pending first
+    const pendingStatus = {
+      ...(production.segment_status || {}),
+      [index]: { ...(production.segment_status?.[index] || {}), video: 'pending', videoUrl: undefined }
+    };
+    const updatedProduction = { ...production, segment_status: pendingStatus as any };
+    onUpdateProduction(updatedProduction);
+    await updateSegmentStatus(production.id, index, { video: 'pending', videoUrl: undefined });
+    
+    // Now generate just this one
+    await handleGenerateVideos(index);
   };
 
   // Step 7: Render final video
@@ -1125,6 +1282,9 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
                     audioStatus={status?.audio === 'done' ? 'completed' : status?.audio === 'generating' ? 'in_progress' : status?.audio === 'failed' ? 'failed' : 'pending'}
                     videoStatus="pending"
                     audioUrl={status?.audioUrl}
+                    onRegenerateAudio={() => handleRegenerateAudio(i)}
+                    isGenerating={isLoading}
+                    showVideoStatus={false}
                   />
                 );
               })}
@@ -1145,7 +1305,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
               </button>
               
               <button
-                onClick={handleGenerateAudios}
+                onClick={() => handleGenerateAudios()}
                 disabled={isLoading}
                 className="bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 disabled:opacity-50 text-white px-8 py-3 rounded-lg font-bold"
               >
@@ -1153,7 +1313,9 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
                   ? `⏳ Generando ${currentSegmentIndex + 1}/${audioSegments.length}...` 
                   : audioCompleted === audioSegments.length 
                     ? 'Continuar →' 
-                    : '🎙️ Generar Audios'}
+                    : audioCompleted > 0
+                      ? `🎙️ Generar Pendientes (${audioSegments.length - audioCompleted})`
+                      : '🎙️ Generar Audios'}
               </button>
             </div>
           </div>
@@ -1191,6 +1353,9 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
                     videoStatus={status?.video === 'done' ? 'completed' : status?.video === 'generating' ? 'in_progress' : status?.video === 'failed' ? 'failed' : 'pending'}
                     audioUrl={status?.audioUrl}
                     videoUrl={status?.videoUrl}
+                    onRegenerateVideo={() => handleRegenerateVideo(i)}
+                    isGenerating={isLoading}
+                    showVideoStatus={true}
                   />
                 );
               })}
@@ -1211,7 +1376,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
               </button>
               
               <button
-                onClick={handleGenerateVideos}
+                onClick={() => handleGenerateVideos()}
                 disabled={isLoading}
                 className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-50 text-white px-8 py-3 rounded-lg font-bold"
               >
@@ -1219,7 +1384,9 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
                   ? `⏳ Generando ${currentSegmentIndex + 1}/${videoSegments.length}...` 
                   : videoCompleted === videoSegments.length 
                     ? 'Continuar →' 
-                    : '🎬 Generar Videos'}
+                    : videoCompleted > 0
+                      ? `🎬 Generar Pendientes (${videoSegments.length - videoCompleted})`
+                      : '🎬 Generar Videos'}
               </button>
             </div>
           </div>
