@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { ChannelConfig, CharacterProfile, StoredVideo, Channel, UserProfile, Production, RenderConfig, DEFAULT_RENDER_CONFIG, ShotstackTransitionType, ShotstackEffectType, ShotstackFilterType } from '../types';
-import { fetchVideosFromDB, saveConfigToDB, getAllChannels, saveChannel, getChannelById, uploadImageToStorage, getIncompleteProductions, getAllProductions, getPublishedProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction, updateSegmentStatus, saveProduction, saveVideoToDB } from '../services/supabaseService';
+import { fetchVideosFromDB, saveConfigToDB, getAllChannels, saveChannel, getChannelById, uploadImageToStorage, getIncompleteProductions, getAllProductions, getPublishedProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction, updateSegmentStatus, saveProduction, saveVideoToDB, connectYouTube } from '../services/supabaseService';
 import { uploadVideoToYouTube } from '../services/youtubeService';
 import { generateSeedImage } from '../services/geminiService';
 import { CostTracker } from '../services/CostTracker';
@@ -811,6 +811,59 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
         {/* SETTINGS TAB */}
         {activeTab === 'settings' && (
           <div className="space-y-8">
+
+            {/* YouTube Connection */}
+            <div className={`p-6 rounded-xl border ${user?.accessToken ? 'bg-green-900/20 border-green-500/30' : 'bg-red-900/20 border-red-500/30'}`}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className={`w-12 h-12 rounded-full flex items-center justify-center ${user?.accessToken ? 'bg-green-600' : 'bg-red-600'}`}>
+                    <svg className="w-6 h-6 text-white" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold text-white">YouTube Connection</h3>
+                    <p className={`text-sm ${user?.accessToken ? 'text-green-400' : 'text-red-400'}`}>
+                      {user?.accessToken ? '✓ Conectado - Puedes publicar videos' : '✗ No conectado - Necesitas conectar para publicar'}
+                    </p>
+                  </div>
+                </div>
+                
+                <button
+                  onClick={async () => {
+                    if (user?.accessToken) {
+                      toast.success('YouTube ya está conectado. Puedes publicar videos.');
+                    } else {
+                      try {
+                        toast.loading('Redirigiendo a Google...', { id: 'youtube-connect' });
+                        await connectYouTube();
+                      } catch (error) {
+                        toast.error('Error conectando YouTube', { id: 'youtube-connect' });
+                      }
+                    }
+                  }}
+                  className={`px-6 py-3 rounded-lg font-bold flex items-center gap-2 transition-all ${
+                    user?.accessToken 
+                      ? 'bg-green-600 hover:bg-green-500 text-white' 
+                      : 'bg-red-600 hover:bg-red-500 text-white animate-pulse'
+                  }`}
+                >
+                  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+                  </svg>
+                  {user?.accessToken ? '✓ Conectado' : 'Conectar YouTube'}
+                </button>
+              </div>
+              
+              {!user?.accessToken && (
+                <div className="mt-4 p-3 bg-black/30 rounded-lg">
+                  <p className="text-sm text-gray-400">
+                    Al hacer clic en "Conectar YouTube", serás redirigido a Google para autorizar el acceso. 
+                    Asegúrate de aceptar los permisos de YouTube para poder publicar videos directamente desde ChimpNews.
+                  </p>
+                </div>
+              )}
+            </div>
 
             {/* General Settings */}
             <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">

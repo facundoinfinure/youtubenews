@@ -91,6 +91,24 @@ export const signInWithGoogle = async () => {
   return data;
 };
 
+// Connect YouTube - Re-authenticate to get YouTube permissions
+export const connectYouTube = async () => {
+  if (!supabase) throw new Error("Supabase not initialized");
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo: import.meta.env.VITE_AUTH_REDIRECT_URL || window.location.origin,
+      scopes: 'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile',
+      queryParams: {
+        access_type: 'offline',
+        prompt: 'consent' // Force consent screen to ensure YouTube permissions are granted
+      }
+    }
+  });
+  if (error) throw error;
+  return data;
+};
+
 export const signOut = async () => {
   if (!supabase) return;
   await supabase.auth.signOut();

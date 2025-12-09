@@ -343,6 +343,10 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [currentSegmentIndex, setCurrentSegmentIndex] = useState(0);
 
+  // Ref to always have the latest production (avoids stale closures)
+  const productionRef = React.useRef(production);
+  productionRef.current = production;
+
   // Sync wizard state when production prop changes (e.g., when production is loaded/updated externally)
   useEffect(() => {
     if (production.wizard_state) {
@@ -658,63 +662,69 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
     
     toast.success(`🎙️ Generando ${indicesToProcess.length} audios en paralelo...`);
     
-    // Generate all audios in PARALLEL
-    const results = await Promise.allSettled(
+    // Shared state objects for real-time updates
+    const liveStatus: Record<number, any> = { ...(production.segment_status || {}) };
+    const liveSegments = [...(production.segments || [])];
+    let successCount = 0;
+    let failCount = 0;
+    
+    // Generate all audios in PARALLEL with real-time UI updates
+    await Promise.allSettled(
       indicesToProcess.map(async (i) => {
         const segment = segments[i];
         
         try {
           const result = await onGenerateAudio(i, segment.text, segment.speaker);
           
-          // Update this segment as done immediately when it completes
+          // Update shared state and UI immediately when this audio completes
+          liveStatus[i] = { ...liveStatus[i], audio: 'done', audioUrl: result.audioUrl };
+          liveSegments[i] = { ...liveSegments[i], audioDuration: result.duration, audioUrl: result.audioUrl };
+          successCount++;
+          
+          // Update UI in real-time
+          onUpdateProduction({ 
+            ...production, 
+            segments: [...liveSegments],
+            segment_status: { ...liveStatus } as any 
+          });
+          
+          // Update DB
           await updateSegmentStatus(production.id, i, {
             audio: 'done',
             audioUrl: result.audioUrl
           });
           
-          return { index: i, success: true, audioUrl: result.audioUrl, duration: result.duration };
+          toast.success(`Audio ${i + 1} ✓`);
+          return { index: i, success: true };
         } catch (error) {
-          // Update this segment as failed immediately
+          // Update shared state and UI immediately on failure
+          liveStatus[i] = { ...liveStatus[i], audio: 'failed', error: (error as Error).message };
+          failCount++;
+          
+          // Update UI in real-time
+          onUpdateProduction({ 
+            ...production, 
+            segment_status: { ...liveStatus } as any 
+          });
+          
+          // Update DB
           await updateSegmentStatus(production.id, i, {
             audio: 'failed',
             error: (error as Error).message
           });
           
-          return { index: i, success: false, error: (error as Error).message };
+          toast.error(`Audio ${i + 1} ✗`);
+          return { index: i, success: false };
         }
       })
     );
     
-    // Process results and update final production state
-    const finalStatus = { ...(production.segment_status || {}) };
-    const updatedSegments = [...(production.segments || [])];
-    let successCount = 0;
-    let failCount = 0;
-    
-    for (const result of results) {
-      if (result.status === 'fulfilled') {
-        const { index, success, audioUrl, duration, error } = result.value;
-        if (success && audioUrl) {
-          finalStatus[index] = { ...finalStatus[index], audio: 'done', audioUrl };
-          updatedSegments[index] = { ...updatedSegments[index], audioDuration: duration, audioUrl };
-          successCount++;
-          toast.success(`Audio ${index + 1} ✓`);
-        } else {
-          finalStatus[index] = { ...finalStatus[index], audio: 'failed', error };
-          failCount++;
-          toast.error(`Audio ${index + 1} ✗`);
-        }
-      } else {
-        failCount++;
-      }
-    }
-    
+    // Final save to DB with all updates
     currentProduction = { 
       ...production, 
-      segments: updatedSegments,
-      segment_status: finalStatus as any 
+      segments: liveSegments,
+      segment_status: liveStatus as any 
     };
-    onUpdateProduction(currentProduction);
     await saveProduction(currentProduction);
     
     setIsLoading(false);
@@ -841,8 +851,13 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
     
     toast.success(`🚀 Generando ${indicesToProcess.length} videos en paralelo...`);
     
-    // Generate all videos in PARALLEL
-    const results = await Promise.allSettled(
+    // Shared state object for real-time updates
+    const liveStatus: Record<number, any> = { ...(production.segment_status || {}) };
+    let successCount = 0;
+    let failCount = 0;
+    
+    // Generate all videos in PARALLEL with real-time UI updates
+    await Promise.allSettled(
       indicesToProcess.map(async (i) => {
         const segment = segments[i];
         const audioUrl = production.segment_status?.[i]?.audioUrl!;
@@ -850,55 +865,43 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
         try {
           const result = await onGenerateVideo(i, audioUrl, segment.speaker);
           
-          // Update this segment as done immediately when it completes
+          // Update shared state and UI immediately when this video completes
+          liveStatus[i] = { ...liveStatus[i], video: 'done', videoUrl: result.videoUrl };
+          successCount++;
+          
+          // Update UI in real-time
+          onUpdateProduction({ ...production, segment_status: { ...liveStatus } as any });
+          
+          // Update DB
           await updateSegmentStatus(production.id, i, {
             video: 'done',
             videoUrl: result.videoUrl
           });
           
-          return { index: i, success: true, videoUrl: result.videoUrl };
+          toast.success(`Video ${i + 1} ✓`);
+          return { index: i, success: true };
         } catch (error) {
-          // Update this segment as failed immediately
+          // Update shared state and UI immediately on failure
+          liveStatus[i] = { ...liveStatus[i], video: 'failed', error: (error as Error).message };
+          failCount++;
+          
+          // Update UI in real-time
+          onUpdateProduction({ ...production, segment_status: { ...liveStatus } as any });
+          
+          // Update DB
           await updateSegmentStatus(production.id, i, {
             video: 'failed',
             error: (error as Error).message
           });
           
-          return { index: i, success: false, error: (error as Error).message };
+          toast.error(`Video ${i + 1} ✗`);
+          return { index: i, success: false };
         }
       })
     );
     
-    // Process results and update final production state
-    const finalStatus = { ...(production.segment_status || {}) };
-    let successCount = 0;
-    let failCount = 0;
-    
-    for (const result of results) {
-      if (result.status === 'fulfilled') {
-        const { index, success, videoUrl, error } = result.value;
-        if (success && videoUrl) {
-          finalStatus[index] = { ...finalStatus[index], video: 'done', videoUrl };
-          successCount++;
-          toast.success(`Video ${index + 1} ✓`);
-        } else {
-          finalStatus[index] = { ...finalStatus[index], video: 'failed', error };
-          failCount++;
-          toast.error(`Video ${index + 1} ✗`);
-        }
-      } else {
-        // Promise rejected (shouldn't happen with our try/catch, but just in case)
-        failCount++;
-      }
-    }
-    
-    // Add already completed videos to count
-    const previouslyCompleted = Object.values(production.segment_status || {})
-      .filter(s => s.video === 'done' && !indicesToProcess.includes(Object.keys(production.segment_status || {}).findIndex(k => production.segment_status?.[parseInt(k)] === s)))
-      .length;
-    
-    currentProduction = { ...production, segment_status: finalStatus as any };
-    onUpdateProduction(currentProduction);
+    // Final save to DB with all updates
+    currentProduction = { ...production, segment_status: liveStatus as any };
     await saveProduction(currentProduction);
     
     setIsLoading(false);
@@ -1549,21 +1552,41 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
       // Step 8: Publish
       case 'publish':
         return (
-          <div className="space-y-6">
-            <div className="text-center py-4">
-              <span className="text-6xl mb-4 block">📺</span>
-              <h3 className="text-2xl font-bold text-white mb-2">Publicar en YouTube</h3>
+          <div className="space-y-4">
+            <div className="text-center py-2">
+              <h3 className="text-xl font-bold text-white">📺 Previsualizar y Publicar</h3>
             </div>
             
-            {production.final_video_url && (
-              <video 
-                src={production.final_video_url} 
-                controls 
-                className="w-full max-h-[250px] rounded-lg"
-                poster={production.final_video_poster}
-              />
+            {/* Video Preview - Prominent */}
+            {production.final_video_url ? (
+              <div className="bg-black rounded-xl overflow-hidden">
+                <video 
+                  src={production.final_video_url} 
+                  controls 
+                  className="w-full max-h-[280px] mx-auto"
+                  poster={production.final_video_poster}
+                  preload="metadata"
+                />
+                <div className="bg-[#111] p-3 flex items-center justify-between">
+                  <span className="text-xs text-gray-400">
+                    Formato: {config.format === '9:16' ? '📱 Short (9:16)' : '📺 Video (16:9)'}
+                  </span>
+                  <a 
+                    href={production.final_video_url}
+                    download={`${production.viral_metadata?.title || 'video'}.mp4`}
+                    className="text-xs bg-cyan-600/30 hover:bg-cyan-600 text-cyan-300 px-3 py-1.5 rounded flex items-center gap-1"
+                  >
+                    📥 Descargar MP4
+                  </a>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-yellow-900/20 border border-yellow-500/30 p-4 rounded-lg text-center">
+                <p className="text-yellow-400">⚠️ No hay video renderizado. Vuelve al paso anterior.</p>
+              </div>
             )}
             
+            {/* Metadata Preview */}
             {production.viral_metadata && (
               <div className="bg-[#1a1a1a] p-4 rounded-lg border border-[#333] space-y-2">
                 <div>
@@ -1575,8 +1598,8 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
                   <p className="text-gray-300 text-sm line-clamp-2">{production.viral_metadata.description}</p>
                 </div>
                 <div className="flex flex-wrap gap-1">
-                  {production.viral_metadata.tags?.slice(0, 5).map((tag, i) => (
-                    <span key={i} className="text-xs bg-blue-500/20 text-blue-400 px-2 py-1 rounded">
+                  {production.viral_metadata.tags?.slice(0, 8).map((tag, i) => (
+                    <span key={i} className="text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded">
                       #{tag}
                     </span>
                   ))}
@@ -1584,6 +1607,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
               </div>
             )}
             
+            {/* YouTube Status */}
             {production.youtube_id ? (
               <div className="bg-green-900/20 border border-green-500/30 p-4 rounded-lg text-center">
                 <p className="text-green-400 mb-2">✓ ¡Publicado exitosamente!</p>
@@ -1596,9 +1620,17 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
                   Ver en YouTube →
                 </a>
               </div>
+            ) : !user?.accessToken ? (
+              <div className="bg-yellow-900/20 border border-yellow-500/30 p-3 rounded-lg">
+                <p className="text-yellow-400 text-sm text-center">
+                  ⚠️ Para publicar en YouTube, necesitas cerrar sesión y volver a iniciar con Google 
+                  dando permisos de YouTube.
+                </p>
+              </div>
             ) : null}
             
-            <div className="flex justify-between">
+            {/* Action Buttons */}
+            <div className="flex justify-between pt-2">
               <button
                 onClick={async () => {
                   const newState: ProductionWizardState = {
@@ -1628,13 +1660,15 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
                     >
                       Guardar sin Publicar
                     </button>
-                    <button
-                      onClick={handlePublish}
-                      disabled={isLoading || !user?.accessToken}
-                      className={`${user?.accessToken ? 'bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500' : 'bg-gray-600'} disabled:opacity-50 text-white px-8 py-3 rounded-lg font-bold`}
-                    >
-                      {isLoading ? '⏳ Publicando...' : !user?.accessToken ? '🔑 Conectar YouTube' : `📺 Publicar ${config.format === '9:16' ? 'Short' : 'Video'}`}
-                    </button>
+                    {user?.accessToken && production.final_video_url && (
+                      <button
+                        onClick={handlePublish}
+                        disabled={isLoading}
+                        className="bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 disabled:opacity-50 text-white px-8 py-3 rounded-lg font-bold"
+                      >
+                        {isLoading ? '⏳ Publicando...' : `📺 Publicar ${config.format === '9:16' ? 'Short' : 'Video'}`}
+                      </button>
+                    )}
                   </>
                 )}
               </div>
