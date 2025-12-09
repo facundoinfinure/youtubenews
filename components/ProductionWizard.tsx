@@ -110,41 +110,101 @@ const NewsItemCard: React.FC<{
   news: NewsItem;
   selected: boolean;
   onToggle: () => void;
-}> = ({ news, selected, onToggle }) => (
-  <div 
-    onClick={onToggle}
-    className={`
-      p-4 rounded-lg border-2 cursor-pointer transition-all
-      ${selected 
-        ? 'border-cyan-500 bg-cyan-500/10' 
-        : 'border-gray-700 bg-[#1a1a1a] hover:border-gray-500'}
-    `}
-  >
-    <div className="flex items-start gap-3">
-      <input 
-        type="checkbox" 
-        checked={selected} 
-        onChange={onToggle}
-        className="mt-1 w-5 h-5 accent-cyan-500"
-      />
-      <div className="flex-1">
-        <h4 className="font-medium text-white">{news.headline}</h4>
-        <p className="text-sm text-gray-400 mt-1 line-clamp-2">{news.summary}</p>
-        <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
-          <span>{news.source}</span>
-          <span className={`
-            px-2 py-0.5 rounded
-            ${news.viralScore >= 80 ? 'bg-green-500/20 text-green-400' : ''}
-            ${news.viralScore >= 60 && news.viralScore < 80 ? 'bg-yellow-500/20 text-yellow-400' : ''}
-            ${news.viralScore < 60 ? 'bg-gray-500/20 text-gray-400' : ''}
-          `}>
-            Viral: {news.viralScore}%
-          </span>
+}> = ({ news, selected, onToggle }) => {
+  // Format publication date
+  const formatDate = (date: Date | string | undefined): string => {
+    if (!date) return '';
+    try {
+      const d = typeof date === 'string' ? new Date(date) : date;
+      return d.toLocaleDateString('es-ES', { 
+        day: 'numeric', 
+        month: 'short', 
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } catch {
+      return '';
+    }
+  };
+
+  return (
+    <div 
+      onClick={onToggle}
+      className={`
+        p-4 rounded-lg border-2 cursor-pointer transition-all
+        ${selected 
+          ? 'border-cyan-500 bg-cyan-500/10' 
+          : 'border-gray-700 bg-[#1a1a1a] hover:border-gray-500'}
+      `}
+    >
+      <div className="flex items-start gap-3">
+        <input 
+          type="checkbox" 
+          checked={selected} 
+          onChange={onToggle}
+          className="mt-1 w-5 h-5 accent-cyan-500 flex-shrink-0"
+        />
+        <div className="flex-1 min-w-0">
+          {/* Title */}
+          <h4 className="font-medium text-white leading-snug">{news.headline}</h4>
+          
+          {/* Summary */}
+          <p className="text-sm text-gray-300 mt-2 leading-relaxed">{news.summary}</p>
+          
+          {/* Viral Score Reasoning */}
+          {news.viralScoreReasoning && (
+            <div className="mt-3 p-2.5 bg-gradient-to-r from-purple-900/30 to-pink-900/30 border border-purple-500/30 rounded-lg">
+              <div className="flex items-start gap-2">
+                <span className="text-purple-400 text-sm">🔥</span>
+                <p className="text-xs text-purple-200 leading-relaxed">
+                  <span className="font-semibold text-purple-300">¿Por qué es viral?</span>{' '}
+                  {news.viralScoreReasoning}
+                </p>
+              </div>
+            </div>
+          )}
+          
+          {/* Metadata row: Source, Date, Viral Score */}
+          <div className="flex items-center flex-wrap gap-3 mt-3 text-xs">
+            <span className="text-gray-400 font-medium">{news.source}</span>
+            
+            {news.publicationDate && (
+              <span className="text-gray-500 flex items-center gap-1">
+                <span>📅</span>
+                {formatDate(news.publicationDate)}
+              </span>
+            )}
+            
+            <span className={`
+              px-2 py-0.5 rounded font-medium
+              ${news.viralScore >= 80 ? 'bg-green-500/20 text-green-400' : ''}
+              ${news.viralScore >= 60 && news.viralScore < 80 ? 'bg-yellow-500/20 text-yellow-400' : ''}
+              ${news.viralScore < 60 ? 'bg-gray-500/20 text-gray-400' : ''}
+            `}>
+              Viral: {news.viralScore}%
+            </span>
+          </div>
+          
+          {/* Link to original article */}
+          {news.url && (
+            <a
+              href={news.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="inline-flex items-center gap-1.5 mt-3 text-xs text-cyan-400 hover:text-cyan-300 hover:underline transition-colors"
+            >
+              <span>🔗</span>
+              <span>Leer noticia completa en {news.source}</span>
+              <span className="text-[10px]">↗</span>
+            </a>
+          )}
         </div>
       </div>
     </div>
-  </div>
-);
+  );
+};
 
 // =============================================================================================
 // SEGMENT PROGRESS CARD
