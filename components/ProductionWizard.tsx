@@ -36,7 +36,7 @@ interface ProductionWizardProps {
   onClose: () => void;
   // External generation functions
   onFetchNews: () => Promise<NewsItem[]>;
-  onGenerateScript: (newsItems: NewsItem[]) => Promise<{ scenes: ScriptWithScenes; metadata: ViralMetadata }>;
+  onGenerateScript: (newsItems: NewsItem[], improvements?: { implement: string[]; maintain: string[] }) => Promise<{ scenes: ScriptWithScenes; metadata: ViralMetadata }>;
   onGenerateAudio: (segmentIndex: number, text: string, speaker: string) => Promise<{ audioUrl: string; duration: number }>;
   onGenerateVideo: (segmentIndex: number, audioUrl: string, speaker: string) => Promise<{ videoUrl: string }>;
 }
@@ -386,6 +386,10 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
   // Script analysis for YouTube Shorts
   const [scriptAnalysis, setScriptAnalysis] = useState<ScriptAnalysis | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  
+  // Selected improvements for script regeneration
+  const [selectedSuggestions, setSelectedSuggestions] = useState<Set<number>>(new Set());
+  const [selectedStrengths, setSelectedStrengths] = useState<Set<number>>(new Set());
 
   // Ref to always have the latest production (avoids stale closures)
   const productionRef = React.useRef(localProduction);
@@ -1608,31 +1612,156 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
                       </div>
                     </div>
                     
-                    {/* Suggestions & Strengths */}
+                    {/* Suggestions & Strengths with Checkboxes */}
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <div className="text-xs text-gray-500 mb-1">💡 Sugerencias</div>
-                        <ul className="text-xs text-yellow-300 space-y-1">
+                        <div className="text-xs text-gray-500 mb-2 flex items-center justify-between">
+                          <span>💡 Sugerencias a implementar</span>
+                          <button
+                            onClick={() => {
+                              if (selectedSuggestions.size === scriptAnalysis.suggestions.length) {
+                                setSelectedSuggestions(new Set());
+                              } else {
+                                setSelectedSuggestions(new Set(scriptAnalysis.suggestions.map((_, i) => i)));
+                              }
+                            }}
+                            className="text-[10px] text-yellow-400 hover:text-yellow-300"
+                          >
+                            {selectedSuggestions.size === scriptAnalysis.suggestions.length ? 'Ninguna' : 'Todas'}
+                          </button>
+                        </div>
+                        <ul className="text-xs space-y-2">
                           {scriptAnalysis.suggestions.slice(0, 3).map((s, i) => (
-                            <li key={i} className="flex items-start gap-1">
-                              <span>•</span>
-                              <span>{s}</span>
+                            <li key={i} className="flex items-start gap-2">
+                              <input
+                                type="checkbox"
+                                checked={selectedSuggestions.has(i)}
+                                onChange={(e) => {
+                                  const newSet = new Set(selectedSuggestions);
+                                  if (e.target.checked) {
+                                    newSet.add(i);
+                                  } else {
+                                    newSet.delete(i);
+                                  }
+                                  setSelectedSuggestions(newSet);
+                                }}
+                                className="mt-0.5 w-3 h-3 accent-yellow-500 cursor-pointer flex-shrink-0"
+                              />
+                              <span className={selectedSuggestions.has(i) ? 'text-yellow-300' : 'text-gray-500'}>{s}</span>
                             </li>
                           ))}
                         </ul>
                       </div>
                       <div>
-                        <div className="text-xs text-gray-500 mb-1">✅ Fortalezas</div>
-                        <ul className="text-xs text-green-300 space-y-1">
-                          {scriptAnalysis.strengths.slice(0, 2).map((s, i) => (
-                            <li key={i} className="flex items-start gap-1">
-                              <span>•</span>
-                              <span>{s}</span>
+                        <div className="text-xs text-gray-500 mb-2 flex items-center justify-between">
+                          <span>✅ Fortalezas a mantener</span>
+                          <button
+                            onClick={() => {
+                              if (selectedStrengths.size === scriptAnalysis.strengths.length) {
+                                setSelectedStrengths(new Set());
+                              } else {
+                                setSelectedStrengths(new Set(scriptAnalysis.strengths.map((_, i) => i)));
+                              }
+                            }}
+                            className="text-[10px] text-green-400 hover:text-green-300"
+                          >
+                            {selectedStrengths.size === scriptAnalysis.strengths.length ? 'Ninguna' : 'Todas'}
+                          </button>
+                        </div>
+                        <ul className="text-xs space-y-2">
+                          {scriptAnalysis.strengths.slice(0, 3).map((s, i) => (
+                            <li key={i} className="flex items-start gap-2">
+                              <input
+                                type="checkbox"
+                                checked={selectedStrengths.has(i)}
+                                onChange={(e) => {
+                                  const newSet = new Set(selectedStrengths);
+                                  if (e.target.checked) {
+                                    newSet.add(i);
+                                  } else {
+                                    newSet.delete(i);
+                                  }
+                                  setSelectedStrengths(newSet);
+                                }}
+                                className="mt-0.5 w-3 h-3 accent-green-500 cursor-pointer flex-shrink-0"
+                              />
+                              <span className={selectedStrengths.has(i) ? 'text-green-300' : 'text-gray-500'}>{s}</span>
                             </li>
                           ))}
                         </ul>
                       </div>
                     </div>
+                    
+                    {/* Regenerate with Improvements Button */}
+                    {(selectedSuggestions.size > 0 || selectedStrengths.size > 0) && (
+                      <button
+                        onClick={async () => {
+                          const improvements = {
+                            implement: scriptAnalysis.suggestions.filter((_, i) => selectedSuggestions.has(i)),
+                            maintain: scriptAnalysis.strengths.filter((_, i) => selectedStrengths.has(i))
+                          };
+                          
+                          setIsLoading(true);
+                          setProgressStatus({ message: 'Regenerando con mejoras...', detail: `${improvements.implement.length} mejoras, ${improvements.maintain.length} fortalezas`, progress: 20 });
+                          
+                          try {
+                            const selectedNews = fetchedNews.filter(n => selectedNewsIds.includes(n.id || n.headline));
+                            const result = await onGenerateScript(selectedNews, improvements);
+                            
+                            setProgressStatus({ message: 'Procesando nuevo guión...', progress: 70 });
+                            
+                            const scenes = result.scenes;
+                            const segments: BroadcastSegment[] = Object.entries(scenes.scenes).map(([key, scene]) => ({
+                              speaker: scene.video_mode === 'hostA' ? config.characters.hostA.name : config.characters.hostB.name,
+                              text: scene.text,
+                              audioBase64: '',
+                              sceneTitle: scene.title,
+                              sceneIndex: parseInt(key)
+                            }));
+                            
+                            const updatedProduction: Production = {
+                              ...localProduction,
+                              scenes: scenes,
+                              viral_metadata: result.metadata,
+                              segments: segments,
+                              narrative_used: scenes.narrative_used
+                            };
+                            
+                            await saveProduction(updatedProduction);
+                            setLocalProduction(updatedProduction);
+                            onUpdateProduction(updatedProduction);
+                            
+                            // Clear selections and analysis for fresh re-analysis
+                            setScriptAnalysis(null);
+                            setSelectedSuggestions(new Set());
+                            setSelectedStrengths(new Set());
+                            
+                            setProgressStatus({ message: '¡Listo!', progress: 100 });
+                            await new Promise(r => setTimeout(r, 300));
+                            
+                            toast.success('✨ Script regenerado con mejoras');
+                          } catch (error) {
+                            toast.error(`Error: ${(error as Error).message}`);
+                          } finally {
+                            setIsLoading(false);
+                            setProgressStatus(null);
+                          }
+                        }}
+                        disabled={isLoading}
+                        className="w-full bg-gradient-to-r from-yellow-600 to-orange-600 hover:from-yellow-500 hover:to-orange-500 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all"
+                      >
+                        {isLoading ? (
+                          <>
+                            <span className="animate-spin">⏳</span>
+                            Regenerando...
+                          </>
+                        ) : (
+                          <>
+                            ✨ Regenerar Script con {selectedSuggestions.size + selectedStrengths.size} mejora(s)
+                          </>
+                        )}
+                      </button>
+                    )}
                   </div>
                 ) : (
                   <p className="text-xs text-gray-500 text-center py-2">

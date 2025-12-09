@@ -97,7 +97,8 @@ const openaiRequest = async (
 export const generateScriptWithGPT = async (
   news: NewsItem[], 
   config: ChannelConfig, 
-  viralHook?: string
+  viralHook?: string,
+  improvements?: { implement: string[]; maintain: string[] }
 ): Promise<ScriptWithScenes> => {
   // Limit news items to reduce context size and latency
   const limitedNews = news.slice(0, 5);
@@ -235,12 +236,26 @@ ${ethicalGuardrails ? ethicalGuardrails + '\n\n' : ''}${metadataRules}
 ${outputFormat}
 `.trim();
 
+  // Build improvements section if regenerating with feedback
+  const improvementsSection = improvements ? `
+IMPORTANT - REGENERATION WITH IMPROVEMENTS:
+This is a script regeneration. You MUST implement these specific improvements:
+
+${improvements.implement.length > 0 ? `IMPROVEMENTS TO IMPLEMENT (REQUIRED):
+${improvements.implement.map((imp, i) => `${i + 1}. ${imp}`).join('\n')}` : ''}
+
+${improvements.maintain.length > 0 ? `STRENGTHS TO MAINTAIN (Keep these in the new script):
+${improvements.maintain.map((str, i) => `${i + 1}. ${str}`).join('\n')}` : ''}
+
+Focus on implementing the requested improvements while preserving the strengths. The new script should be noticeably better than the previous version.
+` : '';
+
   const userPrompt = `
 Generate a complete narrative using the instructions above.
 Language: ${config.language}
 Tone: ${config.tone}
 ${viralHook ? `Hook reference: "${viralHook}"` : ''}
-
+${improvementsSection}
 Today's news:
 ${newsContext}
 `.trim();

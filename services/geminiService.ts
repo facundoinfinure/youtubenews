@@ -527,12 +527,16 @@ export const convertScenesToScriptLines = (
 export const generateScriptWithScenes = async (
   news: NewsItem[], 
   config: ChannelConfig, 
-  viralHook?: string
+  viralHook?: string,
+  improvements?: { implement: string[]; maintain: string[] }
 ): Promise<ScriptWithScenes> => {
   console.log(`📝 [Script v2.0] Generating script with Narrative Engine...`);
+  if (improvements) {
+    console.log(`📝 [Script v2.0] Regenerating with ${improvements.implement.length} improvements and ${improvements.maintain.length} strengths to maintain`);
+  }
   
   try {
-    const scriptWithScenes = await generateScriptWithGPT(news, config, viralHook);
+    const scriptWithScenes = await generateScriptWithGPT(news, config, viralHook, improvements);
     console.log(`✅ [Script v2.0] Generated ${Object.keys(scriptWithScenes.scenes).length} scenes using "${scriptWithScenes.narrative_used}" narrative`);
     return scriptWithScenes;
   } catch (error) {

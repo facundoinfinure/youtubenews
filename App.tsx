@@ -2534,12 +2534,13 @@ const App: React.FC = () => {
             
             return news;
           }}
-          onGenerateScript={async (newsItems) => {
+          onGenerateScript={async (newsItems, improvements) => {
             // Use the production's news_date, not the current selectedDate
             const result = await generateScriptWithScenes(
               newsItems.slice(0, 4),
               config,
-              config.preferredNarrative
+              config.preferredNarrative,
+              improvements // Pass improvements for regeneration
             );
             const dateObj = parseLocalDate(wizardProduction.news_date);
             const metadata = await generateViralMetadata(
