@@ -1127,6 +1127,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
 
       // Step 2: Select News
       case 'news_select':
+        const hasConfirmedSelection = production.selected_news_ids && production.selected_news_ids.length > 0;
         return (
           <div className="space-y-6">
             <div className="flex items-center justify-between">
@@ -1137,6 +1138,14 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
                 Recomendado: 2-4 noticias
               </span>
             </div>
+            
+            {hasConfirmedSelection && selectedNewsIds.length === production.selected_news_ids?.length && (
+              <div className="bg-green-900/20 border border-green-500/30 p-3 rounded-lg">
+                <p className="text-green-400 text-sm">
+                  ✓ Ya tienes {selectedNewsIds.length} noticias seleccionadas. Puedes cambiar la selección o continuar.
+                </p>
+              </div>
+            )}
             
             <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
               {fetchedNews.map((news, i) => (
@@ -1175,7 +1184,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
                 disabled={selectedNewsIds.length === 0}
                 className="bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 disabled:opacity-50 text-white px-8 py-3 rounded-lg font-bold"
               >
-                Confirmar Selección →
+                {hasConfirmedSelection && selectedNewsIds.length > 0 ? '✓ Continuar →' : 'Confirmar Selección →'}
               </button>
             </div>
           </div>
@@ -1183,6 +1192,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
 
       // Step 3: Generate Script
       case 'script_generate':
+        const hasExistingScript = production.scenes?.scenes && Object.keys(production.scenes.scenes).length > 0;
         return (
           <div className="space-y-6">
             <div className="text-center py-8">
@@ -1193,6 +1203,15 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
                 usando el estilo de "{config.tone}".
               </p>
             </div>
+            
+            {hasExistingScript && (
+              <div className="bg-green-900/20 border border-green-500/30 p-4 rounded-lg">
+                <p className="text-green-400">
+                  ✓ Ya tienes un guión con {Object.keys(production.scenes!.scenes).length} escenas. 
+                  Puedes usarlo o regenerar uno nuevo.
+                </p>
+              </div>
+            )}
             
             <div className="bg-[#1a1a1a] p-4 rounded-lg border border-[#333]">
               <h4 className="text-sm font-medium text-gray-400 mb-2">Noticias seleccionadas:</h4>
@@ -1219,13 +1238,31 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
                 ← Volver
               </button>
               
-              <button
-                onClick={handleGenerateScript}
-                disabled={isLoading}
-                className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-50 text-white px-8 py-3 rounded-lg font-bold"
-              >
-                {isLoading ? '⏳ Generando...' : '✨ Generar Guión'}
-              </button>
+              <div className="flex gap-3">
+                <button
+                  onClick={handleGenerateScript}
+                  disabled={isLoading}
+                  className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-50 text-white px-8 py-3 rounded-lg font-bold"
+                >
+                  {isLoading ? '⏳ Generando...' : hasExistingScript ? '🔄 Regenerar Guión' : '✨ Generar Guión'}
+                </button>
+                
+                {hasExistingScript && !isLoading && (
+                  <button
+                    onClick={async () => {
+                      const newState: ProductionWizardState = {
+                        ...wizardState,
+                        currentStep: 'script_review',
+                        scriptGenerate: { ...wizardState.scriptGenerate, status: 'completed' }
+                      };
+                      await saveWizardState(newState);
+                    }}
+                    className="bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white px-8 py-3 rounded-lg font-bold"
+                  >
+                    ✓ Usar Existente →
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         );
@@ -1480,19 +1517,31 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
                 ← Volver
               </button>
               
-              <button
-                onClick={production.final_video_url ? async () => {
-                  const newState: ProductionWizardState = {
-                    ...wizardState,
-                    currentStep: 'publish'
-                  };
-                  await saveWizardState(newState);
-                } : handleRenderFinal}
-                disabled={isLoading}
-                className="bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-500 hover:to-red-500 disabled:opacity-50 text-white px-8 py-3 rounded-lg font-bold"
-              >
-                {isLoading ? '⏳ Renderizando...' : production.final_video_url ? 'Continuar →' : '🎬 Renderizar Final'}
-              </button>
+              <div className="flex gap-3">
+                <button
+                  onClick={handleRenderFinal}
+                  disabled={isLoading}
+                  className="bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-500 hover:to-red-500 disabled:opacity-50 text-white px-8 py-3 rounded-lg font-bold"
+                >
+                  {isLoading ? '⏳ Renderizando...' : production.final_video_url ? '🔄 Re-Renderizar' : '🎬 Renderizar Final'}
+                </button>
+                
+                {production.final_video_url && !isLoading && (
+                  <button
+                    onClick={async () => {
+                      const newState: ProductionWizardState = {
+                        ...wizardState,
+                        currentStep: 'publish',
+                        renderFinal: { ...wizardState.renderFinal, status: 'completed' }
+                      };
+                      await saveWizardState(newState);
+                    }}
+                    className="bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white px-8 py-3 rounded-lg font-bold"
+                  >
+                    ✓ Continuar →
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         );
@@ -1563,22 +1612,32 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
                 ← Volver
               </button>
               
-              {production.youtube_id ? (
-                <button
-                  onClick={onClose}
-                  className="bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white px-8 py-3 rounded-lg font-bold"
-                >
-                  ✓ Finalizar
-                </button>
-              ) : (
-                <button
-                  onClick={handlePublish}
-                  disabled={isLoading || !user?.accessToken}
-                  className={`${user?.accessToken ? 'bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500' : 'bg-gray-600'} disabled:opacity-50 text-white px-8 py-3 rounded-lg font-bold`}
-                >
-                  {isLoading ? '⏳ Publicando...' : !user?.accessToken ? '🔑 Conectar YouTube' : `📺 Publicar ${config.format === '9:16' ? 'Short' : 'Video'}`}
-                </button>
-              )}
+              <div className="flex gap-3">
+                {production.youtube_id ? (
+                  <button
+                    onClick={onClose}
+                    className="bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white px-8 py-3 rounded-lg font-bold"
+                  >
+                    ✓ Finalizar
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      onClick={onClose}
+                      className="bg-gray-600 hover:bg-gray-500 text-white px-6 py-3 rounded-lg"
+                    >
+                      Guardar sin Publicar
+                    </button>
+                    <button
+                      onClick={handlePublish}
+                      disabled={isLoading || !user?.accessToken}
+                      className={`${user?.accessToken ? 'bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500' : 'bg-gray-600'} disabled:opacity-50 text-white px-8 py-3 rounded-lg font-bold`}
+                    >
+                      {isLoading ? '⏳ Publicando...' : !user?.accessToken ? '🔑 Conectar YouTube' : `📺 Publicar ${config.format === '9:16' ? 'Short' : 'Video'}`}
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
           </div>
         );
