@@ -195,6 +195,23 @@ export interface RenderConfig {
     url?: string;
     volume: number; // 0-1
   };
+  
+  // === NEWS-STYLE OVERLAYS (v2.4) - Professional TV Broadcast Look ===
+  newsStyle?: {
+    enabled: boolean;
+    
+    // Lower Third Banner (headline bar at bottom)
+    lowerThird: {
+      enabled: boolean;
+      primaryColor: string;    // Banner color (default: #ff0000)
+      secondaryColor: string;  // Badge background (default: #000000)
+      textColor: string;       // Text color (default: #ffffff)
+      category?: string;       // e.g., "BREAKING NEWS", "ECONOMÍA", "TECH"
+    };
+    
+    // Channel branding watermark
+    showChannelBranding: boolean;
+  };
 }
 
 // Default render configuration
@@ -228,6 +245,18 @@ export const DEFAULT_RENDER_CONFIG: RenderConfig = {
   backgroundMusic: {
     enabled: false,
     volume: 0.1
+  },
+  // News-style overlays defaults
+  newsStyle: {
+    enabled: false,
+    lowerThird: {
+      enabled: false,
+      primaryColor: '#ff0000',
+      secondaryColor: '#000000',
+      textColor: '#ffffff',
+      category: 'BREAKING NEWS'
+    },
+    showChannelBranding: true
   }
 };
 

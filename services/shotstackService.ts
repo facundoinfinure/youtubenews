@@ -550,7 +550,7 @@ export const renderVideo = async (
 // PODCAST-STYLE COMPOSITION (Following shockstack.md guide)
 // =============================================================================================
 
-import { BroadcastSegment, VideoAssets, ChannelConfig } from "../types";
+import { BroadcastSegment, VideoAssets, ChannelConfig, RenderConfig, DEFAULT_RENDER_CONFIG } from "../types";
 
 /**
  * Scene input for podcast-style composition
@@ -563,59 +563,280 @@ export interface PodcastScene {
 }
 
 /**
- * Build podcast-style Shotstack edit following the guide
+ * Build podcast-style Shotstack edit with professional production quality
  * 
- * This creates a clean, modern podcast aesthetic with:
- * - Videos playing sequentially (NO overlaps)
- * - Minimalist lower thirds with titles
- * - Subtle frame/border
- * - Soft vignette overlay
- * - Fade transitions only
+ * This creates a professional podcast aesthetic with:
+ * - Videos playing sequentially with configurable transitions
+ * - Ken Burns style motion effects (zoom, pan)
+ * - Optional news-style overlays (lower third, date, breaking news)
+ * - Configurable filters and color grading
  */
 export const buildPodcastStyleEdit = (
   scenes: PodcastScene[],
   options: {
     channelName?: string;
     episodeTitle?: string;
+    headline?: string;           // Main headline for lower third
     showBorder?: boolean;
     showVignette?: boolean;
     resolution?: '1080' | 'hd' | 'sd';
     aspectRatio?: '16:9' | '9:16' | '1:1' | '4:5';
+    renderConfig?: RenderConfig; // Full render configuration
   } = {}
 ): any => {
-  // Calculate cumulative start times
-  // CRITICAL: Each video starts when the previous one ends
+  const config = options.renderConfig || DEFAULT_RENDER_CONFIG;
+  
+  // Calculate cumulative start times accounting for transitions
+  const transitionDuration = config.transition.type !== 'none' ? config.transition.duration : 0;
   let currentStart = 0;
-  const scenesWithTiming = scenes.map(scene => {
+  const scenesWithTiming = scenes.map((scene, index) => {
     const sceneWithStart = {
       ...scene,
-      start: currentStart
+      start: currentStart,
+      index
     };
-    currentStart += scene.duration;
+    // Overlap clips by transition duration (except first clip)
+    currentStart += scene.duration - (index < scenes.length - 1 ? transitionDuration : 0);
     return sceneWithStart;
   });
 
-  const totalDuration = currentStart;
+  const totalDuration = currentStart + (scenes.length > 0 ? transitionDuration : 0);
   const aspectRatio = options.aspectRatio || '16:9';
   console.log(`🎬 [Podcast Composition] Total duration: ${totalDuration}s across ${scenes.length} scenes (aspect: ${aspectRatio})`);
+  console.log(`🎬 [Podcast Composition] Transition: ${config.transition.type}, Effect: ${config.effects.clipEffect}, Filter: ${config.effects.filter}`);
 
-  // Track 1: Video clips - clean, dynamic, back to back
-  // NO transitions, NO overlays - just pure video flow
-  const videoClips = scenesWithTiming.map(scene => ({
-    asset: {
-      type: 'video',
-      src: scene.video_url,
-      volume: 1 // Use embedded audio
-    },
-    start: scene.start,
-    length: 'auto' // Let Shotstack detect the duration
-    // NO transitions - clips are sequential without gaps
-  }));
+  // Effect rotation for variety (Ken Burns style)
+  const effectRotation: ShotstackEffect[] = [
+    'zoomInSlow', 'slideRightSlow', 'zoomOutSlow', 'slideLeftSlow',
+    'zoomIn', 'slideUpSlow', 'zoomOutSlow', 'slideDownSlow'
+  ];
 
-  // Build tracks array - only video track for dynamic flow
-  // REMOVED: Title overlays, border, vignette, branding for cleaner playback
+  // Build video clips with transitions and effects
+  const videoClips = scenesWithTiming.map((scene, index) => {
+    // Determine effect - use config or auto-rotate for variety
+    let clipEffect: ShotstackEffect | undefined;
+    if (config.effects.clipEffect !== 'none') {
+      clipEffect = config.effects.autoEffectRotation 
+        ? effectRotation[index % effectRotation.length]
+        : config.effects.clipEffect as ShotstackEffect;
+    }
+
+    const clip: any = {
+      asset: {
+        type: 'video',
+        src: scene.video_url,
+        volume: 1 // Use embedded audio
+      },
+      start: scene.start,
+      length: 'auto'
+    };
+
+    // Add effect (Ken Burns motion)
+    if (clipEffect) {
+      clip.effect = clipEffect;
+    }
+
+    // Add filter if configured
+    if (config.effects.filter && config.effects.filter !== 'none') {
+      clip.filter = config.effects.filter;
+    }
+
+    // Add transition (except for first clip)
+    if (config.transition.type !== 'none' && index > 0) {
+      clip.transition = {
+        in: config.transition.type
+      };
+    }
+
+    return clip;
+  });
+
+  // Build tracks array (bottom to top in render order)
   const tracks: any[] = [];
+  
+  // TRACK 1 (Base): Video clips
   tracks.push({ clips: videoClips });
+
+  // === NEWS-STYLE OVERLAYS ===
+  if (config.newsStyle?.enabled) {
+    const newsConfig = config.newsStyle;
+    
+    // TRACK 2: Lower Third Banner (if enabled)
+    if (newsConfig.lowerThird?.enabled) {
+      const primaryColor = newsConfig.lowerThird.primaryColor || '#ff0000';
+      const secondaryColor = newsConfig.lowerThird.secondaryColor || '#000000';
+      const textColor = newsConfig.lowerThird.textColor || '#ffffff';
+      const category = newsConfig.lowerThird.category || 'BREAKING NEWS';
+      const headline = options.headline || options.episodeTitle || options.channelName || '';
+
+      // Main horizontal banner bar
+      tracks.unshift({
+        clips: [{
+          asset: {
+            type: 'text',
+            text: '',
+            alignment: { horizontal: 'center', vertical: 'center' },
+            font: { color: '#000000', family: 'Montserrat SemiBold', size: 24, lineHeight: 1 },
+            width: 2200,
+            height: 162,
+            background: { color: primaryColor }
+          },
+          start: 0.4,
+          length: totalDuration,
+          offset: { x: 0, y: -0.39 },
+          position: 'center',
+          transition: { in: 'slideRight' }
+        }]
+      });
+
+      // Category badge background (black box)
+      tracks.unshift({
+        clips: [{
+          asset: {
+            type: 'text',
+            text: '',
+            alignment: { horizontal: 'center', vertical: 'center' },
+            font: { color: '#000000', family: 'Montserrat SemiBold', size: 24, lineHeight: 1 },
+            width: 430,
+            height: 120,
+            background: { color: secondaryColor }
+          },
+          start: 0.8,
+          length: totalDuration,
+          offset: { x: -0.38, y: -0.39 },
+          position: 'center',
+          transition: { in: 'slideRight' }
+        }]
+      });
+
+      // Category text (e.g., "BREAKING NEWS")
+      tracks.unshift({
+        clips: [{
+          asset: {
+            type: 'text',
+            text: category,
+            alignment: { horizontal: 'center', vertical: 'center' },
+            font: { color: textColor, family: 'Oswald', size: 42, lineHeight: 1 },
+            width: 400,
+            height: 100
+          },
+          start: 1,
+          length: totalDuration,
+          offset: { x: -0.38, y: -0.39 },
+          position: 'center',
+          transition: { in: 'slideRight' }
+        }]
+      });
+
+      // Headline text
+      if (headline) {
+        tracks.unshift({
+          clips: [{
+            asset: {
+              type: 'text',
+              text: headline,
+              alignment: { horizontal: 'left', vertical: 'center' },
+              font: { color: textColor, family: 'Roboto Medium', size: 40, lineHeight: 1 },
+              width: 1200,
+              height: 120
+            },
+            start: 1.2,
+            length: totalDuration,
+            offset: { x: 0.15, y: -0.39 },
+            position: 'center',
+            transition: { in: 'slideRight' }
+          }]
+        });
+      }
+    }
+
+    // TRACK: Date display (if enabled in overlays)
+    if (config.overlays?.showDate) {
+      const dateText = formatNewsDate();
+      tracks.unshift({
+        clips: [{
+          asset: {
+            type: 'text',
+            text: dateText,
+            alignment: { horizontal: 'right', vertical: 'center' },
+            font: { color: '#ffffff', family: 'Roboto', size: 24, lineHeight: 1 },
+            width: 300,
+            height: 50
+          },
+          start: 1.5,
+          length: totalDuration,
+          offset: { x: 0.42, y: 0.44 },
+          position: 'center',
+          transition: { in: 'fade' }
+        }]
+      });
+    }
+
+    // TRACK: LIVE indicator (if enabled)
+    if (config.overlays?.showLiveIndicator) {
+      tracks.unshift({
+        clips: [{
+          asset: {
+            type: 'text',
+            text: '🔴 LIVE',
+            alignment: { horizontal: 'left', vertical: 'center' },
+            font: { color: '#ff0000', family: 'Roboto Bold', size: 28, lineHeight: 1 },
+            width: 150,
+            height: 50
+          },
+          start: 0.5,
+          length: totalDuration,
+          offset: { x: -0.42, y: 0.44 },
+          position: 'center',
+          transition: { in: 'fade' }
+        }]
+      });
+    }
+
+    // TRACK: Breaking News banner at top (if enabled)
+    if (config.overlays?.showBreakingNews) {
+      const breakingText = config.overlays.breakingNewsText || '🔴 BREAKING NEWS';
+      tracks.unshift({
+        clips: [{
+          asset: {
+            type: 'text',
+            text: breakingText,
+            alignment: { horizontal: 'center', vertical: 'center' },
+            font: { color: '#ffffff', family: 'Oswald', size: 36, lineHeight: 1 },
+            width: 600,
+            height: 60,
+            background: { color: '#cc0000' }
+          },
+          start: 0,
+          length: 5, // Show for 5 seconds at start
+          offset: { x: 0, y: 0.42 },
+          position: 'center',
+          transition: { in: 'slideDown', out: 'fade' }
+        }]
+      });
+    }
+
+    // TRACK: Channel branding (if enabled)
+    if (newsConfig.showChannelBranding && options.channelName) {
+      tracks.unshift({
+        clips: [{
+          asset: {
+            type: 'text',
+            text: options.channelName.toUpperCase(),
+            alignment: { horizontal: 'right', vertical: 'center' },
+            font: { color: '#ffcc00', family: 'Oswald', size: 20, lineHeight: 1 },
+            width: 200,
+            height: 40
+          },
+          start: 2,
+          length: totalDuration,
+          offset: { x: 0.42, y: 0.40 },
+          position: 'center',
+          transition: { in: 'fade' }
+        }]
+      });
+    }
+  }
 
   // Resolution settings based on aspect ratio
   const resolutionMap: Record<string, Record<string, { width: number; height: number }>> = {
@@ -640,7 +861,7 @@ export const buildPodcastStyleEdit = (
       'sd': { width: 480, height: 600 }
     }
   };
-  const size = resolutionMap[aspectRatio]?.[options.resolution || '1080'] || resolutionMap['16:9']['1080'];
+  const size = resolutionMap[aspectRatio]?.[options.resolution || config.output.resolution || '1080'] || resolutionMap['16:9']['1080'];
 
   return {
     timeline: {
@@ -649,15 +870,26 @@ export const buildPodcastStyleEdit = (
     },
     output: {
       format: 'mp4',
-      fps: 25,
+      fps: config.output.fps || 25,
       size,
-      aspectRatio // Include aspectRatio in output
+      aspectRatio
     }
   };
 };
 
 /**
- * Render a podcast-style video from scenes
+ * Format current date for news overlay display
+ */
+const formatNewsDate = (): string => {
+  const now = new Date();
+  const day = now.getDate();
+  const month = now.toLocaleString('en-US', { month: 'short' }).toUpperCase();
+  const year = now.getFullYear();
+  return `${day} ${month} ${year}`;
+};
+
+/**
+ * Render a podcast-style video from scenes with professional production quality
  * This is the main function to use for podcast composition
  */
 export const renderPodcastVideo = async (
@@ -665,14 +897,19 @@ export const renderPodcastVideo = async (
   options: {
     channelName?: string;
     episodeTitle?: string;
+    headline?: string;
     showBorder?: boolean;
     showVignette?: boolean;
     resolution?: '1080' | 'hd' | 'sd';
     aspectRatio?: '16:9' | '9:16' | '1:1' | '4:5';
+    renderConfig?: RenderConfig;
   } = {}
 ): Promise<RenderResult> => {
-  console.log(`🎙️ [Podcast Render] Starting podcast-style composition...`);
+  const config = options.renderConfig || DEFAULT_RENDER_CONFIG;
+  
+  console.log(`🎙️ [Podcast Render] Starting professional podcast composition...`);
   console.log(`🎙️ [Podcast Render] ${scenes.length} scenes to compose`);
+  console.log(`🎙️ [Podcast Render] News-style overlays: ${config.newsStyle?.enabled ? 'ENABLED' : 'disabled'}`);
   
   // Validate scenes
   const validScenes = scenes.filter(s => s.video_url && s.duration > 0);
@@ -683,10 +920,13 @@ export const renderPodcastVideo = async (
     };
   }
 
-  // Build the edit
-  const edit = buildPodcastStyleEdit(validScenes, options);
+  // Build the edit with full render config
+  const edit = buildPodcastStyleEdit(validScenes, {
+    ...options,
+    renderConfig: config
+  });
   
-  console.log(`📋 [Podcast Render] Edit config built, submitting to Shotstack...`);
+  console.log(`📋 [Podcast Render] Edit config built with ${edit.timeline.tracks.length} tracks, submitting to Shotstack...`);
 
   try {
     // Submit to Shotstack
@@ -799,19 +1039,7 @@ export interface NewsOverlayConfig {
   showHostNames?: boolean;
 }
 
-/**
- * Format date for news overlay
- */
-const formatNewsDate = (format: 'full' | 'short' | 'time' = 'full'): string => {
-  const now = new Date();
-  const options: Intl.DateTimeFormatOptions = format === 'full' 
-    ? { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }
-    : format === 'short'
-    ? { month: 'short', day: 'numeric', year: 'numeric' }
-    : { hour: '2-digit', minute: '2-digit' };
-  
-  return now.toLocaleDateString('en-US', options).toUpperCase();
-};
+// formatNewsDate is defined earlier in buildPodcastStyleEdit section
 
 /**
  * Create professional news broadcast overlays
@@ -844,7 +1072,7 @@ export const createNewsOverlays = (
   // === DATE DISPLAY ===
   // Shows date in corner, typical news channel style
   if (config.showDate) {
-    const dateText = formatNewsDate(config.dateFormat);
+    const dateText = formatNewsDate();
     overlays.push({
       text: dateText,
       start: currentTime,
@@ -1080,13 +1308,22 @@ import { Production } from "../types";
  * - segment_status: contains videoUrl and audioUrl for each segment
  * - segments: contains speaker and text
  * - scenes.scenes: contains title for each scene
+ * 
+ * @param production - The production to render
+ * @param channelName - Optional channel name for branding
+ * @param aspectRatio - Output aspect ratio
+ * @param renderConfig - Full render configuration (transitions, effects, overlays)
  */
 export const renderProductionToShotstack = async (
   production: Production,
   channelName?: string,
-  aspectRatio?: '16:9' | '9:16' | '1:1' | '4:5'
+  aspectRatio?: '16:9' | '9:16' | '1:1' | '4:5',
+  renderConfig?: RenderConfig
 ): Promise<RenderResult> => {
+  const config = renderConfig || DEFAULT_RENDER_CONFIG;
+  
   console.log(`🎬 [Shotstack] Rendering production ${production.id} to final video (aspect: ${aspectRatio || '16:9'})...`);
+  console.log(`🎬 [Shotstack] Config: transition=${config.transition.type}, effect=${config.effects.clipEffect}, newsStyle=${config.newsStyle?.enabled}`);
   
   // Check if we have segment_status with video URLs
   if (!production.segment_status) {
@@ -1138,12 +1375,19 @@ export const renderProductionToShotstack = async (
   console.log(`🎬 [Shotstack] Found ${scenes.length} scenes with videos`);
   console.log(`🎬 [Shotstack] Total estimated duration: ${scenes.reduce((acc, s) => acc + s.duration, 0)}s`);
 
-  // Clean dynamic video flow - no overlays, no borders, no vignette
+  // Use viral_metadata title or viral_hook as headline for lower third
+  const headline = production.viral_metadata?.title || production.viral_hook || channelName || '';
+
+  // Render with full configuration
   return await renderPodcastVideo(scenes, {
+    channelName,
+    headline,
+    episodeTitle: headline,
     showBorder: false,
     showVignette: false,
-    resolution: '1080',
-    aspectRatio: aspectRatio || '16:9'
+    resolution: config.output.resolution as '1080' | 'hd' | 'sd',
+    aspectRatio: aspectRatio || '16:9',
+    renderConfig: config
   });
 };
 

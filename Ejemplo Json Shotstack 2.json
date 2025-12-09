@@ -1,0 +1,376 @@
+{
+    "timeline": {
+      "fonts": [
+        {
+          "src": "https://templates.shotstack.io/breaking-news-channel-template-urgent-announcements-sales/30e1f15f-b0f0-4c6e-bc2c-8a5f3a8478ef/source.ttf"
+        },
+        {
+          "src": "https://templates.shotstack.io/breaking-news-channel-template-urgent-announcements-sales/ef4d1738-75fd-4808-84b9-119a36c79c3b/source.ttf"
+        }
+      ],
+      "background": "#FFFFFF",
+      "tracks": [
+        {
+          "clips": [
+            {
+              "asset": {
+                "type": "text",
+                "text": "{{Headline}}",
+                "alignment": {
+                  "horizontal": "left",
+                  "vertical": "center"
+                },
+                "font": {
+                  "color": "{{ FONT_COLOR }}",
+                  "family": "Roboto Medium",
+                  "size": 46,
+                  "lineHeight": 1
+                },
+                "width": 1300,
+                "height": 150
+              },
+              "start": 1,
+              "length": "end",
+              "offset": {
+                "x": 0.116,
+                "y": -0.39
+              },
+              "position": "center",
+              "transition": {
+                "in": "slideRight"
+              }
+            }
+          ]
+        },
+        {
+          "clips": [
+            {
+              "asset": {
+                "type": "text",
+                "text": "{{Date}}",
+                "alignment": {
+                  "horizontal": "center",
+                  "vertical": "center"
+                },
+                "font": {
+                  "color": "{{ FONT_COLOR }}",
+                  "family": "Oswald",
+                  "size": "28",
+                  "lineHeight": 1
+                },
+                "width": 300,
+                "height": 72
+              },
+              "start": 1.2,
+              "length": "end",
+              "offset": {
+                "x": -0.421,
+                "y": -0.325
+              },
+              "position": "center",
+              "transition": {
+                "in": "slideRight"
+              }
+            }
+          ]
+        },
+        {
+          "clips": [
+            {
+              "asset": {
+                "type": "text",
+                "text": "{{News_Slug}}",
+                "alignment": {
+                  "horizontal": "center",
+                  "vertical": "center"
+                },
+                "font": {
+                  "color": "{{ SHAPE_COLOR_2 }}",
+                  "family": "Oswald",
+                  "size": "60",
+                  "lineHeight": 1
+                },
+                "width": 450,
+                "height": 150
+              },
+              "start": 0.8,
+              "length": "end",
+              "offset": {
+                "x": -0.39,
+                "y": -0.421
+              },
+              "position": "center",
+              "transition": {
+                "in": "slideRight"
+              }
+            }
+          ]
+        },
+        {
+          "clips": [
+            {
+              "length": "end",
+              "asset": {
+                "type": "video",
+                "src": "{{ VIDEO_2 }}",
+                "volume": 0
+              },
+              "start": 1.4,
+              "scale": 0.35,
+              "offset": {
+                "x": 0.258,
+                "y": 0.167
+              },
+              "position": "center",
+              "transition": {
+                "in": "slideLeft"
+              }
+            }
+          ]
+        },
+        {
+          "clips": [
+            {
+              "asset": {
+                "type": "text",
+                "text": "",
+                "alignment": {
+                  "horizontal": "center",
+                  "vertical": "center"
+                },
+                "font": {
+                  "color": "#000000",
+                  "family": "Montserrat ExtraBold",
+                  "size": 46,
+                  "lineHeight": 1
+                },
+                "width": 710,
+                "height": 410,
+                "background": {
+                  "color": "{{ FONT_COLOR }}"
+                }
+              },
+              "start": 1.4,
+              "length": "end",
+              "offset": {
+                "x": 0.258,
+                "y": 0.167
+              },
+              "position": "center",
+              "transition": {
+                "in": "slideLeft"
+              }
+            }
+          ]
+        },
+        {
+          "clips": [
+            {
+              "asset": {
+                "type": "text",
+                "text": "",
+                "alignment": {
+                  "horizontal": "center",
+                  "vertical": "center"
+                },
+                "font": {
+                  "color": "#000000",
+                  "family": "Montserrat SemiBold",
+                  "size": 24,
+                  "lineHeight": 1
+                },
+                "width": 430,
+                "height": 6,
+                "background": {
+                  "color": "{{ SHAPE_COLOR_1 }}"
+                }
+              },
+              "start": 1,
+              "length": "end",
+              "offset": {
+                "x": -0.452,
+                "y": -0.367
+              },
+              "position": "center"
+            }
+          ]
+        },
+        {
+          "clips": [
+            {
+              "asset": {
+                "type": "luma",
+                "src": "https://templates.shotstack.io/breaking-news-channel-template-urgent-announcements-sales/572b27ab-4de2-4128-8072-a6efbd4b2429/source.png"
+              },
+              "start": 0,
+              "length": "end"
+            },
+            {
+              "asset": {
+                "type": "text",
+                "text": "",
+                "alignment": {
+                  "horizontal": "center",
+                  "vertical": "center"
+                },
+                "font": {
+                  "color": "#000000",
+                  "family": "Montserrat SemiBold",
+                  "size": 24,
+                  "lineHeight": 1
+                },
+                "width": 430,
+                "height": 350,
+                "background": {
+                  "color": "{{ SHAPE_COLOR_2 }}"
+                }
+              },
+              "start": 1,
+              "length": "end",
+              "offset": {
+                "x": -0.421,
+                "y": -0.325
+              },
+              "position": "center",
+              "transition": {
+                "in": "slideRight"
+              }
+            }
+          ]
+        },
+        {
+          "clips": [
+            {
+              "asset": {
+                "type": "luma",
+                "src": "https://templates.shotstack.io/breaking-news-channel-template-urgent-announcements-sales/25d401cb-8653-4b98-ad48-7b3e2bbbf935/source.png"
+              },
+              "start": 0,
+              "length": "end"
+            },
+            {
+              "asset": {
+                "type": "text",
+                "text": "",
+                "alignment": {
+                  "horizontal": "center",
+                  "vertical": "center"
+                },
+                "font": {
+                  "color": "#000000",
+                  "family": "Montserrat SemiBold",
+                  "size": 24,
+                  "lineHeight": 1
+                },
+                "width": 570,
+                "height": 565,
+                "background": {
+                  "color": "{{ FONT_COLOR }}"
+                }
+              },
+              "start": 0.6,
+              "length": "end",
+              "offset": {
+                "x": -0.385,
+                "y": -0.398
+              },
+              "position": "center",
+              "transition": {
+                "in": "slideRight"
+              }
+            }
+          ]
+        },
+        {
+          "clips": [
+            {
+              "asset": {
+                "type": "text",
+                "text": "",
+                "alignment": {
+                  "horizontal": "center",
+                  "vertical": "center"
+                },
+                "font": {
+                  "color": "#000000",
+                  "family": "Montserrat SemiBold",
+                  "size": 24,
+                  "lineHeight": 1
+                },
+                "width": 2200,
+                "height": 162,
+                "background": {
+                  "color": "{{ SHAPE_COLOR_1 }}"
+                }
+              },
+              "start": 0.4,
+              "length": "end",
+              "offset": {
+                "x": 0,
+                "y": -0.39
+              },
+              "position": "center",
+              "transition": {
+                "in": "slideRight"
+              }
+            }
+          ]
+        },
+        {
+          "clips": [
+            {
+              "length": 18.47,
+              "asset": {
+                "type": "video",
+                "src": "{{ VIDEO_1 }}",
+                "volume": 1
+              },
+              "start": 0
+            }
+          ]
+        }
+      ]
+    },
+    "output": {
+      "format": "mp4",
+      "fps": 25,
+      "size": {
+        "width": 1920,
+        "height": 1080
+      }
+    },
+    "merge": [
+      {
+        "find": "Headline",
+        "replace": "Thousands of protesters gather in the city center, demanding change as demonstrations grow nationwide."
+      },
+      {
+        "find": "News_Slug",
+        "replace": "BREAKING NEWS"
+      },
+      {
+        "find": "Date",
+        "replace": "29, AUGUST 2025"
+      },
+      {
+        "find": "FONT_COLOR",
+        "replace": "#ffffff"
+      },
+      {
+        "find": "SHAPE_COLOR_1",
+        "replace": "#ff0000"
+      },
+      {
+        "find": "SHAPE_COLOR_2",
+        "replace": "#000000"
+      },
+      {
+        "find": "VIDEO_1",
+        "replace": "https://templates.shotstack.io/breaking-news-channel-template-urgent-announcements-sales/f67a2f37-425b-4e2e-b0a4-2f73ddbbed79/source.mp4"
+      },
+      {
+        "find": "VIDEO_2",
+        "replace": "https://templates.shotstack.io/breaking-news-channel-template-urgent-announcements-sales/fe80460c-1883-41ee-864f-87270fdb36ce/source.mp4"
+      }
+    ]
+  }

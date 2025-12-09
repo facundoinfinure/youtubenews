@@ -1919,8 +1919,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                                     {/* Re-render */}
                                     <button
                                       onClick={async () => {
-                                        const toastId = toast.loading('🎬 Re-rendering...');
-                                        const result = await renderProductionToShotstack(production, activeChannel?.name, config.format);
+                                        const toastId = toast.loading('🎬 Re-rendering with current settings...');
+                                        const result = await renderProductionToShotstack(production, activeChannel?.name, config.format, config.renderConfig);
                                         toast.dismiss(toastId);
                                         if (result.success && result.videoUrl) {
                                           await saveProduction({ 
@@ -2069,8 +2069,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                                   {hasVideosForRender(production) && (
                                     <button
                                       onClick={async () => {
-                                        const toastId = toast.loading('🎬 Rendering...');
-                                        const result = await renderProductionToShotstack(production, activeChannel?.name, config.format);
+                                        const toastId = toast.loading('🎬 Rendering with professional settings...');
+                                        const result = await renderProductionToShotstack(production, activeChannel?.name, config.format, config.renderConfig);
                                         toast.dismiss(toastId);
                                         if (result.success && result.videoUrl) {
                                           // Save video URL and mark as completed
@@ -2766,6 +2766,185 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                     </div>
                   </div>
 
+                  {/* News-Style Lower Third (Professional TV Look) */}
+                  <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
+                    <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+                      <span className="text-xl">📺</span> Professional Lower Third
+                    </h3>
+                    <p className="text-sm text-gray-400 mb-4">
+                      Add a professional TV-style lower third banner with your branding. Perfect for podcast-news hybrid content.
+                    </p>
+                    
+                    {/* Enable News Style */}
+                    <label className="flex items-center gap-3 cursor-pointer mb-4">
+                      <input
+                        type="checkbox"
+                        checked={renderConfig.newsStyle?.enabled || false}
+                        onChange={(e) => updateRenderConfig({
+                          newsStyle: { 
+                            ...(renderConfig.newsStyle || DEFAULT_RENDER_CONFIG.newsStyle!),
+                            enabled: e.target.checked 
+                          }
+                        })}
+                        className="w-5 h-5 accent-red-500"
+                      />
+                      <span className="text-white font-medium">Enable Lower Third Banner</span>
+                    </label>
+
+                    {renderConfig.newsStyle?.enabled && (
+                      <div className="space-y-4 pl-4 border-l-2 border-red-500/30">
+                        {/* Lower Third Toggle */}
+                        <label className="flex items-center gap-3 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={renderConfig.newsStyle?.lowerThird?.enabled || false}
+                            onChange={(e) => updateRenderConfig({
+                              newsStyle: { 
+                                ...renderConfig.newsStyle!,
+                                lowerThird: {
+                                  ...(renderConfig.newsStyle?.lowerThird || DEFAULT_RENDER_CONFIG.newsStyle!.lowerThird),
+                                  enabled: e.target.checked
+                                }
+                              }
+                            })}
+                            className="w-5 h-5 accent-red-500"
+                          />
+                          <span className="text-white">Show Lower Third with Headline</span>
+                        </label>
+
+                        {renderConfig.newsStyle?.lowerThird?.enabled && (
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-3">
+                            <div className="space-y-2">
+                              <label className="text-xs text-gray-400 block">Banner Color</label>
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="color"
+                                  value={renderConfig.newsStyle?.lowerThird?.primaryColor || '#ff0000'}
+                                  onChange={(e) => updateRenderConfig({
+                                    newsStyle: { 
+                                      ...renderConfig.newsStyle!,
+                                      lowerThird: { ...renderConfig.newsStyle!.lowerThird, primaryColor: e.target.value }
+                                    }
+                                  })}
+                                  className="w-10 h-10 rounded cursor-pointer border border-[#333]"
+                                />
+                                <span className="text-xs font-mono text-gray-400">{renderConfig.newsStyle?.lowerThird?.primaryColor}</span>
+                              </div>
+                            </div>
+
+                            <div className="space-y-2">
+                              <label className="text-xs text-gray-400 block">Badge Color</label>
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="color"
+                                  value={renderConfig.newsStyle?.lowerThird?.secondaryColor || '#000000'}
+                                  onChange={(e) => updateRenderConfig({
+                                    newsStyle: { 
+                                      ...renderConfig.newsStyle!,
+                                      lowerThird: { ...renderConfig.newsStyle!.lowerThird, secondaryColor: e.target.value }
+                                    }
+                                  })}
+                                  className="w-10 h-10 rounded cursor-pointer border border-[#333]"
+                                />
+                                <span className="text-xs font-mono text-gray-400">{renderConfig.newsStyle?.lowerThird?.secondaryColor}</span>
+                              </div>
+                            </div>
+
+                            <div className="space-y-2">
+                              <label className="text-xs text-gray-400 block">Text Color</label>
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="color"
+                                  value={renderConfig.newsStyle?.lowerThird?.textColor || '#ffffff'}
+                                  onChange={(e) => updateRenderConfig({
+                                    newsStyle: { 
+                                      ...renderConfig.newsStyle!,
+                                      lowerThird: { ...renderConfig.newsStyle!.lowerThird, textColor: e.target.value }
+                                    }
+                                  })}
+                                  className="w-10 h-10 rounded cursor-pointer border border-[#333]"
+                                />
+                                <span className="text-xs font-mono text-gray-400">{renderConfig.newsStyle?.lowerThird?.textColor}</span>
+                              </div>
+                            </div>
+
+                            <div className="space-y-2">
+                              <label className="text-xs text-gray-400 block">Category Badge</label>
+                              <input
+                                type="text"
+                                value={renderConfig.newsStyle?.lowerThird?.category || ''}
+                                onChange={(e) => updateRenderConfig({
+                                  newsStyle: { 
+                                    ...renderConfig.newsStyle!,
+                                    lowerThird: { ...renderConfig.newsStyle!.lowerThird, category: e.target.value }
+                                  }
+                                })}
+                                placeholder="BREAKING NEWS"
+                                className="w-full bg-[#111] border border-[#333] rounded px-2 py-1.5 text-white text-sm"
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Channel Branding */}
+                        <label className="flex items-center gap-3 cursor-pointer mt-4">
+                          <input
+                            type="checkbox"
+                            checked={renderConfig.newsStyle?.showChannelBranding || false}
+                            onChange={(e) => updateRenderConfig({
+                              newsStyle: { 
+                                ...renderConfig.newsStyle!,
+                                showChannelBranding: e.target.checked
+                              }
+                            })}
+                            className="w-5 h-5 accent-yellow-500"
+                          />
+                          <span className="text-white">Show Channel Name Branding</span>
+                        </label>
+
+                        {/* Preview Box */}
+                        <div className="mt-4 p-4 bg-black rounded-lg border border-[#333]">
+                          <p className="text-xs text-gray-500 mb-2">Preview:</p>
+                          <div className="relative h-20 bg-gradient-to-r from-gray-800 to-gray-900 rounded overflow-hidden">
+                            {/* Lower third preview */}
+                            <div 
+                              className="absolute bottom-0 left-0 right-0 h-8 flex items-center"
+                              style={{ backgroundColor: renderConfig.newsStyle?.lowerThird?.primaryColor || '#ff0000' }}
+                            >
+                              <div 
+                                className="h-full px-3 flex items-center justify-center text-xs font-bold"
+                                style={{ 
+                                  backgroundColor: renderConfig.newsStyle?.lowerThird?.secondaryColor || '#000000',
+                                  color: renderConfig.newsStyle?.lowerThird?.textColor || '#ffffff'
+                                }}
+                              >
+                                {renderConfig.newsStyle?.lowerThird?.category || 'BREAKING NEWS'}
+                              </div>
+                              <span 
+                                className="ml-3 text-xs"
+                                style={{ color: renderConfig.newsStyle?.lowerThird?.textColor || '#ffffff' }}
+                              >
+                                Your headline will appear here...
+                              </span>
+                            </div>
+                            {/* Date preview */}
+                            {renderConfig.overlays.showDate && (
+                              <div className="absolute top-1 right-2 text-[10px] text-white/70">
+                                {new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' }).toUpperCase()}
+                              </div>
+                            )}
+                            {/* Channel branding preview */}
+                            {renderConfig.newsStyle?.showChannelBranding && (
+                              <div className="absolute top-1 right-2 mt-4 text-[10px] text-yellow-400 font-bold">
+                                {tempConfig.channelName || 'CHANNEL'}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
                   {/* Save Button */}
                   <div className="flex justify-between items-center">
                     <button
@@ -2814,10 +2993,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                         <div className="text-gray-400 text-xs mb-1">Overlays</div>
                         <div className="text-white font-mono">
                           {[
+                            renderConfig.newsStyle?.enabled && renderConfig.newsStyle?.lowerThird?.enabled && '📺',
                             renderConfig.overlays.showBreakingNews && '🔴',
                             renderConfig.overlays.showDate && '📅',
                             renderConfig.overlays.showHostNames && '🎙️',
-                            renderConfig.overlays.showLiveIndicator && '📡'
+                            renderConfig.overlays.showLiveIndicator && '📡',
+                            renderConfig.newsStyle?.showChannelBranding && '🏷️'
                           ].filter(Boolean).join(' ') || 'None'}
                         </div>
                       </div>
