@@ -126,7 +126,27 @@ const NewsItemCard: React.FC<{
   const formatDate = (date: Date | string | undefined): string => {
     if (!date) return '';
     try {
-      const d = typeof date === 'string' ? new Date(date) : date;
+      let d: Date;
+      if (typeof date === 'string') {
+        // Check if it's just a date (YYYY-MM-DD) vs full ISO timestamp
+        if (date.length === 10 && date.match(/^\d{4}-\d{2}-\d{2}$/)) {
+          // Date only - parse as local date at noon to avoid timezone issues
+          const [year, month, day] = date.split('-').map(Number);
+          d = new Date(year, month - 1, day, 12, 0, 0);
+          // For date-only, don't show time
+          return d.toLocaleDateString('es-ES', { 
+            day: 'numeric', 
+            month: 'short', 
+            year: 'numeric'
+          });
+        } else {
+          // Full ISO timestamp - parse normally
+          d = new Date(date);
+        }
+      } else {
+        d = date;
+      }
+      
       return d.toLocaleDateString('es-ES', { 
         day: 'numeric', 
         month: 'short', 
@@ -353,6 +373,13 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
   const [selectedNewsIds, setSelectedNewsIds] = useState<string[]>(production.selected_news_ids || []);
   const [isLoading, setIsLoading] = useState(false);
   const [currentSegmentIndex, setCurrentSegmentIndex] = useState(0);
+  
+  // Micro-updates: detailed progress messages for better UX
+  const [progressStatus, setProgressStatus] = useState<{
+    message: string;
+    detail?: string;
+    progress?: number; // 0-100
+  } | null>(null);
 
   // Ref to always have the latest production (avoids stale closures)
   const productionRef = React.useRef(production);
@@ -519,17 +546,33 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
   // Step 1: Fetch News
   const handleFetchNews = async () => {
     setIsLoading(true);
+    setProgressStatus({ message: 'Iniciando búsqueda...', progress: 5 });
     await updateStepStatus('newsFetch', 'in_progress');
     
     try {
+      setProgressStatus({ message: 'Conectando con fuentes de noticias...', detail: 'Buscando las últimas noticias relevantes', progress: 15 });
+      
+      // Small delay to show progress updates
+      await new Promise(r => setTimeout(r, 500));
+      setProgressStatus({ message: 'Obteniendo noticias...', detail: 'Analizando múltiples fuentes', progress: 40 });
+      
       const news = await onFetchNews();
+      
+      setProgressStatus({ message: 'Calculando puntuación viral...', detail: `${news.length} noticias encontradas`, progress: 70 });
+      await new Promise(r => setTimeout(r, 300));
+      
       setFetchedNews(news);
+      
+      setProgressStatus({ message: 'Guardando en base de datos...', detail: 'Almacenando noticias para tu canal', progress: 85 });
       
       await updateStepStatus('newsFetch', 'completed', {
         fetchedNews: news,
         fetchedAt: new Date().toISOString(),
         source: config.topicToken || 'default'
       });
+      
+      setProgressStatus({ message: '¡Completado!', detail: `${news.length} noticias listas para seleccionar`, progress: 100 });
+      await new Promise(r => setTimeout(r, 500));
       
       // Auto-advance to selection
       const newState: ProductionWizardState = {
@@ -546,10 +589,12 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
       
       toast.success(`¡${news.length} noticias encontradas!`);
     } catch (error) {
+      setProgressStatus({ message: 'Error', detail: (error as Error).message });
       await updateStepStatus('newsFetch', 'failed', { error: (error as Error).message });
       toast.error(`Error: ${(error as Error).message}`);
     } finally {
       setIsLoading(false);
+      setProgressStatus(null);
     }
   };
 
@@ -593,11 +638,32 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
   // Step 3: Generate script
   const handleGenerateScript = async () => {
     setIsLoading(true);
+    setProgressStatus({ message: 'Preparando generación del guión...', progress: 5 });
     await updateStepStatus('scriptGenerate', 'in_progress');
     
     try {
       const selectedNews = fetchedNews.filter(n => selectedNewsIds.includes(n.id || n.headline));
+      
+      setProgressStatus({ 
+        message: 'Analizando noticias seleccionadas...', 
+        detail: `${selectedNews.length} noticias a procesar`,
+        progress: 15 
+      });
+      
+      await new Promise(r => setTimeout(r, 300));
+      setProgressStatus({ 
+        message: 'Generando estructura narrativa...', 
+        detail: 'La IA está creando el guión con estilo podcast',
+        progress: 30 
+      });
+      
       const result = await onGenerateScript(selectedNews);
+      
+      setProgressStatus({ 
+        message: 'Procesando escenas...', 
+        detail: `${Object.keys(result.scenes.scenes).length} escenas generadas`,
+        progress: 70 
+      });
       
       // Update production with script
       const scenes = result.scenes;
@@ -608,6 +674,12 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
         sceneTitle: scene.title,
         sceneIndex: parseInt(key)
       }));
+      
+      setProgressStatus({ 
+        message: 'Guardando guión...', 
+        detail: 'Almacenando en la base de datos',
+        progress: 85 
+      });
       
       const updatedProduction: Production = {
         ...production,
@@ -625,6 +697,9 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
         generatedAt: new Date().toISOString()
       });
       
+      setProgressStatus({ message: '¡Guión completado!', progress: 100 });
+      await new Promise(r => setTimeout(r, 400));
+      
       // Advance to review
       const newState: ProductionWizardState = {
         ...wizardState,
@@ -639,10 +714,12 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
       
       toast.success('¡Guión generado!');
     } catch (error) {
+      setProgressStatus({ message: 'Error', detail: (error as Error).message });
       await updateStepStatus('scriptGenerate', 'failed', { error: (error as Error).message });
       toast.error(`Error: ${(error as Error).message}`);
     } finally {
       setIsLoading(false);
+      setProgressStatus(null);
     }
   };
 
@@ -1191,6 +1268,29 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
               </div>
             ) : null}
             
+            {/* Progress Status Indicator */}
+            {isLoading && progressStatus && (
+              <div className="bg-[#1a1a1a] border border-cyan-500/30 rounded-xl p-4 mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
+                  <div className="flex-1">
+                    <p className="text-white font-medium">{progressStatus.message}</p>
+                    {progressStatus.detail && (
+                      <p className="text-gray-400 text-sm">{progressStatus.detail}</p>
+                    )}
+                  </div>
+                </div>
+                {progressStatus.progress !== undefined && (
+                  <div className="mt-3 h-2 bg-gray-700 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 transition-all duration-300"
+                      style={{ width: `${progressStatus.progress}%` }}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+            
             <div className="flex justify-center gap-4">
               <button
                 onClick={handleFetchNews}
@@ -1317,6 +1417,29 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
                   ))}
               </ul>
             </div>
+            
+            {/* Progress Status Indicator */}
+            {isLoading && progressStatus && (
+              <div className="bg-[#1a1a1a] border border-purple-500/30 rounded-xl p-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
+                  <div className="flex-1">
+                    <p className="text-white font-medium">{progressStatus.message}</p>
+                    {progressStatus.detail && (
+                      <p className="text-gray-400 text-sm">{progressStatus.detail}</p>
+                    )}
+                  </div>
+                </div>
+                {progressStatus.progress !== undefined && (
+                  <div className="mt-3 h-2 bg-gray-700 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-gradient-to-r from-purple-500 to-pink-500 transition-all duration-300"
+                      style={{ width: `${progressStatus.progress}%` }}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
             
             <div className="flex justify-between">
               <button

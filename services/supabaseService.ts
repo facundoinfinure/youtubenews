@@ -349,15 +349,15 @@ export const saveNewsToDB = async (newsDate: Date, news: NewsItem[], channelId: 
   // Prepare news records with REAL publication dates from iso_date
   const newsRecords = news.map(item => {
     // Use the REAL publication date from the news item (parsed from iso_date)
-    // If not available, fall back to the fetch date
-    let publicationDateStr = fetchDateStr;
+    // Store FULL ISO timestamp to preserve timezone information
+    let publicationDateISO: string | null = null;
     if (item.publicationDate) {
       try {
         const pubDate = typeof item.publicationDate === 'string' 
           ? new Date(item.publicationDate) 
           : item.publicationDate;
         if (!isNaN(pubDate.getTime())) {
-          publicationDateStr = pubDate.toISOString().split('T')[0];
+          publicationDateISO = pubDate.toISOString(); // Keep FULL ISO timestamp with time
         }
       } catch (e) {
         console.warn(`⚠️ Could not parse publication date for "${item.headline}", using fetch date`);
@@ -365,8 +365,8 @@ export const saveNewsToDB = async (newsDate: Date, news: NewsItem[], channelId: 
     }
     
     return {
-      news_date: fetchDateStr, // When we fetched the news
-      publication_date: publicationDateStr, // REAL publication date from iso_date
+      news_date: fetchDateStr, // When we fetched the news (date only for filtering)
+      publication_date: publicationDateISO || fetchDateStr, // FULL timestamp or fallback to date
       channel_id: channelId,
       headline: item.headline,
       source: item.source,
