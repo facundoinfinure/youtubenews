@@ -642,12 +642,18 @@ export interface ExtendedBroadcastSegment extends BroadcastSegment {
 /**
  * Generate a single audio file for a text using TTS
  * Returns audio data AND duration for accurate video timing
+ * @param text - The text to convert to speech
+ * @param voiceName - The voice to use
+ * @param channelId - Channel ID for caching
+ * @param label - Label for logging
+ * @param language - Optional language hint (e.g., "Spanish") for better pronunciation
  */
 const generateSingleAudio = async (
   text: string,
   voiceName: string,
   channelId: string,
-  label: string
+  label: string,
+  language?: string
 ): Promise<{ audioBase64: string; fromCache: boolean; audioUrl?: string; durationSeconds?: number }> => {
   // Validate input text before processing
   const trimmedText = text?.trim() || '';
@@ -670,8 +676,8 @@ const generateSingleAudio = async (
     }
   }
 
-  // Generate new audio
-  const audioBase64 = await generateTTSAudio(trimmedText, voiceName);
+  // Generate new audio - pass language for better pronunciation in non-English
+  const audioBase64 = await generateTTSAudio(trimmedText, voiceName, language);
   
   // Estimate duration from text (150 words/min = 2.5 words/sec)
   // This will be updated with actual duration when saved to cache
@@ -711,7 +717,7 @@ export const generateSegmentedAudioWithCache = async (
     }
 
     try {
-      const result = await generateSingleAudio(line.text, character.voiceName, channelId, line.speaker);
+      const result = await generateSingleAudio(line.text, character.voiceName, channelId, line.speaker, config.language);
       return {
         speaker: line.speaker,
         text: line.text,
@@ -778,7 +784,7 @@ export const generateAudioFromScenes = async (
       
       console.log(`🎬 [Audio v2.0] Scene ${sceneNum}: ${speaker} solo - "${sceneText.substring(0, 40)}..."`);
       
-      const audio = await generateSingleAudio(sceneText, character.voiceName, channelId, `Scene ${sceneNum} - ${speaker}`);
+      const audio = await generateSingleAudio(sceneText, character.voiceName, channelId, `Scene ${sceneNum} - ${speaker}`, config.language);
       
       segments.push({
         speaker,

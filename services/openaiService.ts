@@ -629,16 +629,62 @@ const sanitizeTextForTTS = (text: string): string => {
 };
 
 /**
+ * TTS Model Selection
+ * - tts-1: Fast, lower quality (good for English)
+ * - tts-1-hd: Higher quality, better pronunciation for non-English languages
+ */
+type TTSModel = 'tts-1' | 'tts-1-hd';
+
+/**
+ * Determine which TTS model to use based on language
+ * Non-English languages benefit from tts-1-hd for better pronunciation
+ */
+const getTTSModel = (language?: string): TTSModel => {
+  if (!language) return 'tts-1';
+  
+  const lang = language.toLowerCase().trim();
+  
+  // Use HD model for non-English languages (better pronunciation)
+  const nonEnglishLanguages = [
+    'spanish', 'español', 'es',
+    'portuguese', 'português', 'pt',
+    'french', 'français', 'fr',
+    'german', 'deutsch', 'de',
+    'italian', 'italiano', 'it',
+    'japanese', '日本語', 'ja',
+    'chinese', '中文', 'zh',
+    'korean', '한국어', 'ko',
+    'russian', 'русский', 'ru',
+    'arabic', 'العربية', 'ar',
+    'hindi', 'हिंदी', 'hi',
+    'dutch', 'nederlands', 'nl',
+    'polish', 'polski', 'pl',
+    'turkish', 'türkçe', 'tr',
+  ];
+  
+  if (nonEnglishLanguages.some(l => lang.includes(l))) {
+    return 'tts-1-hd';
+  }
+  
+  return 'tts-1';
+};
+
+/**
  * Generate TTS audio for a single line
  * Returns base64-encoded MP3
  * 
  * Per ChimpNews Spec v2.0:
  * - hostA uses "echo" voice
  * - hostB uses "shimmer" voice
+ * 
+ * @param text - The text to convert to speech
+ * @param voiceName - The voice to use
+ * @param language - Optional language hint (e.g., "Spanish") - uses tts-1-hd for non-English
  */
 export const generateTTSAudio = async (
   text: string,
-  voiceName: string
+  voiceName: string,
+  language?: string
 ): Promise<string> => {
   // Validate and sanitize input text
   let sanitizedText: string;
@@ -650,21 +696,23 @@ export const generateTTSAudio = async (
   }
   
   const voice = getOpenAIVoice(voiceName);
+  const model = getTTSModel(language);
   
-  console.log(`[OpenAI TTS] 🎙️ Generating audio with voice: ${voice}${voice !== voiceName.toLowerCase() ? ` (from ${voiceName})` : ''}`);
+  console.log(`[OpenAI TTS] 🎙️ Generating audio with voice: ${voice}, model: ${model}${language ? ` (language: ${language})` : ''}`);
   
   try {
     const response = await openaiRequest('audio/speech', {
-      model: 'tts-1',
+      model: model,
       input: sanitizedText,
       voice: voice,
       response_format: 'mp3'
     });
     
-    // Cost: ~$0.015 per 1000 characters
+    // Cost: tts-1 = $0.015/1000 chars, tts-1-hd = $0.030/1000 chars
     const charCount = sanitizedText.length;
-    const cost = (charCount / 1000) * 0.015;
-    CostTracker.track('audio', 'openai-tts-1', cost);
+    const costPer1000 = model === 'tts-1-hd' ? 0.030 : 0.015;
+    const cost = (charCount / 1000) * costPer1000;
+    CostTracker.track('audio', `openai-${model}`, cost);
     
     // The proxy returns { audio: base64, format: 'mp3' }
     if (!response.audio) {
@@ -685,13 +733,17 @@ export const generateTTSAudio = async (
 
 /**
  * Generate TTS audio for multiple lines in parallel
+ * @param lines - Array of text and voice configurations
+ * @param language - Optional language hint for better pronunciation
  */
 export const generateTTSBatch = async (
-  lines: { text: string; voiceName: string }[]
+  lines: { text: string; voiceName: string }[],
+  language?: string
 ): Promise<string[]> => {
-  console.log(`[OpenAI TTS] 🎙️ Generating ${lines.length} audio segments in parallel`);
+  const model = getTTSModel(language);
+  console.log(`[OpenAI TTS] 🎙️ Generating ${lines.length} audio segments in parallel (model: ${model})`);
   
-  const promises = lines.map(line => generateTTSAudio(line.text, line.voiceName));
+  const promises = lines.map(line => generateTTSAudio(line.text, line.voiceName, language));
   return Promise.all(promises);
 };
 

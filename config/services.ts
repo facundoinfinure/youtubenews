@@ -19,12 +19,18 @@ export const openaiConfig = {
   shortTimeout: 45000,
   /** Number of retry attempts */
   retries: 2,
-  /** TTS model */
+  /** TTS model for English (faster, cheaper) */
   ttsModel: 'tts-1',
+  /** TTS model for non-English languages (better pronunciation) */
+  ttsModelHD: 'tts-1-hd',
   /** Default TTS voice */
   defaultVoice: 'alloy',
   /** Image generation model */
   imageModel: 'dall-e-3',
+  /** Cost per 1000 characters for tts-1 */
+  ttsCostPerThousand: 0.015,
+  /** Cost per 1000 characters for tts-1-hd */
+  ttsCostPerThousandHD: 0.030,
 } as const;
 
 /**
