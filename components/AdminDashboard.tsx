@@ -58,12 +58,15 @@ const CharacterEditor: React.FC<{
   label: string;
   ttsProvider?: 'openai' | 'elevenlabs';
 }> = ({ profile, onChange, label, ttsProvider = 'openai' }) => {
-  const [showCustomVoiceId, setShowCustomVoiceId] = useState(false);
+  // Check if current voice is a preset or custom
+  const currentVoiceId = profile.elevenLabsVoiceId;
+  const isPresetVoice = currentVoiceId && ELEVENLABS_PRESET_VOICES.some(v => v.id === currentVoiceId && v.id !== 'custom');
+  const [showCustomVoiceId, setShowCustomVoiceId] = useState(
+    ttsProvider === 'elevenlabs' && currentVoiceId && !isPresetVoice
+  );
   
-  // Check if current voice is a custom ElevenLabs voice
-  const isCustomElevenLabsVoice = ttsProvider === 'elevenlabs' && 
-    profile.elevenLabsVoiceId && 
-    !ELEVENLABS_PRESET_VOICES.find(v => v.id === profile.elevenLabsVoiceId && v.id !== 'custom');
+  // Debug log to help troubleshoot
+  console.log(`🎤 [CharacterEditor] ${label}: voiceId="${currentVoiceId}", isPreset=${isPresetVoice}, showCustom=${showCustomVoiceId}`);
 
   return (
     <div className="bg-[#1a1a1a] p-4 rounded-lg border border-[#333] space-y-3">
@@ -166,7 +169,7 @@ const CharacterEditor: React.FC<{
         ) : (
           <>
             <select
-              value={isCustomElevenLabsVoice || showCustomVoiceId ? 'custom' : (profile.elevenLabsVoiceId || getDefaultElevenLabsVoice(profile.gender))}
+              value={showCustomVoiceId ? 'custom' : (isPresetVoice ? currentVoiceId : getDefaultElevenLabsVoice(profile.gender))}
               onChange={(e) => {
                 const selectedId = e.target.value;
                 if (selectedId === 'custom') {
@@ -196,7 +199,7 @@ const CharacterEditor: React.FC<{
                 ))}
             </select>
             
-            {(showCustomVoiceId || isCustomElevenLabsVoice) && (
+            {showCustomVoiceId && (
               <input
                 type="text"
                 value={profile.elevenLabsVoiceId || ''}
@@ -453,10 +456,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
   const handleSave = async () => {
     if (!activeChannel) return;
 
-    // Log what we're saving
+    // Log what we're saving - FULL CHARACTER OBJECTS for debugging
     console.log(`💾 [Save] Saving config to Supabase...`);
-    console.log(`💾 [Save] Host A voice: "${tempConfig.characters.hostA.voiceName}"`);
-    console.log(`💾 [Save] Host B voice: "${tempConfig.characters.hostB.voiceName}"`);
+    console.log(`💾 [Save] TTS Provider: "${tempConfig.ttsProvider || 'openai'}"`);
+    console.log(`💾 [Save] Host A FULL:`, JSON.stringify(tempConfig.characters.hostA, null, 2));
+    console.log(`💾 [Save] Host B FULL:`, JSON.stringify(tempConfig.characters.hostB, null, 2));
 
     // Check if topicToken or country changed - need to invalidate news cache
     const topicTokenChanged = config.topicToken !== tempConfig.topicToken;
@@ -490,8 +494,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
     const confirmedConfig = verifiedChannel.config;
     
     console.log(`✅ [Save] VERIFIED from Supabase (reloaded):`);
-    console.log(`✅ [Save] Host A voice: "${confirmedConfig?.characters?.hostA?.voiceName}"`);
-    console.log(`✅ [Save] Host B voice: "${confirmedConfig?.characters?.hostB?.voiceName}"`);
+    console.log(`✅ [Save] TTS Provider: "${confirmedConfig?.ttsProvider || 'openai'}"`);
+    console.log(`✅ [Save] Host A FULL:`, JSON.stringify(confirmedConfig?.characters?.hostA, null, 2));
+    console.log(`✅ [Save] Host B FULL:`, JSON.stringify(confirmedConfig?.characters?.hostB, null, 2));
     console.log(`✅ [Save] Host A image: "${confirmedConfig?.seedImages?.hostASoloUrl || 'not set'}"`);
     console.log(`✅ [Save] Host B image: "${confirmedConfig?.seedImages?.hostBSoloUrl || 'not set'}"`);
 
