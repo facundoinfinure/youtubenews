@@ -2619,7 +2619,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
               // Show confirmation if there's work in progress
               const hasProgress = wizardState.currentStep !== 'news_fetch' || 
                 fetchedNews.length > 0 ||
-                localProduction.segments?.length > 0;
+                (localProduction.segments && localProduction.segments.length > 0);
               
               if (hasProgress && !showCloseConfirm) {
                 setShowCloseConfirm(true);
