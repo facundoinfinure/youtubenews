@@ -1327,6 +1327,48 @@ export const buildPodcastStyleEdit = (
   };
   const size = resolutionMap[aspectRatio]?.[options.resolution || config.output.resolution || '1080'] || resolutionMap['16:9']['1080'];
 
+  // === SOUND EFFECTS TRACK ===
+  // Add transition sound effects for dynamic pacing
+  if (config.soundEffects?.enabled && scenesWithTiming.length > 1) {
+    const soundEffectClips: any[] = [];
+    
+    // Add transition sounds at scene changes
+    scenesWithTiming.forEach((scene, index) => {
+      if (index > 0) {
+        // Add whoosh/transition sound at each scene change
+        if (config.soundEffects?.transitionSound) {
+          soundEffectClips.push({
+            asset: {
+              type: 'audio',
+              src: config.soundEffects.transitionSound,
+              volume: config.soundEffects.transitionVolume || 0.4
+            },
+            start: Math.max(0, scene.start - 0.3), // Start slightly before transition
+            length: 1.5 // Short sound effect
+          });
+        }
+        
+        // Add scene change notification sound (optional)
+        if (config.soundEffects?.sceneChangeSound && index % 3 === 0) {
+          soundEffectClips.push({
+            asset: {
+              type: 'audio',
+              src: config.soundEffects.sceneChangeSound,
+              volume: config.soundEffects.sceneChangeVolume || 0.3
+            },
+            start: scene.start + 0.5,
+            length: 1
+          });
+        }
+      }
+    });
+    
+    if (soundEffectClips.length > 0) {
+      console.log(`🔊 [Podcast Composition] Adding ${soundEffectClips.length} sound effects`);
+      tracks.push({ clips: soundEffectClips });
+    }
+  }
+
   // === BUILD TIMELINE WITH FONTS ===
   const timeline: any = {
     background: '#0a0a0a', // Slightly lighter than pure black for better transitions
@@ -1854,15 +1896,25 @@ export const renderProductionToShotstack = async (
     const sceneInfo = sceneData[String(index + 1)];
     const title = sceneInfo?.title || `Scene ${index + 1}`;
     
-    // Estimate duration from text length (~150 words per minute = 2.5 words per second)
+    // Get text for subtitles and duration estimation
     const text = segment?.text || sceneInfo?.text || '';
-    const wordCount = text.split(/\s+/).length;
-    const estimatedDuration = Math.max(5, Math.ceil(wordCount / 2.5));
+    
+    // Use EXACT audio duration if available, otherwise estimate from text
+    // ~150 words per minute = 2.5 words per second
+    let sceneDuration: number;
+    if (segment?.audioDuration && segment.audioDuration > 0) {
+      sceneDuration = segment.audioDuration;
+      console.log(`📏 [Shotstack] Segment ${index}: Using exact audio duration: ${sceneDuration.toFixed(2)}s`);
+    } else {
+      const wordCount = text.split(/\s+/).length;
+      sceneDuration = Math.max(3, Math.ceil(wordCount / 2.5));
+      console.log(`📏 [Shotstack] Segment ${index}: Estimated duration from ${wordCount} words: ${sceneDuration}s`);
+    }
     
     scenes.push({
       video_url: status.videoUrl,
       title,
-      duration: segment?.audioDuration || estimatedDuration,
+      duration: sceneDuration,
       speaker,
       text // Include text for subtitles
     });

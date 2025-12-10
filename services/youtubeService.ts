@@ -1,5 +1,6 @@
 
-import { UserProfile, ViralMetadata } from "../types";
+import { UserProfile, ViralMetadata, BroadcastSegment } from "../types";
+import { generateSRTFromSegments } from "./subtitleService";
 
 // =============================================================================================
 // CONFIGURATION: GOOGLE CLOUD OAUTH CLIENT ID
@@ -40,13 +41,84 @@ const getYouTubeLanguageCode = (language?: string): string => {
   return LANGUAGE_CODE_MAP[language] || 'en';
 };
 
+/**
+ * Upload captions/subtitles to a YouTube video
+ * Uses YouTube Data API v3 captions endpoint
+ */
+export const uploadCaptionsToYouTube = async (
+  videoId: string,
+  srtContent: string,
+  accessToken: string,
+  languageCode: string = 'es',
+  captionName: string = 'Subtítulos'
+): Promise<boolean> => {
+  try {
+    console.log(`[YouTube] 📝 Uploading captions for video ${videoId}...`);
+    
+    // Create caption metadata
+    const captionMetadata = {
+      snippet: {
+        videoId: videoId,
+        language: languageCode,
+        name: captionName,
+        isDraft: false
+      }
+    };
+    
+    // Create multipart form data
+    const boundary = '-------314159265358979323846';
+    const delimiter = `\r\n--${boundary}\r\n`;
+    const closeDelimiter = `\r\n--${boundary}--`;
+    
+    const metadataPart = 
+      delimiter +
+      'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+      JSON.stringify(captionMetadata);
+    
+    const mediaPart = 
+      delimiter +
+      'Content-Type: text/plain; charset=UTF-8\r\n' +
+      'Content-Transfer-Encoding: binary\r\n\r\n' +
+      srtContent;
+    
+    const requestBody = metadataPart + mediaPart + closeDelimiter;
+    
+    const response = await fetch(
+      'https://www.googleapis.com/upload/youtube/v3/captions?uploadType=multipart&part=snippet',
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': `multipart/related; boundary="${boundary}"`,
+        },
+        body: requestBody
+      }
+    );
+    
+    if (response.ok) {
+      console.log(`[YouTube] ✅ Captions uploaded successfully`);
+      return true;
+    } else {
+      const errorText = await response.text();
+      console.error(`[YouTube] ⚠️ Caption upload failed: ${response.status} - ${errorText}`);
+      // Don't fail the whole process, just log the error
+      return false;
+    }
+  } catch (error) {
+    console.error(`[YouTube] ⚠️ Caption upload error:`, (error as Error).message);
+    return false;
+  }
+};
+
 export const uploadVideoToYouTube = async (
   blob: Blob,
   metadata: ViralMetadata,
   accessToken: string,
   thumbnailBlob: Blob | null,
   onProgress: (percent: number) => void,
-  channelLanguage?: string // Optional: channel language setting (e.g., "Spanish")
+  channelLanguage?: string, // Optional: channel language setting (e.g., "Spanish")
+  segments?: BroadcastSegment[], // Optional: segments for subtitle generation
+  introOffset?: number // Optional: offset in seconds for intro video
 ): Promise<string> => {
   try {
     // Get YouTube language code from channel language
@@ -136,6 +208,28 @@ export const uploadVideoToYouTube = async (
         });
       } catch (e) {
         console.error("Thumbnail upload error", e);
+      }
+    }
+    
+    // Upload Subtitles/Captions if segments are provided
+    if (segments && segments.length > 0 && videoId) {
+      console.log(`[YouTube] 📝 Generating and uploading subtitles...`);
+      try {
+        const srtContent = generateSRTFromSegments(segments, {
+          includeSpeakerNames: false, // Cleaner subtitles without speaker names
+          introOffset: introOffset || 0
+        });
+        
+        await uploadCaptionsToYouTube(
+          videoId,
+          srtContent,
+          accessToken,
+          languageCode,
+          languageCode === 'es' ? 'Subtítulos en español' : 'Subtitles'
+        );
+      } catch (captionError) {
+        console.error("Caption upload error:", captionError);
+        // Don't fail the whole process if captions fail
       }
     }
 

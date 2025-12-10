@@ -124,7 +124,7 @@ export interface CharacterProfile {
   name: string;
   bio: string; // Personality, political stance
   visualPrompt: string; // Description for Veo
-  voiceName: string; // TTS Voice ID
+  voiceName: string; // TTS Voice ID (OpenAI voice or ElevenLabs voice ID)
   voiceStyle?: 'energetic' | 'calm' | 'dramatic' | 'neutral'; // Voice emotion/style
   speakingRate?: number; // 0.5 - 2.0, default 1.0
   pitch?: number; // -20 to +20, default 0
@@ -132,6 +132,8 @@ export interface CharacterProfile {
   outfit?: string; // e.g., "dark hoodie", "teal blazer and white shirt"
   personality?: string; // Detailed personality description
   gender?: "male" | "female";
+  // ElevenLabs TTS (v2.7)
+  elevenLabsVoiceId?: string; // ElevenLabs voice ID for Argentine/Spanish voices
 }
 
 // Shotstack Render Configuration Types
@@ -198,6 +200,15 @@ export interface RenderConfig {
     enabled: boolean;
     url?: string;
     volume: number; // 0-1
+  };
+  
+  // Sound Effects (v2.7) - Transition and scene change sounds
+  soundEffects?: {
+    enabled: boolean;
+    transitionSound?: string; // URL to transition sound effect (whoosh, etc.)
+    transitionVolume?: number; // 0-1
+    sceneChangeSound?: string; // URL to scene change sound
+    sceneChangeVolume?: number; // 0-1
   };
   
   // === NEWS-STYLE OVERLAYS (v2.4) - Professional TV Broadcast Look ===
@@ -269,6 +280,15 @@ export const DEFAULT_RENDER_CONFIG: RenderConfig = {
     enabled: false,
     volume: 0.1
   },
+  // Sound effects for dynamic transitions
+  soundEffects: {
+    enabled: true,
+    // Free whoosh sound effect (public domain)
+    transitionSound: 'https://cdn.pixabay.com/audio/2022/03/15/audio_942bb0a98b.mp3', // Whoosh transition
+    transitionVolume: 0.4,
+    sceneChangeSound: 'https://cdn.pixabay.com/audio/2022/03/10/audio_f8c49b0c13.mp3', // Short notification
+    sceneChangeVolume: 0.3
+  },
   // News-style overlays defaults
   newsStyle: {
     enabled: false,
@@ -313,6 +333,9 @@ export const DEFAULT_ETHICAL_GUARDRAILS = {
   customInstructions: ''
 };
 
+// TTS Provider Configuration (v2.7)
+export type TTSProvider = 'openai' | 'elevenlabs';
+
 export interface ChannelConfig {
   channelName: string;
   tagline: string;
@@ -326,6 +349,8 @@ export interface ChannelConfig {
   defaultTags?: string[]; // Added for default tags
   referenceImageUrl?: string; // NEW: Reference image for visual consistency
   topicToken?: string; // Google News topic token for news fetching (e.g., Business, Argentina, etc.)
+  // TTS Provider (v2.7) - OpenAI or ElevenLabs
+  ttsProvider?: TTSProvider; // 'openai' (default) or 'elevenlabs'
   characters: {
     hostA: CharacterProfile;
     hostB: CharacterProfile;
