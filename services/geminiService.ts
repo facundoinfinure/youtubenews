@@ -47,6 +47,10 @@ import {
 } from "./openaiService";
 import type { ScriptAnalysis } from "./openaiService";
 import { 
+  generateElevenLabsTTS,
+  checkElevenLabsConfig
+} from "./elevenlabsService";
+import { 
   fetchNewsWithSerpAPI,
   fetchTrendingWithSerpAPI,
   checkSerpAPIConfig
@@ -640,20 +644,24 @@ export interface ExtendedBroadcastSegment extends BroadcastSegment {
 }
 
 /**
- * Generate a single audio file for a text using TTS
+ * Generate a single audio file for a text using TTS (OpenAI or ElevenLabs)
  * Returns audio data AND duration for accurate video timing
  * @param text - The text to convert to speech
- * @param voiceName - The voice to use
+ * @param voiceName - The OpenAI voice to use (fallback)
  * @param channelId - Channel ID for caching
  * @param label - Label for logging
  * @param language - Optional language hint (e.g., "Spanish") for better pronunciation
+ * @param ttsProvider - 'openai' or 'elevenlabs'
+ * @param elevenLabsVoiceId - ElevenLabs voice ID (required if ttsProvider is 'elevenlabs')
  */
 const generateSingleAudio = async (
   text: string,
   voiceName: string,
   channelId: string,
   label: string,
-  language?: string
+  language?: string,
+  ttsProvider: 'openai' | 'elevenlabs' = 'openai',
+  elevenLabsVoiceId?: string
 ): Promise<{ audioBase64: string; fromCache: boolean; audioUrl?: string; durationSeconds?: number }> => {
   // Validate input text before processing
   const trimmedText = text?.trim() || '';
@@ -662,9 +670,12 @@ const generateSingleAudio = async (
     throw new Error(`Empty text provided for audio generation (${label})`);
   }
   
+  // Determine cache key voice (use elevenLabsVoiceId if available, else voiceName)
+  const cacheVoiceKey = ttsProvider === 'elevenlabs' && elevenLabsVoiceId ? elevenLabsVoiceId : voiceName;
+  
   // Check cache first
   if (findCachedAudioFn && channelId) {
-    const cachedResult = await findCachedAudioFn(trimmedText, voiceName, channelId);
+    const cachedResult = await findCachedAudioFn(trimmedText, cacheVoiceKey, channelId);
     if (cachedResult) {
       console.log(`✅ Cache hit for audio (${label}): "${trimmedText.substring(0, 30)}..." (duration: ${cachedResult.durationSeconds}s)`);
       return { 
@@ -676,16 +687,35 @@ const generateSingleAudio = async (
     }
   }
 
-  // Generate new audio - pass language for better pronunciation in non-English
-  const audioBase64 = await generateTTSAudio(trimmedText, voiceName, language);
+  let audioBase64: string;
+  let audioDuration: number;
   
-  // Estimate duration from text (150 words/min = 2.5 words/sec)
-  // This will be updated with actual duration when saved to cache
-  const wordCount = trimmedText.split(/\s+/).length;
-  const estimatedDuration = Math.max(1, wordCount / 2.5);
+  // Generate audio based on TTS provider
+  if (ttsProvider === 'elevenlabs' && elevenLabsVoiceId) {
+    // Use ElevenLabs TTS
+    console.log(`🎙️ [ElevenLabs] Generating audio for ${label} with voice: ${elevenLabsVoiceId}`);
+    try {
+      const result = await generateElevenLabsTTS(trimmedText, elevenLabsVoiceId);
+      audioBase64 = result.audioBase64;
+      audioDuration = result.audioDuration;
+      console.log(`✅ [ElevenLabs] Generated (${label}): "${trimmedText.substring(0, 30)}..." (${audioDuration.toFixed(1)}s)`);
+    } catch (error) {
+      console.warn(`⚠️ [ElevenLabs] Failed for ${label}, falling back to OpenAI:`, (error as Error).message);
+      // Fallback to OpenAI
+      audioBase64 = await generateTTSAudio(trimmedText, voiceName, language);
+      const wordCount = trimmedText.split(/\s+/).length;
+      audioDuration = Math.max(1, wordCount / 2.5);
+    }
+  } else {
+    // Use OpenAI TTS
+    audioBase64 = await generateTTSAudio(trimmedText, voiceName, language);
+    // Estimate duration from text (150 words/min = 2.5 words/sec)
+    const wordCount = trimmedText.split(/\s+/).length;
+    audioDuration = Math.max(1, wordCount / 2.5);
+    console.log(`✅ [OpenAI TTS] Generated (${label}): "${trimmedText.substring(0, 30)}..." (estimated: ${audioDuration.toFixed(1)}s)`);
+  }
   
-  console.log(`✅ [Audio] Generated (${label}): "${trimmedText.substring(0, 30)}..." (estimated: ${estimatedDuration.toFixed(1)}s)`);
-  return { audioBase64, fromCache: false, durationSeconds: estimatedDuration };
+  return { audioBase64, fromCache: false, durationSeconds: audioDuration };
 };
 
 export const generateSegmentedAudio = async (script: ScriptLine[], config: ChannelConfig): Promise<BroadcastSegment[]> => {
@@ -695,18 +725,23 @@ export const generateSegmentedAudio = async (script: ScriptLine[], config: Chann
 /**
  * Generate audio segments from script lines (legacy format)
  * For new v2.0 format with scenes, use generateAudioFromScenes instead
+ * Supports both OpenAI TTS and ElevenLabs based on config.ttsProvider
  */
 export const generateSegmentedAudioWithCache = async (
   script: ScriptLine[], 
   config: ChannelConfig,
   channelId: string = ''
 ): Promise<BroadcastSegment[]> => {
-  // Log config details only in development
-  if (import.meta.env.DEV) {
-    console.log(`🔊 [Audio] Config: hostA=${config.characters.hostA.voiceName}, hostB=${config.characters.hostB.voiceName}`);
-  }
+  const ttsProvider = config.ttsProvider || 'openai';
+  const providerLabel = ttsProvider === 'elevenlabs' ? 'ElevenLabs' : 'OpenAI TTS';
   
-  console.log(`🎙️ [Audio] Generating ${script.length} audio segments using OpenAI TTS...`);
+  // Log config details
+  console.log(`🎙️ [Audio] Generating ${script.length} audio segments using ${providerLabel}...`);
+  if (ttsProvider === 'elevenlabs') {
+    console.log(`🎙️ [Audio] ElevenLabs voices: hostA=${config.characters.hostA.elevenLabsVoiceId || 'not set'}, hostB=${config.characters.hostB.elevenLabsVoiceId || 'not set'}`);
+  } else {
+    console.log(`🎙️ [Audio] OpenAI voices: hostA=${config.characters.hostA.voiceName}, hostB=${config.characters.hostB.voiceName}`);
+  }
 
   const audioPromises = script.map(async (line) => {
     let character = config.characters.hostA;
@@ -717,7 +752,15 @@ export const generateSegmentedAudioWithCache = async (
     }
 
     try {
-      const result = await generateSingleAudio(line.text, character.voiceName, channelId, line.speaker, config.language);
+      const result = await generateSingleAudio(
+        line.text, 
+        character.voiceName, 
+        channelId, 
+        line.speaker, 
+        config.language,
+        ttsProvider,
+        character.elevenLabsVoiceId
+      );
       return {
         speaker: line.speaker,
         text: line.text,
@@ -733,7 +776,7 @@ export const generateSegmentedAudioWithCache = async (
   });
 
   const results = await Promise.all(audioPromises);
-  console.log(`✅ [Audio] Successfully generated ${results.length} audio segments via OpenAI TTS`);
+  console.log(`✅ [Audio] Successfully generated ${results.length} audio segments via ${providerLabel}`);
   return results;
 };
 
@@ -747,8 +790,15 @@ export const generateAudioFromScenes = async (
   config: ChannelConfig,
   channelId: string = ''
 ): Promise<ExtendedBroadcastSegment[]> => {
-  console.log(`🎙️ [Audio v2.0] Generating audio from ${Object.keys(scriptWithScenes.scenes).length} scenes...`);
+  const ttsProvider = config.ttsProvider || 'openai';
+  const providerLabel = ttsProvider === 'elevenlabs' ? 'ElevenLabs' : 'OpenAI TTS';
+  
+  console.log(`🎙️ [Audio v2.0] Generating audio from ${Object.keys(scriptWithScenes.scenes).length} scenes using ${providerLabel}...`);
   console.log(`🎙️ [Audio v2.0] Narrative: ${scriptWithScenes.narrative_used}`);
+  
+  if (ttsProvider === 'elevenlabs') {
+    console.log(`🎙️ [Audio v2.0] ElevenLabs voices: hostA=${config.characters.hostA.elevenLabsVoiceId || 'not set'}, hostB=${config.characters.hostB.elevenLabsVoiceId || 'not set'}`);
+  }
   
   const hostA = config.characters.hostA;
   const hostB = config.characters.hostB;
@@ -784,7 +834,15 @@ export const generateAudioFromScenes = async (
       
       console.log(`🎬 [Audio v2.0] Scene ${sceneNum}: ${speaker} solo - "${sceneText.substring(0, 40)}..."`);
       
-      const audio = await generateSingleAudio(sceneText, character.voiceName, channelId, `Scene ${sceneNum} - ${speaker}`, config.language);
+      const audio = await generateSingleAudio(
+        sceneText, 
+        character.voiceName, 
+        channelId, 
+        `Scene ${sceneNum} - ${speaker}`, 
+        config.language,
+        ttsProvider,
+        character.elevenLabsVoiceId
+      );
       
       segments.push({
         speaker,
@@ -803,7 +861,7 @@ export const generateAudioFromScenes = async (
     }
   }
   
-  console.log(`✅ [Audio v2.0] Generated ${segments.length} segments with audio`);
+  console.log(`✅ [Audio v2.0] Generated ${segments.length} segments with audio via ${providerLabel}`);
   return segments;
 };
 

@@ -1225,7 +1225,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                         type="radio" 
                         name="ttsProvider" 
                         checked={tempConfig.ttsProvider === 'elevenlabs'} 
-                        onChange={() => setTempConfig({ ...tempConfig, ttsProvider: 'elevenlabs' })}
+                        onChange={() => {
+                          // When switching to ElevenLabs, auto-assign default voices based on gender
+                          const hostAVoice = tempConfig.characters.hostA.elevenLabsVoiceId || getDefaultElevenLabsVoice(tempConfig.characters.hostA.gender);
+                          const hostBVoice = tempConfig.characters.hostB.elevenLabsVoiceId || getDefaultElevenLabsVoice(tempConfig.characters.hostB.gender);
+                          
+                          setTempConfig({ 
+                            ...tempConfig, 
+                            ttsProvider: 'elevenlabs',
+                            characters: {
+                              ...tempConfig.characters,
+                              hostA: { ...tempConfig.characters.hostA, elevenLabsVoiceId: hostAVoice },
+                              hostB: { ...tempConfig.characters.hostB, elevenLabsVoiceId: hostBVoice }
+                            }
+                          });
+                        }}
                         className="hidden"
                       />
                       <span className="text-xl">🎙️</span>
