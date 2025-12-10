@@ -19,6 +19,7 @@ import { ErrorState } from './components/ErrorState';
 import { ProductionStatus } from './components/ProductionStatus';
 import { ProductionWizard } from './components/ProductionWizard';
 import { ToastProvider } from './components/ToastProvider';
+import { ErrorBoundary } from './components/ErrorBoundary';
 // Shared utilities
 import { EMPTY_VIDEO_ASSETS, normalizeVideoAssets, hasVideoAssets } from './utils/videoAssets';
 import { parseLocalDate, getYesterdayString } from './utils/dateUtils';
@@ -252,21 +253,25 @@ const App: React.FC = () => {
   }, [user, activeChannel]); // Only depend on user and activeChannel, not state
 
   // Track when we enter/exit admin dashboard
+  // FIXED: Reset flag whenever we leave admin dashboard, not just on explicit exit
   useEffect(() => {
     if (state === AppState.ADMIN_DASHBOARD) {
       wasInAdminRef.current = true;
+    } else {
+      // Reset the flag when navigating away from admin dashboard
+      // This fixes the bug where tab switch would incorrectly navigate to admin
+      wasInAdminRef.current = false;
     }
-    // Note: wasInAdminRef flag is cleared when user explicitly exits admin dashboard via onExit callback
   }, [state]);
 
   // Persist production state to Supabase when tab becomes hidden
+  // FIXED: Removed automatic navigation to admin on tab visible - this was causing UX issues
   useEffect(() => {
     const handleVisibilityChange = async () => {
+      // Only save state when tab becomes hidden, not when it becomes visible
       if (document.hidden && activeChannel && user) {
-        // Track admin dashboard state in memory ref (no localStorage needed)
+        // Don't save state if in admin dashboard (no production data to save)
         if (state === AppState.ADMIN_DASHBOARD) {
-          wasInAdminRef.current = true;
-          logger.debug('ui', 'Admin dashboard state tracked in memory');
           return;
         }
         // Save current production state to Supabase before losing it (only if not IDLE or LOGIN)
@@ -299,13 +304,8 @@ const App: React.FC = () => {
           }
         }
       }
-      // When tab becomes visible again, restore admin dashboard state from memory ref
-      if (!document.hidden && user && activeChannel) {
-        if (wasInAdminRef.current && state !== AppState.ADMIN_DASHBOARD) {
-          setState(AppState.ADMIN_DASHBOARD);
-          logger.debug('ui', 'Restored admin dashboard state on tab visible');
-        }
-      }
+      // NOTE: We no longer auto-navigate when tab becomes visible
+      // This was causing bugs where users would be unexpectedly moved to admin dashboard
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -1952,6 +1952,11 @@ const App: React.FC = () => {
             hostBVoice: channel.config?.characters?.hostB?.voiceName
           });
         }}
+        onChannelCreated={(newChannel) => {
+          // Add new channel to list without page reload
+          setChannels(prev => [...prev, newChannel]);
+          logger.info('channel', 'New channel created', { name: newChannel.name });
+        }}
         onDeleteVideo={handleDeleteVideo}
         onResumeProduction={resumeProduction}
         user={user}
@@ -2499,18 +2504,25 @@ const App: React.FC = () => {
 
       {/* Production Wizard Modal (v2.4 step-by-step flow) */}
       {showWizard && wizardProduction && activeChannel && (
-        <ProductionWizard
-          production={wizardProduction}
-          channel={activeChannel}
-          config={config}
-          user={user}
-          onUpdateProduction={(updatedProd) => {
-            setWizardProduction(updatedProd);
+        <ErrorBoundary 
+          componentName="Production Wizard"
+          showDetails={import.meta.env.DEV}
+          onError={(error) => {
+            logger.error('production', 'Wizard crashed', { error: error.message });
           }}
-          onClose={() => {
-            setShowWizard(false);
-            setWizardProduction(null);
-          }}
+        >
+          <ProductionWizard
+            production={wizardProduction}
+            channel={activeChannel}
+            config={config}
+            user={user}
+            onUpdateProduction={(updatedProd) => {
+              setWizardProduction(updatedProd);
+            }}
+            onClose={() => {
+              setShowWizard(false);
+              setWizardProduction(null);
+            }}
           onFetchNews={async () => {
             // Use the production's news_date, not the current selectedDate
             const dateObj = parseLocalDate(wizardProduction.news_date);
@@ -2566,33 +2578,58 @@ const App: React.FC = () => {
             return news;
           }}
           onGenerateScript={async (newsItems, improvements) => {
+            // CRITICAL: Load fresh config from Supabase to ensure we have latest settings
+            const freshChannel = await getChannelById(activeChannel!.id);
+            const freshConfig = freshChannel?.config || config;
+            
+            if (freshChannel) {
+              setConfig(freshConfig);
+            }
+            
             // Use the production's news_date, not the current selectedDate
             const result = await generateScriptWithScenes(
               newsItems.slice(0, 4),
-              config,
-              config.preferredNarrative,
+              freshConfig,
+              freshConfig.preferredNarrative,
               improvements // Pass improvements for regeneration
             );
             const dateObj = parseLocalDate(wizardProduction.news_date);
             const metadata = await generateViralMetadata(
               newsItems.slice(0, 4),
-              config,
+              freshConfig,
               dateObj
             );
             return { scenes: result, metadata };
           }}
           onGenerateAudio={async (segmentIndex, text, speaker) => {
+            // CRITICAL: Load fresh config from Supabase to ensure we have latest TTS settings
+            // This fixes the bug where ElevenLabs voiceId wasn't being used for Host B
+            const freshChannel = await getChannelById(activeChannel!.id);
+            const freshConfig = freshChannel?.config || config;
+            
+            // Update local state with fresh config (sync fix)
+            if (freshChannel) {
+              setConfig(freshConfig);
+            }
+            
             // Generate audio for a single segment using the script line format
-            const characterKey = speaker.toLowerCase().includes(config.characters.hostA.name.toLowerCase()) 
+            const characterKey = speaker.toLowerCase().includes(freshConfig.characters.hostA.name.toLowerCase()) 
               ? 'hostA' 
               : 'hostB';
-            const character = config.characters[characterKey];
+            const character = freshConfig.characters[characterKey];
+            
+            // Log TTS provider and voice being used for debugging
+            console.log(`🎙️ [Audio] Generating for ${speaker} (${characterKey}):`, {
+              ttsProvider: freshConfig.ttsProvider,
+              voiceName: character.voiceName,
+              elevenLabsVoiceId: character.elevenLabsVoiceId
+            });
             
             // Create a single-item script array to use existing function
             const singleLineScript: ScriptLine[] = [{ speaker, text }];
             const audioSegments = await generateSegmentedAudioWithCache(
               singleLineScript,
-              config,
+              freshConfig,
               wizardProduction?.channel_id || ''
             );
             
@@ -2614,12 +2651,20 @@ const App: React.FC = () => {
             };
           }}
           onGenerateVideo={async (segmentIndex, audioUrl, speaker) => {
+            // CRITICAL: Load fresh config from Supabase
+            const freshChannel = await getChannelById(activeChannel!.id);
+            const freshConfig = freshChannel?.config || config;
+            
+            if (freshChannel) {
+              setConfig(freshConfig);
+            }
+            
             // Generate video for a single segment
             const segment = wizardProduction?.segments?.[segmentIndex];
             
             // Get the correct video_mode from scenes for this specific segment
             const sceneData = wizardProduction?.scenes?.scenes?.[String(segmentIndex + 1)];
-            const videoMode = sceneData?.video_mode || (speaker === config.characters.hostA.name ? 'hostA' : 'hostB');
+            const videoMode = sceneData?.video_mode || (speaker === freshConfig.characters.hostA.name ? 'hostA' : 'hostB');
             
             // Use WaveSpeed/InfiniteTalk to generate video
             // IMPORTANT: Pass originalIndex so the correct scene metadata is used
@@ -2631,7 +2676,7 @@ const App: React.FC = () => {
                 audioUrl: audioUrl,
                 originalIndex: segmentIndex  // Pass the real segment index
               } as any],
-              config,
+              freshConfig,
               activeChannel?.id || '',
               wizardProduction?.id,
               wizardProduction?.scenes
@@ -2641,7 +2686,8 @@ const App: React.FC = () => {
               videoUrl: videoUrls[0] || ''
             };
           }}
-        />
+          />
+        </ErrorBoundary>
       )}
     </div>
   );

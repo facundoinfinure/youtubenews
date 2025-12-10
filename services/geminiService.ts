@@ -670,8 +670,10 @@ const generateSingleAudio = async (
     throw new Error(`Empty text provided for audio generation (${label})`);
   }
   
-  // Determine cache key voice (use elevenLabsVoiceId if available, else voiceName)
-  const cacheVoiceKey = ttsProvider === 'elevenlabs' && elevenLabsVoiceId ? elevenLabsVoiceId : voiceName;
+  // Determine cache key voice - INCLUDE PROVIDER to avoid returning OpenAI audio when ElevenLabs is requested
+  // Format: "provider:voiceId" (e.g., "elevenlabs:9oPKasc15pfAbMr7N6Gs" or "openai:echo")
+  const voiceId = ttsProvider === 'elevenlabs' && elevenLabsVoiceId ? elevenLabsVoiceId : voiceName;
+  const cacheVoiceKey = `${ttsProvider}:${voiceId}`;
   
   // Check cache first
   if (findCachedAudioFn && channelId) {
@@ -690,12 +692,19 @@ const generateSingleAudio = async (
   let audioBase64: string;
   let audioDuration: number;
   
+  // Validate ElevenLabs voiceId if provider is elevenlabs
+  // ElevenLabs voice IDs are typically 20-24 character alphanumeric strings
+  const isValidElevenLabsVoiceId = elevenLabsVoiceId && 
+    typeof elevenLabsVoiceId === 'string' && 
+    elevenLabsVoiceId.trim().length >= 15 &&
+    /^[a-zA-Z0-9]+$/.test(elevenLabsVoiceId.trim());
+  
   // Generate audio based on TTS provider
-  if (ttsProvider === 'elevenlabs' && elevenLabsVoiceId) {
+  if (ttsProvider === 'elevenlabs' && isValidElevenLabsVoiceId) {
     // Use ElevenLabs TTS
     console.log(`🎙️ [ElevenLabs] Generating audio for ${label} with voice: ${elevenLabsVoiceId}`);
     try {
-      const result = await generateElevenLabsTTS(trimmedText, elevenLabsVoiceId);
+      const result = await generateElevenLabsTTS(trimmedText, elevenLabsVoiceId!.trim());
       audioBase64 = result.audioBase64;
       audioDuration = result.audioDuration;
       console.log(`✅ [ElevenLabs] Generated (${label}): "${trimmedText.substring(0, 30)}..." (${audioDuration.toFixed(1)}s)`);
@@ -708,6 +717,9 @@ const generateSingleAudio = async (
     }
   } else {
     // Use OpenAI TTS
+    if (ttsProvider === 'elevenlabs' && !isValidElevenLabsVoiceId) {
+      console.warn(`⚠️ [Audio] ElevenLabs selected but voiceId "${elevenLabsVoiceId}" is invalid for ${label}, using OpenAI`);
+    }
     audioBase64 = await generateTTSAudio(trimmedText, voiceName, language);
     // Estimate duration from text (150 words/min = 2.5 words/sec)
     const wordCount = trimmedText.split(/\s+/).length;

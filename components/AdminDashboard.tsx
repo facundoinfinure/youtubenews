@@ -28,6 +28,8 @@ interface AdminDashboardProps {
   onDeleteVideo: (videoId: string, youtubeId: string | null) => Promise<void>;
   onResumeProduction?: (production: Production) => Promise<void>;
   user: UserProfile | null;
+  /** Called when a new channel is created - parent should refresh channel list */
+  onChannelCreated?: (channel: Channel) => void;
 }
 
 // ElevenLabs predefined voices - organized by gender
@@ -292,7 +294,7 @@ const RetentionChart: React.FC<{ data: number[], color: string }> = ({ data, col
   );
 };
 
-export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdateConfig, onExit, activeChannel, channels, onChannelChange, onDeleteVideo, onResumeProduction, user }) => {
+export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdateConfig, onExit, activeChannel, channels, onChannelChange, onDeleteVideo, onResumeProduction, user, onChannelCreated }) => {
   const [tempConfig, setTempConfig] = useState<ChannelConfig>(config);
   const [activeTab, setActiveTab] = useState<'overview' | 'insights' | 'settings' | 'costs' | 'cache' | 'productions' | 'render'>('overview');
   
@@ -537,8 +539,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
         toast.success(`Channel "${newChannelName}" created!`);
         setShowNewChannelModal(false);
         setNewChannelName('');
-        // Reload to fetch new channels
-        window.location.reload();
+        
+        // FIXED: Use callback instead of window.location.reload()
+        // This preserves app state and provides better UX
+        if (onChannelCreated) {
+          onChannelCreated(created);
+        }
+        // Switch to the new channel
+        onChannelChange(created);
       } else {
         toast.error('Failed to create channel');
       }

@@ -37,5 +37,8 @@ export {
 export { Ticker } from './Ticker';
 export { ToastProvider } from './ToastProvider';
 
+// Error Handling
+export { ErrorBoundary, InlineErrorBoundary, withErrorBoundary } from './ErrorBoundary';
+
 // UI System (Icons, Command Palette, etc.)
 export * from './ui';

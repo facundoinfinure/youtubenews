@@ -578,6 +578,9 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
   const [scriptHistory, setScriptHistory] = useState<ScriptHistoryItem[]>(production.script_history || []);
   const [showScriptHistory, setShowScriptHistory] = useState(false);
   
+  // Close confirmation dialog (v2.8 - UX improvement)
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false);
+  
   // Restore a script from history
   const handleRestoreScript = useCallback(async (historyItem: ScriptHistoryItem) => {
     const scenes = historyItem.scenes;
@@ -1162,7 +1165,14 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
             error: (error as Error).message
           });
           
-          toast.error(`Audio ${i + 1} ✗`);
+          // Show more helpful error message
+          const errorMsg = (error as Error).message;
+          const friendlyError = errorMsg.includes('timeout') 
+            ? `Audio ${i + 1}: Tiempo de espera agotado. Reintenta.`
+            : errorMsg.includes('rate') || errorMsg.includes('limit')
+            ? `Audio ${i + 1}: Límite de API alcanzado. Espera unos minutos.`
+            : `Audio ${i + 1} falló: ${errorMsg.substring(0, 50)}`;
+          toast.error(friendlyError);
           return { index: i, success: false };
         }
       })
@@ -2605,8 +2615,20 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
             </p>
           </div>
           <button
-            onClick={onClose}
+            onClick={() => {
+              // Show confirmation if there's work in progress
+              const hasProgress = wizardState.currentStep !== 'news_fetch' || 
+                fetchedNews.length > 0 ||
+                localProduction.segments?.length > 0;
+              
+              if (hasProgress && !showCloseConfirm) {
+                setShowCloseConfirm(true);
+              } else {
+                onClose();
+              }
+            }}
             className="text-gray-400 hover:text-white text-xl sm:text-2xl p-1 ml-2 flex-shrink-0"
+            title="Cerrar wizard"
           >
             ×
           </button>
@@ -2628,6 +2650,37 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
           {renderStepContent()}
         </div>
       </div>
+      
+      {/* Close Confirmation Dialog */}
+      {showCloseConfirm && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[60]">
+          <div className="bg-[#1a1a1a] border border-[#333] rounded-xl p-6 max-w-md w-full mx-4 shadow-2xl">
+            <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
+              ⚠️ ¿Cerrar Production Wizard?
+            </h3>
+            <p className="text-gray-400 text-sm mb-4">
+              Tu progreso se ha guardado automáticamente. Podrás retomar esta producción más tarde desde el Admin Dashboard.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowCloseConfirm(false)}
+                className="px-4 py-2 bg-white/5 hover:bg-white/10 text-white rounded-lg text-sm transition-all"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => {
+                  setShowCloseConfirm(false);
+                  onClose();
+                }}
+                className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg text-sm font-medium transition-all"
+              >
+                Sí, cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

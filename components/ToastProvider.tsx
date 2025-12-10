@@ -4,13 +4,19 @@ import { Toaster } from 'react-hot-toast';
 /**
  * Toast Notifications Wrapper
  * Pre-configured with ChimpNews branding
+ * 
+ * Position: bottom-center to avoid interfering with Admin Dashboard menu
  */
 export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     return (
         <>
             {children}
             <Toaster
-                position="top-right"
+                position="bottom-center"
+                containerStyle={{
+                    bottom: 40,
+                    zIndex: 9999,
+                }}
                 toastOptions={{
                     // Default options
                     duration: 3000,
@@ -22,7 +28,8 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                         padding: '16px',
                         fontSize: '14px',
                         fontFamily: 'var(--font-sans)',
-                        boxShadow: 'var(--shadow-xl)',
+                        boxShadow: '0 10px 40px rgba(0,0,0,0.5)',
+                        maxWidth: '400px',
                     },
                     // Success
                     success: {

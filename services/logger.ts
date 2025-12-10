@@ -30,6 +30,15 @@ const isDev = () => {
   }
 };
 
+// Check if verbose logging is enabled (for debugging production issues)
+const isVerbose = () => {
+  try {
+    return localStorage.getItem('chimpnews_verbose_logs') === 'true';
+  } catch {
+    return false;
+  }
+};
+
 // Log level configuration
 const LOG_LEVELS: Record<LogLevel, number> = {
   debug: 0,
@@ -38,8 +47,12 @@ const LOG_LEVELS: Record<LogLevel, number> = {
   error: 3
 };
 
-// Minimum log level (debug in dev, info in prod)
-const getMinLogLevel = (): LogLevel => isDev() ? 'debug' : 'info';
+// Minimum log level (debug in dev, warn in prod unless verbose)
+const getMinLogLevel = (): LogLevel => {
+  if (isDev()) return 'debug';
+  if (isVerbose()) return 'info';
+  return 'warn'; // In production, only show warnings and errors by default
+};
 
 // Emoji prefixes for each level
 const LEVEL_EMOJI: Record<LogLevel, string> = {
@@ -235,10 +248,53 @@ class Logger {
   exportLogs(): string {
     return JSON.stringify(logBuffer, null, 2);
   }
+
+  /**
+   * Enable verbose logging (useful for debugging production issues)
+   */
+  enableVerbose() {
+    try {
+      localStorage.setItem('chimpnews_verbose_logs', 'true');
+      this.minLevel = 'debug';
+      console.info('🔍 Verbose logging enabled. Reload the page for full effect.');
+    } catch {
+      console.warn('Could not enable verbose logging');
+    }
+  }
+
+  /**
+   * Disable verbose logging
+   */
+  disableVerbose() {
+    try {
+      localStorage.removeItem('chimpnews_verbose_logs');
+      this.minLevel = getMinLogLevel();
+      console.info('Verbose logging disabled');
+    } catch {
+      // Ignore
+    }
+  }
+
+  /**
+   * Check if currently in verbose mode
+   */
+  isVerbose(): boolean {
+    return isVerbose() || this.minLevel === 'debug';
+  }
 }
 
 // Singleton instance
 export const logger = new Logger();
+
+// Expose logger globally for debugging in production console
+if (typeof window !== 'undefined') {
+  (window as any).chimpLogger = {
+    enableVerbose: () => logger.enableVerbose(),
+    disableVerbose: () => logger.disableVerbose(),
+    getLogs: () => logger.getRecentLogs(),
+    exportLogs: () => logger.exportLogs(),
+  };
+}
 
 // Export for convenience
 export default logger;
