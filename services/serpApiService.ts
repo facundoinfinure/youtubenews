@@ -101,11 +101,29 @@ const loadLocaleConfig = async (): Promise<Record<string, { gl: string; hl: stri
 
 /**
  * Get country config (sync version with fallback)
+ * Case-insensitive lookup to handle variations like "ARGENTINA", "Argentina", "argentina"
  */
 const getCountryConfig = (country: string): { gl: string; hl: string } => {
   // Use cache if available, otherwise fallback
   const config = localeConfigCache || FALLBACK_COUNTRY_CONFIG;
-  return config[country] || { gl: 'us', hl: 'en' };
+  
+  // Direct lookup first
+  if (config[country]) {
+    return config[country];
+  }
+  
+  // Case-insensitive lookup
+  const countryLower = country.toLowerCase();
+  for (const [key, value] of Object.entries(config)) {
+    if (key.toLowerCase() === countryLower) {
+      console.log(`🌍 [Locale] Matched "${country}" to "${key}" (case-insensitive)`);
+      return value;
+    }
+  }
+  
+  // Fallback to US English if no match found
+  console.warn(`⚠️ [Locale] No config found for country "${country}", using US/en fallback`);
+  return { gl: 'us', hl: 'en' };
 };
 
 // Default topic token - loaded from system_defaults or fallback
