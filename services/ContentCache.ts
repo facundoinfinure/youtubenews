@@ -261,6 +261,49 @@ export class ContentCache {
     }
 
     /**
+     * Invalidate cache entries matching a prefix (e.g., "serpapi_topic_news_")
+     * Useful when channel config changes (like topicToken)
+     */
+    static async invalidateByPrefix(prefix: string) {
+        // Clear from memory
+        const keysToDelete: string[] = [];
+        memoryCache.forEach((_, key) => {
+            if (key.startsWith(prefix)) {
+                keysToDelete.push(key);
+            }
+        });
+        keysToDelete.forEach(key => memoryCache.delete(key));
+        console.log(`🗑️ Invalidated ${keysToDelete.length} memory cache entries with prefix: ${prefix}`);
+
+        // Clear from Supabase
+        if (supabase && currentChannelId) {
+            try {
+                const { error, count } = await supabase
+                    .from('content_cache')
+                    .delete()
+                    .eq('channel_id', currentChannelId)
+                    .like('cache_key', `${prefix}%`);
+                
+                if (!error) {
+                    console.log(`🗑️ Invalidated ${count || 0} DB cache entries with prefix: ${prefix}`);
+                }
+            } catch (e) {
+                console.warn('Failed to invalidate cache from DB:', e);
+            }
+        }
+    }
+
+    /**
+     * Invalidate news cache for a specific channel
+     * Call this when topicToken or country changes
+     */
+    static async invalidateNewsCache(channelName: string) {
+        const prefix = `serpapi_topic_news_${channelName}`;
+        await this.invalidateByPrefix(prefix);
+        console.log(`📰 News cache invalidated for channel: ${channelName}`);
+    }
+
+    /**
      * Preload cache from Supabase for current channel
      */
     static async preload() {

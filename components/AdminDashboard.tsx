@@ -313,6 +313,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
     console.log(`💾 [Save] Host A voice: "${tempConfig.characters.hostA.voiceName}"`);
     console.log(`💾 [Save] Host B voice: "${tempConfig.characters.hostB.voiceName}"`);
 
+    // Check if topicToken or country changed - need to invalidate news cache
+    const topicTokenChanged = config.topicToken !== tempConfig.topicToken;
+    const countryChanged = config.country !== tempConfig.country;
+    const needsNewsCacheInvalidation = topicTokenChanged || countryChanged;
+
+    if (needsNewsCacheInvalidation) {
+      console.log(`🔄 [Save] News source changed - will invalidate news cache`);
+      console.log(`🔄 [Save] topicToken: "${config.topicToken}" -> "${tempConfig.topicToken}"`);
+      console.log(`🔄 [Save] country: "${config.country}" -> "${tempConfig.country}"`);
+    }
+
     // Save to Supabase
     const updatedChannel = { ...activeChannel, config: tempConfig };
     const savedResult = await saveChannel(updatedChannel);
@@ -345,8 +356,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
     
     // Also update the channel in parent state
     onChannelChange(verifiedChannel);
-    
-    toast.success('Configuration saved & verified from database!');
+
+    // Invalidate news cache if topicToken or country changed
+    if (needsNewsCacheInvalidation) {
+      await ContentCache.invalidateNewsCache(confirmedConfig.channelName);
+      toast.success('Configuration saved! News cache cleared - next fetch will use new settings.');
+    } else {
+      toast.success('Configuration saved & verified from database!');
+    }
   };
 
 
@@ -2535,6 +2552,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                   </div>
                 );
               })()}
+            </div>
+
+            {/* News Cache Management */}
+            <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
+              <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+                <span>📰</span> News Cache
+              </h3>
+              <p className="text-sm text-gray-400 mb-4">
+                Si cambiaste el Topic Token o el país y las noticias siguen siendo incorrectas, limpia el cache de noticias.
+              </p>
+              <button
+                onClick={async () => {
+                  try {
+                    await ContentCache.invalidateNewsCache(config.channelName);
+                    toast.success(`✅ Cache de noticias limpiado para ${config.channelName}. La próxima búsqueda traerá noticias nuevas.`);
+                  } catch (e) {
+                    toast.error(`Error: ${(e as Error).message}`);
+                  }
+                }}
+                className="w-full bg-yellow-600 hover:bg-yellow-500 px-4 py-3 rounded-lg font-bold transition-colors flex items-center justify-center gap-2"
+              >
+                🗑️ Limpiar Cache de Noticias ({config.channelName})
+              </button>
+              <p className="text-xs text-gray-500 mt-2">
+                Topic Token actual: {config.topicToken ? `${config.topicToken.substring(0, 30)}...` : 'Default (US Business)'}
+              </p>
             </div>
 
             <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
