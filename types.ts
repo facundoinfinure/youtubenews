@@ -565,6 +565,27 @@ export interface SegmentStatus {
   error?: string;
 }
 
+// Script History Types (v2.5) - For tracking multiple script generations
+export interface ScriptHistoryItem {
+  id: string; // Unique identifier (uuid)
+  generatedAt: string; // ISO timestamp
+  scenes: ScriptWithScenes;
+  viralMetadata: ViralMetadata;
+  analysis?: {
+    overallScore: number;
+    hookScore: number;
+    retentionScore: number;
+    pacingScore: number;
+    engagementScore: number;
+    suggestions: string[];
+    strengths: string[];
+  };
+  improvements?: { // If regenerated with improvements
+    implement: string[];
+    maintain: string[];
+  };
+}
+
 export interface Production {
   id: string;
   created_at: string;
@@ -604,6 +625,8 @@ export interface Production {
   // Wizard state for step-by-step flow (v2.4)
   wizard_state?: ProductionWizardState; // Detailed step-by-step progress tracking
   fetched_news?: NewsItem[]; // Cached fetched news for this production
+  // Script history for comparison (v2.5)
+  script_history?: ScriptHistoryItem[]; // Array of previously generated scripts
 }
 
 // Window augmentation for AI Studio key selection & Google Identity & Runtime Env

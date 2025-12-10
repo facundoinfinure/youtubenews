@@ -421,6 +421,31 @@ export const saveNewsToDB = async (newsDate: Date, news: NewsItem[], channelId: 
   console.log(`✅ Saved ${insertedCount} new items, skipped ${skippedCount} duplicates`);
 };
 
+/**
+ * Delete all news items for a specific channel
+ * Call this when topicToken changes to force fresh news fetch
+ */
+export const deleteNewsForChannel = async (channelId: string): Promise<number> => {
+  if (!supabase) return 0;
+
+  console.log(`🗑️ [News] Deleting all news for channel ${channelId}...`);
+  
+  const { data, error } = await supabase
+    .from('news_items')
+    .delete()
+    .eq('channel_id', channelId)
+    .select('id');
+
+  if (error) {
+    console.error("Error deleting news:", error);
+    return 0;
+  }
+
+  const count = data?.length || 0;
+  console.log(`🗑️ [News] Deleted ${count} news items for channel`);
+  return count;
+};
+
 export const getNewsByDate = async (newsDate: Date, channelId: string): Promise<NewsItem[]> => {
   if (!supabase) return [];
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { ChannelConfig, CharacterProfile, StoredVideo, Channel, UserProfile, Production, RenderConfig, DEFAULT_RENDER_CONFIG, DEFAULT_ETHICAL_GUARDRAILS, ShotstackTransitionType, ShotstackEffectType, ShotstackFilterType } from '../types';
-import { fetchVideosFromDB, saveConfigToDB, getAllChannels, saveChannel, getChannelById, uploadImageToStorage, getIncompleteProductions, getAllProductions, getPublishedProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction, updateSegmentStatus, saveProduction, saveVideoToDB, connectYouTube } from '../services/supabaseService';
+import { fetchVideosFromDB, saveConfigToDB, getAllChannels, saveChannel, getChannelById, uploadImageToStorage, getIncompleteProductions, getAllProductions, getPublishedProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction, updateSegmentStatus, saveProduction, saveVideoToDB, connectYouTube, deleteNewsForChannel } from '../services/supabaseService';
 import { uploadVideoToYouTube } from '../services/youtubeService';
 import { generateSeedImage } from '../services/geminiService';
 import { CostTracker } from '../services/CostTracker';
@@ -10,6 +10,13 @@ import { VideoListSkeleton, AnalyticsCardSkeleton, EmptyState } from './LoadingS
 import { parseLocalDate } from '../utils/dateUtils';
 import { getStorageUsage, cleanupOldFiles } from '../services/storageManager';
 import { renderProductionToShotstack, hasVideosForRender } from '../services/shotstackService';
+import { CommandPalette, useCommandPalette } from './ui/CommandPalette';
+import { 
+  IconLayoutDashboard, IconBarChart, IconSettings, IconFilm, 
+  IconDollarSign, IconHardDrive, IconSliders, IconPlus,
+  IconArrowLeft, IconCheck, IconClock, IconCheckCircle,
+  IconPlay, IconChevronDown, IconMic
+} from './ui/Icons';
 
 interface AdminDashboardProps {
   config: ChannelConfig;
@@ -108,6 +115,37 @@ const CharacterEditor: React.FC<{
   );
 };
 
+// Tab Button Component for premium tabs
+const TabButton: React.FC<{
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+  badge?: number;
+}> = ({ active, onClick, icon, label, badge }) => (
+  <button
+    onClick={onClick}
+    className={`
+      flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-all
+      ${active 
+        ? 'bg-white/10 text-white' 
+        : 'text-white/50 hover:text-white/80 hover:bg-white/5'
+      }
+    `}
+  >
+    <span className={active ? 'text-accent-400' : ''}>{icon}</span>
+    <span className="hidden sm:inline">{label}</span>
+    {badge !== undefined && (
+      <span className={`
+        min-w-5 h-5 px-1.5 rounded-full text-xs flex items-center justify-center font-medium
+        ${active ? 'bg-accent-500/20 text-accent-400' : 'bg-white/10 text-white/50'}
+      `}>
+        {badge}
+      </span>
+    )}
+  </button>
+);
+
 // Simple Line Chart Component using SVG
 const RetentionChart: React.FC<{ data: number[], color: string }> = ({ data, color }) => {
   if (!data || data.length === 0) return <div className="h-32 flex items-center justify-center text-gray-500">No Data</div>;
@@ -150,6 +188,9 @@ const RetentionChart: React.FC<{ data: number[], color: string }> = ({ data, col
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdateConfig, onExit, activeChannel, channels, onChannelChange, onDeleteVideo, onResumeProduction, user }) => {
   const [tempConfig, setTempConfig] = useState<ChannelConfig>(config);
   const [activeTab, setActiveTab] = useState<'overview' | 'insights' | 'settings' | 'costs' | 'cache' | 'productions' | 'render'>('overview');
+  
+  // Command Palette
+  const commandPalette = useCommandPalette();
   const [videos, setVideos] = useState<StoredVideo[]>([]);
   const [selectedVideo, setSelectedVideo] = useState<StoredVideo | null>(null);
   const [isLoadingVideos, setIsLoadingVideos] = useState(false);
@@ -357,10 +398,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
     // Also update the channel in parent state
     onChannelChange(verifiedChannel);
 
-    // Invalidate news cache if topicToken or country changed
+    // Invalidate news cache AND delete news from DB if topicToken or country changed
     if (needsNewsCacheInvalidation) {
       await ContentCache.invalidateNewsCache(confirmedConfig.channelName);
-      toast.success('Configuration saved! News cache cleared - next fetch will use new settings.');
+      // Also delete news from database so fresh news will be fetched
+      const deletedCount = await deleteNewsForChannel(activeChannel.id);
+      toast.success(`Configuration saved! ${deletedCount} old news items cleared - next fetch will use new settings.`);
     } else {
       toast.success('Configuration saved & verified from database!');
     }
@@ -396,209 +439,234 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
   };
 
   return (
-    <div className="w-full min-h-screen bg-[#0f0f0f] text-white p-6 md:p-12 font-sans">
+    <div className="w-full min-h-screen bg-[#09090b] text-white p-4 sm:p-6 md:p-8 font-sans">
+      {/* Command Palette */}
+      <CommandPalette 
+        isOpen={commandPalette.isOpen}
+        onClose={commandPalette.close}
+        onNavigate={(tab) => setActiveTab(tab as any)}
+        onExitAdmin={onExit}
+      />
+      
       <div className="max-w-6xl mx-auto">
 
-        {/* Header */}
-        <div className="flex justify-between items-center mb-8 border-b border-[#333] pb-4">
+        {/* Header - Redesigned */}
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8 pb-6 border-b border-white/5">
           <div>
-            <h1 className="text-4xl font-bold leading-tight">Admin Dashboard</h1>
-            <p className="text-gray-400 text-sm mt-2 leading-relaxed">Manage production settings and analyze performance</p>
+            <h1 className="text-2xl sm:text-3xl font-semibold text-white">Admin Dashboard</h1>
+            <p className="text-white/40 text-sm mt-1">Manage production settings and analyze performance</p>
           </div>
-          <div className="flex gap-4 items-center">
-            {/* Channel Selector */}
+          <div className="flex flex-wrap gap-2 sm:gap-3 items-center">
+            {/* Channel Selector - Premium */}
             <div className="flex items-center gap-2">
-              <label className="text-sm text-gray-400 font-medium">Channel:</label>
-              <select
-                value={activeChannel?.id || ''}
-                onChange={(e) => {
-                  const selected = channels.find(c => c.id === e.target.value);
-                  if (selected) {
-                    onChannelChange(selected);
-                  }
-                }}
-                className="bg-[#1a1a1a] border border-[#333] rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors duration-200 cursor-pointer hover:border-[#555]"
-                disabled={channels.length === 0}
-              >
-                {channels.length === 0 ? (
-                  <option value="">No channels available</option>
-                ) : (
-                  channels.map(ch => (
-                    <option key={ch.id} value={ch.id}>{ch.name}</option>
-                  ))
-                )}
-              </select>
+              <div className="relative">
+                <select
+                  value={activeChannel?.id || ''}
+                  onChange={(e) => {
+                    const selected = channels.find(c => c.id === e.target.value);
+                    if (selected) {
+                      onChannelChange(selected);
+                    }
+                  }}
+                  className="appearance-none bg-white/5 border border-white/10 rounded-xl px-4 py-2 pr-10 text-white text-sm focus:outline-none focus:border-accent-500/50 focus:ring-2 focus:ring-accent-500/20 transition-all cursor-pointer hover:border-white/20"
+                  disabled={channels.length === 0}
+                >
+                  {channels.length === 0 ? (
+                    <option value="">No channels</option>
+                  ) : (
+                    channels.map(ch => (
+                      <option key={ch.id} value={ch.id}>{ch.name}</option>
+                    ))
+                  )}
+                </select>
+                <IconChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 pointer-events-none" />
+              </div>
               <button
                 onClick={() => setShowNewChannelModal(true)}
-                className="bg-green-600 hover:bg-green-500 px-3 py-1.5 rounded-lg text-sm font-bold transition-all duration-200 hover:scale-105 active:scale-95"
+                className="h-9 w-9 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 flex items-center justify-center transition-all"
+                title="New Channel"
               >
-                + New Channel
+                <IconPlus size={18} className="text-emerald-400" />
               </button>
             </div>
+            
+            {/* Keyboard shortcut hint */}
+            <button
+              onClick={commandPalette.open}
+              className="hidden sm:flex items-center gap-2 h-9 px-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 text-white/40 hover:text-white/60 text-xs transition-all"
+            >
+              <kbd className="px-1.5 py-0.5 bg-white/10 rounded text-[10px]">⌘K</kbd>
+            </button>
+            
             <button
               onClick={onExit}
-              className="text-gray-400 hover:text-white transition-colors duration-200 font-medium"
+              className="h-9 px-4 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 text-white/60 hover:text-white text-sm font-medium flex items-center gap-2 transition-all"
             >
-              Exit to App
+              <IconArrowLeft size={16} />
+              <span className="hidden sm:inline">Exit</span>
             </button>
             <button
               onClick={handleSave}
-              className="btn-primary"
+              className="h-9 px-4 rounded-xl bg-accent-500 hover:bg-accent-400 text-white text-sm font-medium flex items-center gap-2 transition-all shadow-lg shadow-accent-500/20"
             >
-              Save Changes
+              <IconCheck size={16} />
+              <span>Save</span>
             </button>
           </div>
         </div>
 
-        {/* Tabs - Horizontally scrollable on mobile */}
-        <div className="flex gap-2 sm:gap-6 mb-6 sm:mb-8 border-b border-[#272727] overflow-x-auto pb-0 scrollbar-hide -mx-4 px-4 sm:mx-0 sm:px-0">
-          <button
+        {/* Tabs - Premium Design */}
+        <div className="flex gap-1 mb-8 bg-white/[0.02] p-1 rounded-xl border border-white/5 overflow-x-auto scrollbar-hide">
+          <TabButton 
+            active={activeTab === 'overview'} 
             onClick={() => setActiveTab('overview')}
-            className={`pb-3 px-2 sm:px-3 border-b-2 font-semibold text-xs sm:text-sm transition-all duration-200 whitespace-nowrap flex-shrink-0 ${activeTab === 'overview'
-              ? 'border-blue-500 text-white'
-              : 'border-transparent text-gray-500 hover:text-gray-300'
-              }`}
-          >
-            🏠 <span className="hidden sm:inline">Overview</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('insights')}
-            className={`pb-3 px-2 sm:px-3 border-b-2 font-semibold text-xs sm:text-sm transition-all duration-200 whitespace-nowrap flex-shrink-0 ${activeTab === 'insights'
-              ? 'border-blue-500 text-white'
-              : 'border-transparent text-gray-500 hover:text-gray-300'
-              }`}
-          >
-            📊 <span className="hidden sm:inline">Insights</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('settings')}
-            className={`pb-3 px-2 sm:px-3 border-b-2 font-semibold text-xs sm:text-sm transition-all duration-200 whitespace-nowrap flex-shrink-0 ${activeTab === 'settings'
-              ? 'border-blue-500 text-white'
-              : 'border-transparent text-gray-500 hover:text-gray-300'
-              }`}
-          >
-            ⚙️ <span className="hidden sm:inline">Settings</span>
-          </button>
-          <button
+            icon={<IconLayoutDashboard size={16} />}
+            label="Overview"
+          />
+          <TabButton 
+            active={activeTab === 'productions'} 
             onClick={() => setActiveTab('productions')}
-            className={`pb-3 px-2 sm:px-3 border-b-2 font-semibold text-xs sm:text-sm transition-all duration-200 whitespace-nowrap flex-shrink-0 ${activeTab === 'productions'
-              ? 'border-blue-500 text-white'
-              : 'border-transparent text-gray-500 hover:text-gray-300'
-              }`}
-          >
-            🎬 <span className="hidden sm:inline">Productions</span> {productions.length > 0 && `(${productions.length})`}
-          </button>
-          <button
-            onClick={() => setActiveTab('costs')}
-            className={`pb-3 px-2 sm:px-3 border-b-2 font-semibold text-xs sm:text-sm transition-all duration-200 whitespace-nowrap flex-shrink-0 ${activeTab === 'costs'
-              ? 'border-blue-500 text-white'
-              : 'border-transparent text-gray-500 hover:text-gray-300'
-              }`}
-          >
-            💰 <span className="hidden sm:inline">Costs</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('cache')}
-            className={`pb-3 px-2 sm:px-3 border-b-2 font-semibold text-xs sm:text-sm transition-all duration-200 whitespace-nowrap flex-shrink-0 ${activeTab === 'cache'
-              ? 'border-blue-500 text-white'
-              : 'border-transparent text-gray-500 hover:text-gray-300'
-              }`}
-          >
-            💾 <span className="hidden sm:inline">Cache</span>
-          </button>
-          <button
+            icon={<IconFilm size={16} />}
+            label="Productions"
+            badge={productions.length > 0 ? productions.length : undefined}
+          />
+          <TabButton 
+            active={activeTab === 'insights'} 
+            onClick={() => setActiveTab('insights')}
+            icon={<IconBarChart size={16} />}
+            label="Insights"
+          />
+          <TabButton 
+            active={activeTab === 'settings'} 
+            onClick={() => setActiveTab('settings')}
+            icon={<IconSettings size={16} />}
+            label="Settings"
+          />
+          <TabButton 
+            active={activeTab === 'render'} 
             onClick={() => setActiveTab('render')}
-            className={`pb-3 px-2 sm:px-3 border-b-2 font-semibold text-xs sm:text-sm transition-all duration-200 whitespace-nowrap flex-shrink-0 ${activeTab === 'render'
-              ? 'border-cyan-500 text-white'
-              : 'border-transparent text-gray-500 hover:text-gray-300'
-              }`}
-          >
-            🎞️ <span className="hidden sm:inline">Render</span>
-          </button>
+            icon={<IconSliders size={16} />}
+            label="Render"
+          />
+          <TabButton 
+            active={activeTab === 'costs'} 
+            onClick={() => setActiveTab('costs')}
+            icon={<IconDollarSign size={16} />}
+            label="Costs"
+          />
+          <TabButton 
+            active={activeTab === 'cache'} 
+            onClick={() => setActiveTab('cache')}
+            icon={<IconHardDrive size={16} />}
+            label="Storage"
+          />
         </div>
 
         {/* OVERVIEW TAB */}
         {activeTab === 'overview' && (
           <div className="space-y-6">
-            {/* Hero Stats Grid */}
+            {/* Hero Stats Grid - Premium Design */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div 
                 onClick={() => { setProductionFilter('incomplete'); setActiveTab('productions'); }} 
-                className="bg-gradient-to-br from-yellow-500/20 to-orange-500/10 p-6 rounded-xl border border-yellow-500/30 cursor-pointer hover:scale-105 transition-all"
+                className="bg-white/[0.02] p-5 rounded-2xl border border-white/5 cursor-pointer hover:border-white/10 hover:bg-white/[0.04] transition-all group"
               >
-                <div className="text-3xl mb-2">🔄</div>
-                <div className="text-3xl font-bold text-yellow-400">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                  <IconClock size={20} className="text-amber-400" />
+                </div>
+                <div className="text-2xl font-semibold text-white mb-1">
                   {productions.filter(p => p.status === 'in_progress').length}
                 </div>
-                <div className="text-sm text-gray-400">In Progress</div>
+                <div className="text-sm text-white/40">In Progress</div>
               </div>
               
               <div 
                 onClick={() => { setProductionFilter('completed'); setActiveTab('productions'); }} 
-                className="bg-gradient-to-br from-green-500/20 to-emerald-500/10 p-6 rounded-xl border border-green-500/30 cursor-pointer hover:scale-105 transition-all"
+                className="bg-white/[0.02] p-5 rounded-2xl border border-white/5 cursor-pointer hover:border-white/10 hover:bg-white/[0.04] transition-all group"
               >
-                <div className="text-3xl mb-2">✅</div>
-                <div className="text-3xl font-bold text-green-400">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                  <IconCheckCircle size={20} className="text-emerald-400" />
+                </div>
+                <div className="text-2xl font-semibold text-white mb-1">
                   {productions.filter(p => p.status === 'completed').length}
                 </div>
-                <div className="text-sm text-gray-400">Completed</div>
+                <div className="text-sm text-white/40">Completed</div>
               </div>
               
               <div 
                 onClick={() => setActiveTab('insights')} 
-                className="bg-gradient-to-br from-blue-500/20 to-indigo-500/10 p-6 rounded-xl border border-blue-500/30 cursor-pointer hover:scale-105 transition-all"
+                className="bg-white/[0.02] p-5 rounded-2xl border border-white/5 cursor-pointer hover:border-white/10 hover:bg-white/[0.04] transition-all group"
               >
-                <div className="text-3xl mb-2">📺</div>
-                <div className="text-3xl font-bold text-blue-400">{videos.length}</div>
-                <div className="text-sm text-gray-400">Published</div>
+                <div className="w-10 h-10 rounded-xl bg-accent-500/10 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                  <IconPlay size={20} className="text-accent-400" />
+                </div>
+                <div className="text-2xl font-semibold text-white mb-1">{videos.length}</div>
+                <div className="text-sm text-white/40">Published</div>
               </div>
               
               <div 
                 onClick={() => setActiveTab('costs')} 
-                className="bg-gradient-to-br from-purple-500/20 to-pink-500/10 p-6 rounded-xl border border-purple-500/30 cursor-pointer hover:scale-105 transition-all"
+                className="bg-white/[0.02] p-5 rounded-2xl border border-white/5 cursor-pointer hover:border-white/10 hover:bg-white/[0.04] transition-all group"
               >
-                <div className="text-3xl mb-2">💰</div>
-                <div className="text-3xl font-bold text-purple-400">
+                <div className="w-10 h-10 rounded-xl bg-violet-500/10 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                  <IconDollarSign size={20} className="text-violet-400" />
+                </div>
+                <div className="text-2xl font-semibold text-white mb-1">
                   ${(prodCosts?.total || 0).toFixed(2)}
                 </div>
-                <div className="text-sm text-gray-400">Total Cost</div>
+                <div className="text-sm text-white/40">Total Cost</div>
               </div>
             </div>
             
             {/* Active Productions - Quick Access */}
             {productions.filter(p => p.status === 'in_progress').length > 0 && (
-              <div className="bg-gradient-to-br from-[#1a1a2e] to-[#16213e] p-6 rounded-xl border border-yellow-500/30">
-                <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
-                  <span className="animate-pulse text-red-500">●</span> Producciones Activas
-                </h3>
-                <div className="space-y-3">
+              <div className="bg-white/[0.02] rounded-2xl border border-white/5 overflow-hidden">
+                <div className="px-6 py-4 border-b border-white/5 flex items-center gap-3">
+                  <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                  <h3 className="font-medium text-white">Active Productions</h3>
+                </div>
+                <div className="divide-y divide-white/5">
                   {productions.filter(p => p.status === 'in_progress').slice(0, 3).map(prod => {
                     const segmentStatus = prod.segment_status || {};
                     const totalSegments = prod.segments?.length || Object.keys(segmentStatus).length;
                     const audiosDone = Object.values(segmentStatus).filter(s => s?.audio === 'done').length;
                     const videosDone = Object.values(segmentStatus).filter(s => s?.video === 'done').length;
+                    const progress = totalSegments > 0 ? ((audiosDone + videosDone) / (totalSegments * 2)) * 100 : (prod.progress_step / 6) * 100;
                     
                     return (
-                      <div key={prod.id} className="flex items-center justify-between p-4 bg-[#111] rounded-lg border border-[#333]">
-                        <div className="flex-1">
-                          <div className="font-medium text-white truncate max-w-[400px]">
+                      <div key={prod.id} className="px-6 py-4 flex items-center justify-between gap-4 hover:bg-white/[0.02] transition-colors">
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium text-white truncate">
                             {prod.viral_metadata?.title || `Production ${prod.id.slice(0, 8)}`}
                           </div>
-                          <div className="flex items-center gap-3 mt-1">
-                            <span className="text-xs text-gray-500">Step {prod.progress_step}/6</span>
+                          <div className="flex items-center gap-4 mt-1 text-xs text-white/40">
+                            <span>Step {prod.progress_step}/6</span>
                             {totalSegments > 0 && (
                               <>
-                                <span className="text-xs text-cyan-400">🔊 {audiosDone}/{totalSegments}</span>
-                                <span className="text-xs text-purple-400">🎥 {videosDone}/{totalSegments}</span>
+                                <span className="flex items-center gap-1">
+                                  <IconMic size={12} className="text-accent-400" /> {audiosDone}/{totalSegments}
+                                </span>
+                                <span className="flex items-center gap-1">
+                                  <IconFilm size={12} className="text-violet-400" /> {videosDone}/{totalSegments}
+                                </span>
                               </>
                             )}
                           </div>
                         </div>
+                        
+                        {/* Progress bar */}
+                        <div className="w-24 hidden sm:block">
+                          <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
+                            <div className="h-full bg-accent-500 rounded-full" style={{ width: `${progress}%` }} />
+                          </div>
+                        </div>
+                        
                         <button
                           onClick={() => { onResumeProduction?.(prod); onExit(); }}
-                          className="bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-lg shadow-blue-500/20"
+                          className="px-4 py-2 bg-accent-500/10 hover:bg-accent-500/20 text-accent-400 rounded-lg text-sm font-medium transition-all flex items-center gap-2"
                         >
-                          ▶️ Retomar
+                          <IconPlay size={14} />
+                          Resume
                         </button>
                       </div>
                     );
@@ -608,71 +676,77 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
             )}
             
             {/* Asset Summary */}
-            <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
-              <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
-                <span>📦</span> Resumen de Assets
-              </h3>
+            <div className="bg-white/[0.02] rounded-2xl border border-white/5 p-6">
+              <h3 className="font-medium text-white mb-4">Asset Summary</h3>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="bg-[#111] p-4 rounded-lg text-center">
-                  <div className="text-3xl font-bold text-white">{productions.length}</div>
-                  <div className="text-sm text-gray-400">Producciones</div>
+                <div className="bg-white/[0.02] p-4 rounded-xl text-center">
+                  <div className="text-2xl font-semibold text-white">{productions.length}</div>
+                  <div className="text-xs text-white/40 mt-1">Productions</div>
                 </div>
-                <div className="bg-[#111] p-4 rounded-lg text-center">
-                  <div className="text-3xl font-bold text-cyan-400">
+                <div className="bg-white/[0.02] p-4 rounded-xl text-center">
+                  <div className="text-2xl font-semibold text-accent-400">
                     {productions.reduce((acc, p) => acc + Object.values(p.segment_status || {}).filter(s => s?.audio === 'done').length, 0)}
                   </div>
-                  <div className="text-sm text-gray-400">Audios</div>
+                  <div className="text-xs text-white/40 mt-1">Audios</div>
                 </div>
-                <div className="bg-[#111] p-4 rounded-lg text-center">
-                  <div className="text-3xl font-bold text-purple-400">
+                <div className="bg-white/[0.02] p-4 rounded-xl text-center">
+                  <div className="text-2xl font-semibold text-violet-400">
                     {productions.reduce((acc, p) => acc + Object.values(p.segment_status || {}).filter(s => s?.video === 'done').length, 0)}
                   </div>
-                  <div className="text-sm text-gray-400">Videos</div>
+                  <div className="text-xs text-white/40 mt-1">Videos</div>
                 </div>
-                <div className="bg-[#111] p-4 rounded-lg text-center">
-                  <div className="text-3xl font-bold text-pink-400">
+                <div className="bg-white/[0.02] p-4 rounded-xl text-center">
+                  <div className="text-2xl font-semibold text-pink-400">
                     {productions.reduce((acc, p) => acc + (p.segments?.length || 0), 0)}
                   </div>
-                  <div className="text-sm text-gray-400">Segmentos</div>
+                  <div className="text-xs text-white/40 mt-1">Segments</div>
                 </div>
               </div>
             </div>
             
             {/* Quick Actions */}
-            <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
-              <h3 className="text-xl font-bold mb-4">⚡ Acciones Rápidas</h3>
+            <div>
+              <h3 className="font-medium text-white mb-4">Quick Actions</h3>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <button 
                   onClick={() => setActiveTab('productions')}
-                  className="p-4 bg-[#111] hover:bg-[#1a1a1a] border border-[#333] hover:border-blue-500 rounded-lg text-left transition-all"
+                  className="p-4 bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 hover:border-white/10 rounded-xl text-left transition-all group"
                 >
-                  <div className="text-2xl mb-2">📦</div>
-                  <div className="font-medium text-white">Ver Producciones</div>
-                  <div className="text-xs text-gray-500">Gestionar assets</div>
+                  <div className="w-10 h-10 rounded-lg bg-accent-500/10 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                    <IconFilm size={20} className="text-accent-400" />
+                  </div>
+                  <div className="font-medium text-white text-sm">View Productions</div>
+                  <div className="text-xs text-white/40 mt-1">Manage assets</div>
                 </button>
                 <button 
                   onClick={() => setActiveTab('settings')}
-                  className="p-4 bg-[#111] hover:bg-[#1a1a1a] border border-[#333] hover:border-green-500 rounded-lg text-left transition-all"
+                  className="p-4 bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 hover:border-white/10 rounded-xl text-left transition-all group"
                 >
-                  <div className="text-2xl mb-2">⚙️</div>
-                  <div className="font-medium text-white">Configuración</div>
-                  <div className="text-xs text-gray-500">Hosts y canal</div>
+                  <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                    <IconSettings size={20} className="text-emerald-400" />
+                  </div>
+                  <div className="font-medium text-white text-sm">Configuration</div>
+                  <div className="text-xs text-white/40 mt-1">Hosts & channel</div>
                 </button>
                 <button 
                   onClick={() => setActiveTab('costs')}
-                  className="p-4 bg-[#111] hover:bg-[#1a1a1a] border border-[#333] hover:border-purple-500 rounded-lg text-left transition-all"
+                  className="p-4 bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 hover:border-white/10 rounded-xl text-left transition-all group"
                 >
-                  <div className="text-2xl mb-2">💰</div>
-                  <div className="font-medium text-white">Costos</div>
-                  <div className="text-xs text-gray-500">Analytics y gastos</div>
+                  <div className="w-10 h-10 rounded-lg bg-violet-500/10 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                    <IconDollarSign size={20} className="text-violet-400" />
+                  </div>
+                  <div className="font-medium text-white text-sm">Costs</div>
+                  <div className="text-xs text-white/40 mt-1">Analytics & spend</div>
                 </button>
                 <button 
                   onClick={() => setActiveTab('cache')}
-                  className="p-4 bg-[#111] hover:bg-[#1a1a1a] border border-[#333] hover:border-yellow-500 rounded-lg text-left transition-all"
+                  className="p-4 bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 hover:border-white/10 rounded-xl text-left transition-all group"
                 >
-                  <div className="text-2xl mb-2">💾</div>
-                  <div className="font-medium text-white">Storage</div>
-                  <div className="text-xs text-gray-500">Cache y limpieza</div>
+                  <div className="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                    <IconHardDrive size={20} className="text-amber-400" />
+                  </div>
+                  <div className="font-medium text-white text-sm">Storage</div>
+                  <div className="text-xs text-white/40 mt-1">Cache & cleanup</div>
                 </button>
               </div>
             </div>
@@ -2565,15 +2639,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
               <button
                 onClick={async () => {
                   try {
+                    // Clear memory cache
                     await ContentCache.invalidateNewsCache(config.channelName);
-                    toast.success(`✅ Cache de noticias limpiado para ${config.channelName}. La próxima búsqueda traerá noticias nuevas.`);
+                    // Also delete news from database
+                    const deletedCount = activeChannel ? await deleteNewsForChannel(activeChannel.id) : 0;
+                    toast.success(`✅ Cache limpiado y ${deletedCount} noticias eliminadas de la DB. La próxima búsqueda traerá noticias nuevas.`);
                   } catch (e) {
                     toast.error(`Error: ${(e as Error).message}`);
                   }
                 }}
                 className="w-full bg-yellow-600 hover:bg-yellow-500 px-4 py-3 rounded-lg font-bold transition-colors flex items-center justify-center gap-2"
               >
-                🗑️ Limpiar Cache de Noticias ({config.channelName})
+                🗑️ Limpiar Cache de Noticias y DB ({config.channelName})
               </button>
               <p className="text-xs text-gray-500 mt-2">
                 Topic Token actual: {config.topicToken ? `${config.topicToken.substring(0, 30)}...` : 'Default (US Business)'}

@@ -1,13 +1,15 @@
 /**
  * Header Component
  * 
- * App header with logo, channel selector, and user info.
+ * Premium app header with logo, channel selector, and user info.
+ * Redesigned for minimal, clean aesthetic.
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { ChannelConfig, Channel, UserProfile } from '../types';
 import { connectYouTube } from '../services/supabaseService';
 import toast from 'react-hot-toast';
+import { IconYoutube, IconSettings, IconChevronDown } from './ui/Icons';
 
 interface HeaderProps {
   config: ChannelConfig;
@@ -28,100 +30,158 @@ export const Header: React.FC<HeaderProps> = ({
   onAdminClick,
   onChannelChange
 }) => {
+  const [showChannelDropdown, setShowChannelDropdown] = useState(false);
+
   return (
-    <header className="bg-[#0f0f0f] px-3 sm:px-6 py-2 sm:py-3 flex justify-between items-center sticky top-0 z-50 border-b border-[#272727]">
-      {/* Left Side - Logo */}
-      <div className="flex items-center gap-2 sm:gap-4">
-        <button className="text-white p-1.5 sm:p-2 hover:bg-[#272727] rounded-full hidden sm:block">
-          <svg viewBox="0 0 24 24" className="w-5 h-5 sm:w-6 sm:h-6 fill-current">
-            <path d="M21 6H3V5h18v1zm0 5H3v1h18v-1zm0 6H3v1h18v-1z" />
-          </svg>
-        </button>
-        <div className="flex items-center gap-1 cursor-pointer">
-          <div className="w-6 h-5 sm:w-8 sm:h-6 bg-red-600 rounded-lg flex items-center justify-center relative">
-            <div className="w-0 h-0 border-t-[2px] sm:border-t-[3px] border-t-transparent border-l-[4px] sm:border-l-[6px] border-l-white border-b-[2px] sm:border-b-[3px] border-b-transparent ml-0.5" />
+    <header className="fixed top-0 left-0 right-0 z-50 bg-[#09090b]/80 backdrop-blur-xl border-b border-white/5">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 sm:h-16 flex items-center justify-between">
+        
+        {/* Left Side - Logo */}
+        <div className="flex items-center gap-3">
+          {/* Logo Icon */}
+          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-br from-accent-400 to-accent-600 flex items-center justify-center shadow-lg shadow-accent-500/20">
+            <svg className="w-4 h-4 sm:w-5 sm:h-5 text-white" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M8 5v14l11-7z"/>
+            </svg>
           </div>
-          <span className="font-headline text-base sm:text-xl ml-1 truncate max-w-[100px] sm:max-w-none">{config.channelName}</span>
+          
+          {/* Logo Text */}
+          <span className="font-semibold text-base sm:text-lg tracking-tight text-white hidden sm:block">
+            {config.channelName}
+          </span>
         </div>
-      </div>
 
-      {/* Right Side - Controls */}
-      <div className="flex items-center gap-2 sm:gap-4">
-        {/* Upload Status - Hidden on very small screens */}
-        {uploadStatus && (
-          <div className="hidden sm:block text-xs font-mono bg-blue-900/50 text-blue-200 px-2 sm:px-3 py-1 rounded border border-blue-500/30 animate-pulse">
-            {uploadStatus}
+        {/* Center - Channel Selector (only if multiple channels) */}
+        {user && channels.length > 1 && (
+          <div className="absolute left-1/2 -translate-x-1/2 hidden md:block">
+            <div className="relative">
+              <button
+                onClick={() => setShowChannelDropdown(!showChannelDropdown)}
+                className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/10 rounded-full text-sm font-medium text-white/80 transition-all"
+              >
+                <div className="w-2 h-2 rounded-full bg-emerald-400" />
+                <span>{activeChannel?.name || 'Select Channel'}</span>
+                <IconChevronDown size={16} className={`text-white/40 transition-transform ${showChannelDropdown ? 'rotate-180' : ''}`} />
+              </button>
+              
+              {/* Dropdown */}
+              {showChannelDropdown && (
+                <>
+                  <div 
+                    className="fixed inset-0 z-10" 
+                    onClick={() => setShowChannelDropdown(false)} 
+                  />
+                  <div className="absolute top-full mt-2 left-1/2 -translate-x-1/2 w-48 py-2 bg-[#1a1a1e] border border-white/10 rounded-xl shadow-xl z-20">
+                    {channels.map(ch => (
+                      <button
+                        key={ch.id}
+                        onClick={() => {
+                          onChannelChange(ch);
+                          setShowChannelDropdown(false);
+                        }}
+                        className={`
+                          w-full px-4 py-2 text-left text-sm transition-colors flex items-center gap-2
+                          ${ch.id === activeChannel?.id 
+                            ? 'text-white bg-white/5' 
+                            : 'text-white/60 hover:text-white hover:bg-white/5'
+                          }
+                        `}
+                      >
+                        <div className={`w-2 h-2 rounded-full ${ch.id === activeChannel?.id ? 'bg-emerald-400' : 'bg-white/20'}`} />
+                        {ch.name}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         )}
 
-        {/* Admin Button */}
-        {user && (
-          <button onClick={onAdminClick} className="btn-secondary text-xs sm:text-sm px-2 sm:px-4 py-1 sm:py-2">
-            <span className="hidden sm:inline">ADMIN</span>
-            <span className="sm:hidden">⚙️</span>
-          </button>
-        )}
-
-        {/* Channel Selector */}
+        {/* Mobile Channel Selector */}
         {user && channels.length > 0 && (
-          <div className="flex items-center">
+          <div className="md:hidden">
             <select
               value={activeChannel?.id || ''}
               onChange={(e) => {
                 const selected = channels.find(c => c.id === e.target.value);
-                if (selected) {
-                  onChannelChange(selected);
-                }
+                if (selected) onChannelChange(selected);
               }}
-              className="bg-[#1a1a1a] border border-[#333] rounded px-2 sm:px-3 py-1 sm:py-1.5 text-white text-xs sm:text-sm focus:outline-none focus:border-blue-500 max-w-[100px] sm:max-w-none"
-              disabled={!activeChannel && channels.length === 0}
+              className="bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-white text-xs focus:outline-none focus:border-accent-500/50"
             >
-              {channels.length === 0 ? (
-                <option value="">No channels</option>
-              ) : (
-                channels.map(ch => (
-                  <option key={ch.id} value={ch.id}>{ch.name}</option>
-                ))
-              )}
+              {channels.map(ch => (
+                <option key={ch.id} value={ch.id}>{ch.name}</option>
+              ))}
             </select>
           </div>
         )}
 
-        {/* YouTube Connection Status */}
-        {user && (
-          <button
-            onClick={async () => {
-              if (user.accessToken) {
-                toast.success('YouTube ya está conectado');
-              } else {
-                try {
-                  await connectYouTube();
-                } catch (error) {
-                  toast.error('Error conectando YouTube');
-                }
-              }
-            }}
-            className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-all ${
-              user.accessToken 
-                ? 'bg-green-600/20 text-green-400 border border-green-500/30 hover:bg-green-600/30' 
-                : 'bg-red-600/20 text-red-400 border border-red-500/30 hover:bg-red-600/30 animate-pulse'
-            }`}
-            title={user.accessToken ? 'YouTube conectado' : 'Clic para conectar YouTube'}
-          >
-            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
-            </svg>
-            <span className="hidden sm:inline">{user.accessToken ? '✓' : 'Conectar'}</span>
-          </button>
-        )}
+        {/* Right Side - Controls */}
+        <div className="flex items-center gap-2 sm:gap-3">
+          {/* Upload Status */}
+          {uploadStatus && (
+            <div className="hidden sm:flex items-center gap-2 text-xs font-medium bg-accent-500/10 text-accent-400 px-3 py-1.5 rounded-full border border-accent-500/20 animate-pulse">
+              <div className="w-1.5 h-1.5 rounded-full bg-accent-400" />
+              {uploadStatus}
+            </div>
+          )}
 
-        {/* User Info - Simplified on mobile */}
-        {user && (
-          <div className="flex items-center gap-1 sm:gap-2 bg-[#222] rounded-full pr-2 sm:pr-4 pl-1 py-1 border border-[#333]">
-            <img src={user.picture} alt={user.name} className="w-5 h-5 sm:w-6 sm:h-6 rounded-full" />
-            <span className="hidden sm:inline text-xs font-bold text-gray-300">{user.name}</span>
-          </div>
-        )}
+          {/* YouTube Status */}
+          {user && (
+            <button
+              onClick={async () => {
+                if (user.accessToken) {
+                  toast.success('YouTube está conectado');
+                } else {
+                  try {
+                    await connectYouTube();
+                  } catch (error) {
+                    toast.error('Error conectando YouTube');
+                  }
+                }
+              }}
+              className={`
+                h-8 px-3 rounded-full text-xs font-medium flex items-center gap-1.5 transition-all
+                ${user.accessToken 
+                  ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20' 
+                  : 'bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 animate-pulse'
+                }
+              `}
+              title={user.accessToken ? 'YouTube conectado' : 'Clic para conectar YouTube'}
+            >
+              <IconYoutube size={14} />
+              <span className="hidden sm:inline">
+                {user.accessToken ? 'Connected' : 'Connect'}
+              </span>
+            </button>
+          )}
+
+          {/* Admin Button */}
+          {user && (
+            <button 
+              onClick={onAdminClick} 
+              className="h-8 w-8 sm:w-auto sm:px-3 rounded-lg bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/10 text-white/60 hover:text-white flex items-center justify-center gap-2 transition-all"
+              title="Admin Dashboard"
+            >
+              <IconSettings size={16} />
+              <span className="hidden sm:inline text-xs font-medium">Admin</span>
+            </button>
+          )}
+
+          {/* User Avatar */}
+          {user && (
+            <button 
+              className="w-8 h-8 rounded-full overflow-hidden ring-2 ring-white/10 hover:ring-accent-500/50 transition-all flex-shrink-0"
+              title={user.name}
+            >
+              <img 
+                src={user.picture} 
+                alt={user.name} 
+                className="w-full h-full object-cover" 
+              />
+            </button>
+          )}
+        </div>
       </div>
     </header>
   );

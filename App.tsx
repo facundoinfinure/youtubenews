@@ -18,6 +18,7 @@ import { IdleState } from './components/IdleState';
 import { ErrorState } from './components/ErrorState';
 import { ProductionStatus } from './components/ProductionStatus';
 import { ProductionWizard } from './components/ProductionWizard';
+import { ToastProvider } from './components/ToastProvider';
 // Shared utilities
 import { EMPTY_VIDEO_ASSETS, normalizeVideoAssets, hasVideoAssets } from './utils/videoAssets';
 import { parseLocalDate, getYesterdayString } from './utils/dateUtils';
@@ -2514,17 +2515,46 @@ const App: React.FC = () => {
             // Use the production's news_date, not the current selectedDate
             const dateObj = parseLocalDate(wizardProduction.news_date);
             
+            // IMPORTANT: Load FRESH config from Supabase to ensure we have the latest topicToken
+            // This fixes issues where config in React state is stale after Admin Dashboard changes
+            const freshChannel = await getChannelById(activeChannel.id);
+            const freshConfig = freshChannel?.config || config;
+            
+            console.log(`📰 [FetchNews] Using config from Supabase:`);
+            console.log(`📰 [FetchNews] Country: ${freshConfig.country}`);
+            console.log(`📰 [FetchNews] TopicToken: ${freshConfig.topicToken || 'default (US Business)'}`);
+            
+            // Update local state with fresh config
+            if (freshChannel) {
+              setConfig(freshConfig);
+              setActiveChannel(freshChannel);
+            }
+            
             // First check if news exists in database for this date
             let news = await getNewsByDate(dateObj, activeChannel.id);
             
             if (news.length > 0) {
               console.log(`📰 Found ${news.length} cached news items for ${dateObj.toLocaleDateString()}`);
-              return news;
+              // Check if these news items match the current topicToken
+              // If the first few news items are from US sources and config is Argentina, we should refresh
+              const isArgentina = freshConfig.country?.toLowerCase().includes('argentin');
+              const hasUSNews = news.slice(0, 5).some(n => 
+                ['fox news', 'usa today', 'cnn', 'abc', 'nbc', 'cbs', 'washington post', 'new york times', 'los angeles times']
+                  .some(source => n.source.toLowerCase().includes(source.toLowerCase()))
+              );
+              
+              if (isArgentina && hasUSNews) {
+                console.log(`⚠️ [FetchNews] Config is Argentina but found US news - forcing refresh`);
+                // Delete old news and fetch fresh
+                news = [];
+              } else {
+                return news;
+              }
             }
             
             // No cached news for this date - fetch from API
             console.log(`📡 No cached news for ${dateObj.toLocaleDateString()}, fetching from API...`);
-            news = await fetchEconomicNews(dateObj, config);
+            news = await fetchEconomicNews(dateObj, freshConfig);
             
             // Save to database for future use
             if (news.length > 0) {

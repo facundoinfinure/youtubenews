@@ -15,7 +15,8 @@ import {
   getStepNumber,
   ViralMetadata,
   BroadcastSegment,
-  ScriptWithScenes
+  ScriptWithScenes,
+  ScriptHistoryItem
 } from '../types';
 import { saveProduction, updateSegmentStatus } from '../services/supabaseService';
 import { uploadVideoToYouTube } from '../services/youtubeService';
@@ -61,39 +62,57 @@ const StepIndicator: React.FC<{
     return 'pending';
   };
 
+  // Step icons for premium look
+  const getStepIcon = (step: ProductionStep, status: SubStepStatus) => {
+    if (status === 'completed') return '✓';
+    const icons: Record<ProductionStep, string> = {
+      news_fetch: '🔍',
+      news_select: '📰',
+      script_generate: '📝',
+      script_review: '👁️',
+      audio_generate: '🎤',
+      video_generate: '🎬',
+      render_final: '🎞️',
+      publish: '🚀',
+      done: '🎉'
+    };
+    return icons[step] || '●';
+  };
+
   return (
-    <div className="overflow-x-auto scrollbar-hide -mx-4 px-4">
-      <div className="flex items-center justify-start sm:justify-between mb-4 sm:mb-8 min-w-max sm:min-w-0 px-2 sm:px-4">
+    <div className="overflow-x-auto scrollbar-hide -mx-4 px-4 mb-6">
+      <div className="flex items-center justify-start sm:justify-between min-w-max sm:min-w-0 px-2 sm:px-4 py-3 bg-white/[0.02] rounded-xl border border-white/5">
         {steps.filter(s => s !== 'done').map((step, index) => {
           const status = getStepStatus(step);
           const isCurrent = step === currentStep;
-          const stepNum = index + 1;
           const isNavigable = canNavigate?.(step) ?? (status === 'completed');
           
           return (
             <React.Fragment key={step}>
-              <div className="flex flex-col items-center flex-shrink-0">
+              <div 
+                className={`flex items-center gap-2 flex-shrink-0 px-3 py-2 rounded-lg transition-all
+                  ${isCurrent ? 'bg-accent-500/10' : ''}
+                  ${isNavigable && !isCurrent ? 'cursor-pointer hover:bg-white/5' : ''}
+                `}
+                onClick={() => isNavigable && onStepClick?.(step)}
+                title={isNavigable ? `Go to: ${getStepDisplayName(step)}` : undefined}
+              >
                 <div 
-                  onClick={() => isNavigable && onStepClick?.(step)}
                   className={`
-                    w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center font-bold text-xs sm:text-sm
+                    w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-xs
                     transition-all duration-300
-                    ${status === 'completed' ? 'bg-green-500 text-white' : ''}
-                    ${status === 'in_progress' || isCurrent ? 'bg-cyan-500 text-white ring-2 sm:ring-4 ring-cyan-500/30' : ''}
+                    ${status === 'completed' ? 'bg-emerald-500 text-white' : ''}
+                    ${status === 'in_progress' || isCurrent ? 'bg-accent-500 text-white shadow-lg shadow-accent-500/30' : ''}
                     ${status === 'failed' ? 'bg-red-500 text-white' : ''}
-                    ${status === 'pending' && !isCurrent ? 'bg-gray-700 text-gray-400' : ''}
-                    ${isNavigable && !isCurrent ? 'cursor-pointer hover:ring-2 hover:ring-white/30 hover:scale-110' : ''}
+                    ${status === 'pending' && !isCurrent ? 'bg-white/10 text-white/40' : ''}
                   `}
-                  title={isNavigable ? `Ir a: ${getStepDisplayName(step)}` : undefined}
                 >
-                  {status === 'completed' ? '✓' : stepNum}
+                  {getStepIcon(step, status)}
                 </div>
                 <span 
-                  onClick={() => isNavigable && onStepClick?.(step)}
                   className={`
-                    text-[10px] sm:text-xs mt-1 sm:mt-2 text-center max-w-[50px] sm:max-w-[80px] leading-tight
-                    ${isCurrent ? 'text-cyan-400 font-medium' : 'text-gray-500'}
-                    ${isNavigable && !isCurrent ? 'cursor-pointer hover:text-white' : ''}
+                    text-xs font-medium hidden sm:block
+                    ${isCurrent ? 'text-accent-400' : status === 'completed' ? 'text-emerald-400' : 'text-white/40'}
                   `}
                 >
                   {getStepDisplayName(step).split(' ').slice(1).join(' ')}
@@ -102,8 +121,8 @@ const StepIndicator: React.FC<{
               
               {index < steps.length - 2 && (
                 <div className={`
-                  w-4 sm:flex-1 h-0.5 sm:h-1 mx-1 sm:mx-2 rounded flex-shrink-0
-                  ${status === 'completed' ? 'bg-green-500' : 'bg-gray-700'}
+                  w-4 sm:w-8 h-px mx-1 flex-shrink-0
+                  ${status === 'completed' ? 'bg-emerald-500' : 'bg-white/10'}
                 `} />
               )}
             </React.Fragment>
@@ -164,33 +183,37 @@ const NewsItemCard: React.FC<{
     <div 
       onClick={onToggle}
       className={`
-        p-4 rounded-lg border-2 cursor-pointer transition-all
+        p-4 rounded-xl cursor-pointer transition-all duration-200 group
         ${selected 
-          ? 'border-cyan-500 bg-cyan-500/10' 
-          : 'border-gray-700 bg-[#1a1a1a] hover:border-gray-500'}
+          ? 'bg-accent-500/10 border border-accent-500/50 ring-2 ring-accent-500/20' 
+          : 'bg-white/[0.02] border border-white/5 hover:border-white/10 hover:bg-white/[0.04]'}
       `}
     >
       <div className="flex items-start gap-3">
-        <input 
-          type="checkbox" 
-          checked={selected} 
-          onChange={onToggle}
-          className="mt-1 w-5 h-5 accent-cyan-500 flex-shrink-0"
-        />
+        {/* Custom Checkbox */}
+        <div className={`
+          w-5 h-5 rounded-md flex-shrink-0 mt-0.5 flex items-center justify-center transition-all
+          ${selected 
+            ? 'bg-accent-500 text-white' 
+            : 'bg-white/5 border border-white/10 group-hover:border-white/20'}
+        `}>
+          {selected && <span className="text-xs">✓</span>}
+        </div>
+        
         <div className="flex-1 min-w-0">
           {/* Title */}
           <h4 className="font-medium text-white leading-snug">{news.headline}</h4>
           
           {/* Summary */}
-          <p className="text-sm text-gray-300 mt-2 leading-relaxed">{news.summary}</p>
+          <p className="text-sm text-white/60 mt-2 leading-relaxed line-clamp-2">{news.summary}</p>
           
           {/* Viral Score Reasoning */}
           {news.viralScoreReasoning && (
-            <div className="mt-3 p-2.5 bg-gradient-to-r from-purple-900/30 to-pink-900/30 border border-purple-500/30 rounded-lg">
+            <div className="mt-3 p-3 bg-violet-500/10 border border-violet-500/20 rounded-lg">
               <div className="flex items-start gap-2">
-                <span className="text-purple-400 text-sm">🔥</span>
-                <p className="text-xs text-purple-200 leading-relaxed">
-                  <span className="font-semibold text-purple-300">¿Por qué es viral?</span>{' '}
+                <span className="text-violet-400 text-sm">🔥</span>
+                <p className="text-xs text-violet-300/80 leading-relaxed">
+                  <span className="font-medium text-violet-300">Why it's viral:</span>{' '}
                   {news.viralScoreReasoning}
                 </p>
               </div>
@@ -199,22 +222,22 @@ const NewsItemCard: React.FC<{
           
           {/* Metadata row: Source, Date, Viral Score */}
           <div className="flex items-center flex-wrap gap-3 mt-3 text-xs">
-            <span className="text-gray-400 font-medium">{news.source}</span>
+            <span className="text-white/40 font-medium">{news.source}</span>
             
             {news.publicationDate && (
-              <span className="text-gray-500 flex items-center gap-1">
+              <span className="text-white/30 flex items-center gap-1">
                 <span>📅</span>
                 {formatDate(news.publicationDate)}
               </span>
             )}
             
             <span className={`
-              px-2 py-0.5 rounded font-medium
-              ${news.viralScore >= 80 ? 'bg-green-500/20 text-green-400' : ''}
-              ${news.viralScore >= 60 && news.viralScore < 80 ? 'bg-yellow-500/20 text-yellow-400' : ''}
-              ${news.viralScore < 60 ? 'bg-gray-500/20 text-gray-400' : ''}
+              px-2 py-0.5 rounded-full font-medium
+              ${news.viralScore >= 80 ? 'bg-emerald-500/10 text-emerald-400' : ''}
+              ${news.viralScore >= 60 && news.viralScore < 80 ? 'bg-amber-500/10 text-amber-400' : ''}
+              ${news.viralScore < 60 ? 'bg-white/5 text-white/40' : ''}
             `}>
-              Viral: {news.viralScore}%
+              {news.viralScore}% viral
             </span>
           </div>
           
@@ -225,10 +248,10 @@ const NewsItemCard: React.FC<{
               target="_blank"
               rel="noopener noreferrer"
               onClick={(e) => e.stopPropagation()}
-              className="inline-flex items-center gap-1.5 mt-3 text-xs text-cyan-400 hover:text-cyan-300 hover:underline transition-colors"
+              className="inline-flex items-center gap-1.5 mt-3 text-xs text-accent-400 hover:text-accent-300 transition-colors"
             >
               <span>🔗</span>
-              <span>Leer noticia completa en {news.source}</span>
+              <span>Read full article on {news.source}</span>
               <span className="text-[10px]">↗</span>
             </a>
           )}
@@ -254,68 +277,71 @@ const SegmentProgressCard: React.FC<{
   isGenerating?: boolean;
   showVideoStatus?: boolean;
 }> = ({ index, segment, audioStatus, videoStatus, audioUrl, videoUrl, onRegenerateAudio, onRegenerateVideo, isGenerating = false, showVideoStatus = true }) => (
-  <div className={`bg-[#1a1a1a] rounded-lg border p-4 transition-all ${
-    audioStatus === 'in_progress' ? 'border-cyan-500/50 shadow-lg shadow-cyan-500/10' : 'border-[#333]'
+  <div className={`bg-white/[0.02] rounded-xl border p-4 transition-all ${
+    audioStatus === 'in_progress' ? 'border-accent-500/50 shadow-lg shadow-accent-500/10' : 'border-white/5'
   }`}>
     <div className="flex items-center justify-between mb-2">
-      <span className="text-sm font-medium text-white">
-        #{index + 1} - {segment.speaker}
+      <span className="text-sm font-medium text-white flex items-center gap-2">
+        <span className="w-6 h-6 rounded-full bg-white/10 flex items-center justify-center text-xs text-white/60">
+          {index + 1}
+        </span>
+        {segment.speaker}
       </span>
       <div className="flex items-center gap-2">
         {/* Audio Status */}
         <span className={`
-          text-xs px-2 py-1 rounded flex items-center gap-1
-          ${audioStatus === 'completed' ? 'bg-green-500/20 text-green-400' : ''}
-          ${audioStatus === 'in_progress' ? 'bg-cyan-500/20 text-cyan-400 animate-pulse' : ''}
-          ${audioStatus === 'failed' ? 'bg-red-500/20 text-red-400' : ''}
-          ${audioStatus === 'pending' ? 'bg-gray-500/20 text-gray-400' : ''}
+          text-xs px-2.5 py-1 rounded-full flex items-center gap-1.5 font-medium
+          ${audioStatus === 'completed' ? 'bg-emerald-500/10 text-emerald-400' : ''}
+          ${audioStatus === 'in_progress' ? 'bg-accent-500/10 text-accent-400 animate-pulse' : ''}
+          ${audioStatus === 'failed' ? 'bg-red-500/10 text-red-400' : ''}
+          ${audioStatus === 'pending' ? 'bg-white/5 text-white/30' : ''}
         `}>
-          🎙️ {audioStatus === 'completed' ? '✓' : audioStatus === 'in_progress' ? '⏳' : audioStatus === 'failed' ? '✗' : 'pending'}
+          🎙️ {audioStatus === 'completed' ? '✓' : audioStatus === 'in_progress' ? '...' : audioStatus === 'failed' ? '✗' : '—'}
         </span>
         
         {/* Video Status - only show if requested */}
         {showVideoStatus && (
           <span className={`
-            text-xs px-2 py-1 rounded flex items-center gap-1
-            ${videoStatus === 'completed' ? 'bg-green-500/20 text-green-400' : ''}
-            ${videoStatus === 'in_progress' ? 'bg-purple-500/20 text-purple-400 animate-pulse' : ''}
-            ${videoStatus === 'failed' ? 'bg-red-500/20 text-red-400' : ''}
-            ${videoStatus === 'pending' ? 'bg-gray-500/20 text-gray-400' : ''}
+            text-xs px-2.5 py-1 rounded-full flex items-center gap-1.5 font-medium
+            ${videoStatus === 'completed' ? 'bg-emerald-500/10 text-emerald-400' : ''}
+            ${videoStatus === 'in_progress' ? 'bg-violet-500/10 text-violet-400 animate-pulse' : ''}
+            ${videoStatus === 'failed' ? 'bg-red-500/10 text-red-400' : ''}
+            ${videoStatus === 'pending' ? 'bg-white/5 text-white/30' : ''}
           `}>
-            🎬 {videoStatus === 'completed' ? '✓' : videoStatus === 'in_progress' ? '⏳' : videoStatus === 'failed' ? '✗' : 'pending'}
+            🎬 {videoStatus === 'completed' ? '✓' : videoStatus === 'in_progress' ? '...' : videoStatus === 'failed' ? '✗' : '—'}
           </span>
         )}
       </div>
     </div>
     
-    <p className="text-sm text-gray-400 line-clamp-2">{segment.text}</p>
+    <p className="text-sm text-white/50 line-clamp-2">{segment.text}</p>
     
     {/* Actions */}
     <div className="flex items-center gap-2 mt-3 flex-wrap">
       {/* Audio Player - show when completed */}
       {audioStatus === 'completed' && audioUrl && (
-        <audio src={audioUrl} controls className="h-8 flex-1 min-w-[150px]" />
+        <audio src={audioUrl} controls className="h-8 flex-1 min-w-[150px] opacity-80" />
       )}
       
       {/* Regenerate Audio Button - show when completed or failed, but not while generating */}
       {(audioStatus === 'completed' || audioStatus === 'failed') && onRegenerateAudio && !isGenerating && (
         <button 
           onClick={onRegenerateAudio}
-          className={`text-xs px-2 py-1 rounded flex items-center gap-1 ${
+          className={`text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all ${
             audioStatus === 'failed' 
-              ? 'bg-red-600/30 hover:bg-red-600 text-red-300' 
-              : 'bg-gray-600/30 hover:bg-gray-600 text-gray-300'
+              ? 'bg-red-500/10 hover:bg-red-500/20 text-red-400' 
+              : 'bg-white/5 hover:bg-white/10 text-white/50 hover:text-white'
           }`}
         >
-          🔄 {audioStatus === 'failed' ? 'Reintentar' : 'Regenerar'}
+          🔄 {audioStatus === 'failed' ? 'Retry' : 'Regen'}
         </button>
       )}
       
       {/* In Progress Indicator */}
       {audioStatus === 'in_progress' && (
-        <div className="flex items-center gap-2 text-cyan-400 text-sm">
-          <span className="animate-spin">⏳</span>
-          <span>Generando audio...</span>
+        <div className="flex items-center gap-2 text-accent-400 text-sm">
+          <div className="w-4 h-4 border-2 border-accent-400 border-t-transparent rounded-full animate-spin" />
+          <span>Generating audio...</span>
         </div>
       )}
       
@@ -325,9 +351,9 @@ const SegmentProgressCard: React.FC<{
           href={videoUrl} 
           target="_blank" 
           rel="noopener noreferrer"
-          className="text-xs bg-purple-600/30 hover:bg-purple-600 text-purple-300 px-2 py-1 rounded"
+          className="text-xs bg-violet-500/10 hover:bg-violet-500/20 text-violet-400 px-3 py-1.5 rounded-lg transition-all"
         >
-          👁️ Ver Video
+          👁️ View Video
         </a>
       )}
       
@@ -335,18 +361,175 @@ const SegmentProgressCard: React.FC<{
       {(videoStatus === 'completed' || videoStatus === 'failed') && onRegenerateVideo && !isGenerating && (
         <button 
           onClick={onRegenerateVideo}
-          className={`text-xs px-2 py-1 rounded ${
+          className={`text-xs px-3 py-1.5 rounded-lg transition-all ${
             videoStatus === 'failed' 
-              ? 'bg-red-600/30 hover:bg-red-600 text-red-300' 
-              : 'bg-gray-600/30 hover:bg-gray-600 text-gray-300'
+              ? 'bg-red-500/10 hover:bg-red-500/20 text-red-400' 
+              : 'bg-white/5 hover:bg-white/10 text-white/50 hover:text-white'
           }`}
         >
-          🔄 {videoStatus === 'failed' ? 'Reintentar Video' : 'Regenerar Video'}
+          🔄 {videoStatus === 'failed' ? 'Retry Video' : 'Regen Video'}
         </button>
       )}
     </div>
   </div>
 );
+
+// =============================================================================================
+// SCRIPT HISTORY PANEL - Shows previously generated scripts with scores
+// =============================================================================================
+
+const ScriptHistoryPanel: React.FC<{
+  history: ScriptHistoryItem[];
+  currentScriptId?: string;
+  onRestore: (item: ScriptHistoryItem) => void;
+  onClose: () => void;
+  hostAName: string;
+  hostBName: string;
+}> = ({ history, currentScriptId, onRestore, onClose, hostAName, hostBName }) => {
+  if (history.length === 0) {
+    return (
+      <div className="bg-white/[0.02] border border-white/5 rounded-xl p-4 mb-4">
+        <div className="flex items-center justify-between mb-2">
+          <h4 className="text-sm font-medium text-white flex items-center gap-2">
+            <span>📜</span> Script History
+          </h4>
+          <button onClick={onClose} className="text-white/40 hover:text-white text-sm">✕</button>
+        </div>
+        <p className="text-xs text-white/40 text-center py-4">
+          No previous scripts. Generate your first script to start the history.
+        </p>
+      </div>
+    );
+  }
+
+  // Sort by date, newest first
+  const sortedHistory = [...history].sort((a, b) => 
+    new Date(b.generatedAt).getTime() - new Date(a.generatedAt).getTime()
+  );
+
+  return (
+    <div className="bg-white/[0.02] border border-white/5 rounded-xl p-4 mb-4 max-h-[350px] overflow-hidden flex flex-col">
+      <div className="flex items-center justify-between mb-3 flex-shrink-0">
+        <h4 className="text-sm font-medium text-white flex items-center gap-2">
+          <span>📜</span> Script History ({history.length})
+        </h4>
+        <button onClick={onClose} className="text-white/40 hover:text-white text-sm transition-colors">✕</button>
+      </div>
+      
+      <div className="overflow-y-auto space-y-2 flex-1 pr-1 scrollbar-thin">
+        {sortedHistory.map((item, index) => {
+          const isCurrentScript = sortedHistory.indexOf(item) === 0;
+          const score = item.analysis?.overallScore;
+          const hasImprovements = item.improvements && 
+            (item.improvements.implement.length > 0 || item.improvements.maintain.length > 0);
+          
+          return (
+            <div 
+              key={item.id}
+              className={`
+                p-3 rounded-xl border transition-all
+                ${isCurrentScript 
+                  ? 'border-accent-500/30 bg-accent-500/5' 
+                  : 'border-white/5 bg-white/[0.02] hover:border-white/10 hover:bg-white/[0.04]'
+                }
+              `}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1 min-w-0">
+                  {/* Header Row */}
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-xs text-white/30 font-mono">
+                      #{history.length - index}
+                    </span>
+                    {isCurrentScript && (
+                      <span className="text-[10px] bg-accent-500/20 text-accent-400 px-1.5 py-0.5 rounded-full font-medium">
+                        CURRENT
+                      </span>
+                    )}
+                    {hasImprovements && (
+                      <span className="text-[10px] bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded-full font-medium">
+                        IMPROVED
+                      </span>
+                    )}
+                  </div>
+                  
+                  {/* Title */}
+                  <p className="text-sm text-white font-medium line-clamp-1">
+                    {item.viralMetadata.title}
+                  </p>
+                  
+                  {/* Metadata */}
+                  <div className="flex items-center gap-3 mt-1 text-[10px] text-white/30">
+                    <span>
+                      {new Date(item.generatedAt).toLocaleString('en-US', {
+                        day: '2-digit',
+                        month: 'short',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      })}
+                    </span>
+                    <span>
+                      {Object.keys(item.scenes.scenes).length} scenes
+                    </span>
+                    <span className="text-violet-400/70">
+                      {item.scenes.narrative_used}
+                    </span>
+                  </div>
+                </div>
+                
+                {/* Score Badge */}
+                <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+                  {score !== undefined ? (
+                    <div className={`
+                      text-lg font-bold px-2.5 py-0.5 rounded-lg
+                      ${score >= 80 ? 'text-emerald-400 bg-emerald-500/10' : ''}
+                      ${score >= 60 && score < 80 ? 'text-amber-400 bg-amber-500/10' : ''}
+                      ${score < 60 ? 'text-red-400 bg-red-500/10' : ''}
+                    `}>
+                      {score}
+                    </div>
+                  ) : (
+                    <div className="text-xs text-white/30 bg-white/5 px-2 py-1 rounded-lg">
+                      No score
+                    </div>
+                  )}
+                  
+                  {/* Restore Button */}
+                  {!isCurrentScript && (
+                    <button
+                      onClick={() => onRestore(item)}
+                      className="text-[10px] bg-violet-500/10 hover:bg-violet-500/20 text-violet-400 px-2 py-1 rounded-lg transition-all font-medium"
+                    >
+                      ↩ Restore
+                    </button>
+                  )}
+                </div>
+              </div>
+              
+              {/* Preview of first scene */}
+              <div className="mt-2 text-[11px] text-white/40 line-clamp-2 bg-black/20 p-2 rounded-lg">
+                <span className="text-violet-400">
+                  {item.scenes.scenes['1']?.video_mode === 'hostA' ? hostAName : hostBName}:
+                </span>{' '}
+                {item.scenes.scenes['1']?.text.slice(0, 100)}...
+              </div>
+              
+              {/* Score breakdown if available */}
+              {item.analysis && (
+                <div className="flex items-center gap-3 mt-2 text-[10px]">
+                  <span className="text-white/30">🎯 {item.analysis.hookScore}</span>
+                  <span className="text-white/30">⏱️ {item.analysis.retentionScore}</span>
+                  <span className="text-white/30">🔄 {item.analysis.pacingScore}</span>
+                  <span className="text-white/30">💬 {item.analysis.engagementScore}</span>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
 
 // =============================================================================================
 // MAIN WIZARD COMPONENT
@@ -390,6 +573,60 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
   // Selected improvements for script regeneration
   const [selectedSuggestions, setSelectedSuggestions] = useState<Set<number>>(new Set());
   const [selectedStrengths, setSelectedStrengths] = useState<Set<number>>(new Set());
+  
+  // Script history for comparison (v2.5)
+  const [scriptHistory, setScriptHistory] = useState<ScriptHistoryItem[]>(production.script_history || []);
+  const [showScriptHistory, setShowScriptHistory] = useState(false);
+  
+  // Restore a script from history
+  const handleRestoreScript = useCallback(async (historyItem: ScriptHistoryItem) => {
+    const scenes = historyItem.scenes;
+    const segments: BroadcastSegment[] = Object.entries(scenes.scenes).map(([key, scene]) => ({
+      speaker: scene.video_mode === 'hostA' ? config.characters.hostA.name : config.characters.hostB.name,
+      text: scene.text,
+      audioBase64: '',
+      sceneTitle: scene.title,
+      sceneIndex: parseInt(key)
+    }));
+    
+    const updatedProduction: Production = {
+      ...localProduction,
+      scenes: scenes,
+      viral_metadata: historyItem.viralMetadata,
+      segments: segments,
+      narrative_used: scenes.narrative_used
+    };
+    
+    await saveProduction(updatedProduction);
+    setLocalProduction(updatedProduction);
+    onUpdateProduction(updatedProduction);
+    
+    // If the restored script had an analysis, restore that too
+    if (historyItem.analysis) {
+      setScriptAnalysis({
+        overallScore: historyItem.analysis.overallScore,
+        hookScore: historyItem.analysis.hookScore,
+        hookFeedback: '',
+        retentionScore: historyItem.analysis.retentionScore,
+        retentionFeedback: '',
+        pacingScore: historyItem.analysis.pacingScore,
+        pacingFeedback: '',
+        engagementScore: historyItem.analysis.engagementScore,
+        engagementFeedback: '',
+        suggestions: historyItem.analysis.suggestions,
+        strengths: historyItem.analysis.strengths
+      });
+    } else {
+      setScriptAnalysis(null);
+    }
+    
+    // Clear selections
+    setSelectedSuggestions(new Set());
+    setSelectedStrengths(new Set());
+    setShowScriptHistory(false);
+    
+    toast.success(`✨ Script restaurado (v${scriptHistory.indexOf(historyItem) + 1})`);
+  }, [config, localProduction, scriptHistory, onUpdateProduction]);
 
   // Ref to always have the latest production (avoids stale closures)
   const productionRef = React.useRef(localProduction);
@@ -696,12 +933,25 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
         progress: 85 
       });
       
+      // Save to script history before updating production
+      const newHistoryItem: ScriptHistoryItem = {
+        id: crypto.randomUUID(),
+        generatedAt: new Date().toISOString(),
+        scenes: scenes,
+        viralMetadata: result.metadata,
+        analysis: undefined // Will be filled when analyzed
+      };
+      
+      const updatedHistory = [...scriptHistory, newHistoryItem];
+      setScriptHistory(updatedHistory);
+      
       const updatedProduction: Production = {
         ...production,
         scenes: scenes,
         viral_metadata: result.metadata,
         segments: segments,
-        narrative_used: scenes.narrative_used
+        narrative_used: scenes.narrative_used,
+        script_history: updatedHistory
       };
       
       await saveProduction(updatedProduction);
@@ -1546,6 +1796,17 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
               </div>
             )}
             
+            {/* Script History Panel */}
+            {showScriptHistory && scriptHistory.length > 0 && (
+              <ScriptHistoryPanel
+                history={scriptHistory}
+                onRestore={handleRestoreScript}
+                onClose={() => setShowScriptHistory(false)}
+                hostAName={config.characters.hostA.name}
+                hostBName={config.characters.hostB.name}
+              />
+            )}
+            
             {/* Script Analysis for YouTube Shorts */}
             {Object.keys(scenes).length > 0 && (
               <div className="bg-[#1a1a1a] p-4 rounded-lg border border-[#333]">
@@ -1553,29 +1814,73 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
                   <h4 className="text-sm font-bold text-gray-300 flex items-center gap-2">
                     <span>📊</span> Análisis para YouTube Shorts
                   </h4>
-                  <button
-                    onClick={async () => {
-                      if (isAnalyzing) return;
-                      setIsAnalyzing(true);
-                      try {
-                        const analysis = await analyzeScriptForShorts(
-                          scenes,
-                          config.characters.hostA.name,
-                          config.characters.hostB.name
-                        );
-                        setScriptAnalysis(analysis);
-                        toast.success('Análisis completado');
-                      } catch (error) {
-                        toast.error('Error al analizar');
-                      } finally {
-                        setIsAnalyzing(false);
-                      }
-                    }}
-                    disabled={isAnalyzing}
-                    className="text-xs bg-cyan-600/20 hover:bg-cyan-600 text-cyan-400 hover:text-white px-3 py-1 rounded transition-all disabled:opacity-50"
-                  >
-                    {isAnalyzing ? '⏳ Analizando...' : scriptAnalysis ? '🔄 Re-analizar' : '🎯 Analizar Script'}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {/* History Button */}
+                    {scriptHistory.length > 0 && (
+                      <button
+                        onClick={() => setShowScriptHistory(!showScriptHistory)}
+                        className={`text-xs px-3 py-1 rounded transition-all flex items-center gap-1 ${
+                          showScriptHistory 
+                            ? 'bg-purple-600 text-white' 
+                            : 'bg-purple-600/20 hover:bg-purple-600 text-purple-400 hover:text-white'
+                        }`}
+                      >
+                        <span>📜</span>
+                        Historial ({scriptHistory.length})
+                      </button>
+                    )}
+                    <button
+                      onClick={async () => {
+                        if (isAnalyzing) return;
+                        setIsAnalyzing(true);
+                        try {
+                          const analysis = await analyzeScriptForShorts(
+                            scenes,
+                            config.characters.hostA.name,
+                            config.characters.hostB.name
+                          );
+                          setScriptAnalysis(analysis);
+                          
+                          // Save analysis to the most recent script in history
+                          if (scriptHistory.length > 0) {
+                            const updatedHistory = [...scriptHistory];
+                            const latestIndex = updatedHistory.length - 1;
+                            updatedHistory[latestIndex] = {
+                              ...updatedHistory[latestIndex],
+                              analysis: {
+                                overallScore: analysis.overallScore,
+                                hookScore: analysis.hookScore,
+                                retentionScore: analysis.retentionScore,
+                                pacingScore: analysis.pacingScore,
+                                engagementScore: analysis.engagementScore,
+                                suggestions: analysis.suggestions,
+                                strengths: analysis.strengths
+                              }
+                            };
+                            setScriptHistory(updatedHistory);
+                            
+                            // Also update production with updated history
+                            const updatedProduction: Production = {
+                              ...localProduction,
+                              script_history: updatedHistory
+                            };
+                            await saveProduction(updatedProduction);
+                            onUpdateProduction(updatedProduction);
+                          }
+                          
+                          toast.success('Análisis completado');
+                        } catch (error) {
+                          toast.error('Error al analizar');
+                        } finally {
+                          setIsAnalyzing(false);
+                        }
+                      }}
+                      disabled={isAnalyzing}
+                      className="text-xs bg-cyan-600/20 hover:bg-cyan-600 text-cyan-400 hover:text-white px-3 py-1 rounded transition-all disabled:opacity-50"
+                    >
+                      {isAnalyzing ? '⏳ Analizando...' : scriptAnalysis ? '🔄 Re-analizar' : '🎯 Analizar Script'}
+                    </button>
+                  </div>
                 </div>
                 
                 {scriptAnalysis ? (
@@ -1741,12 +2046,26 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
                               sceneIndex: parseInt(key)
                             }));
                             
+                            // Save to script history with improvements info
+                            const newHistoryItem: ScriptHistoryItem = {
+                              id: crypto.randomUUID(),
+                              generatedAt: new Date().toISOString(),
+                              scenes: scenes,
+                              viralMetadata: result.metadata,
+                              analysis: undefined,
+                              improvements
+                            };
+                            
+                            const updatedHistory = [...scriptHistory, newHistoryItem];
+                            setScriptHistory(updatedHistory);
+                            
                             const updatedProduction: Production = {
                               ...localProduction,
                               scenes: scenes,
                               viral_metadata: result.metadata,
                               segments: segments,
-                              narrative_used: scenes.narrative_used
+                              narrative_used: scenes.narrative_used,
+                              script_history: updatedHistory
                             };
                             
                             await saveProduction(updatedProduction);
