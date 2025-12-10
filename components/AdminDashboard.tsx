@@ -30,19 +30,27 @@ interface AdminDashboardProps {
   user: UserProfile | null;
 }
 
-// ElevenLabs predefined voices
+// ElevenLabs predefined voices - organized by gender
 const ELEVENLABS_PRESET_VOICES = [
-  { id: 'FrrTxu4nrplZwLlMy2kD', name: 'Argentine Male', description: 'Male Argentine Spanish ⭐' },
-  { id: 'CDrROTHWaKY3O9vD3F3t', name: 'Argentine Female', description: 'Female Argentine Spanish ⭐' },
-  { id: 'pNInz6obpgDQGcFmaJgB', name: 'Adam', description: 'Male, Deep & Narrative' },
-  { id: 'EXAVITQu4vr4xnSDxMaL', name: 'Sarah', description: 'Female, Soft & Warm' },
-  { id: '21m00Tcm4TlvDq8ikWAM', name: 'Rachel', description: 'Female, American' },
-  { id: 'AZnzlk1XvdvUeBnXmlld', name: 'Domi', description: 'Female, Expressive' },
-  { id: 'MF3mGyEYCl7XYWbV9V6O', name: 'Elli', description: 'Female, Young & Bright' },
-  { id: 'TxGEqnHWrfWFTfGW9XjX', name: 'Josh', description: 'Male, Deep & Authoritative' },
-  { id: 'VR6AewLTigWG4xSOukaG', name: 'Arnold', description: 'Male, Powerful' },
-  { id: 'custom', name: 'Custom Voice ID', description: 'Enter your own ElevenLabs Voice ID' },
+  { id: 'FrrTxu4nrplZwLlMy2kD', name: 'Argentine Male', description: 'Male Argentine Spanish ⭐', gender: 'male' },
+  { id: 'CDrROTHWaKY3O9vD3F3t', name: 'Argentine Female', description: 'Female Argentine Spanish ⭐', gender: 'female' },
+  { id: 'pNInz6obpgDQGcFmaJgB', name: 'Adam', description: 'Male, Deep & Narrative', gender: 'male' },
+  { id: 'EXAVITQu4vr4xnSDxMaL', name: 'Sarah', description: 'Female, Soft & Warm', gender: 'female' },
+  { id: '21m00Tcm4TlvDq8ikWAM', name: 'Rachel', description: 'Female, American', gender: 'female' },
+  { id: 'AZnzlk1XvdvUeBnXmlld', name: 'Domi', description: 'Female, Expressive', gender: 'female' },
+  { id: 'MF3mGyEYCl7XYWbV9V6O', name: 'Elli', description: 'Female, Young & Bright', gender: 'female' },
+  { id: 'TxGEqnHWrfWFTfGW9XjX', name: 'Josh', description: 'Male, Deep & Authoritative', gender: 'male' },
+  { id: 'VR6AewLTigWG4xSOukaG', name: 'Arnold', description: 'Male, Powerful', gender: 'male' },
+  { id: 'custom', name: 'Custom Voice ID', description: 'Enter your own ElevenLabs Voice ID', gender: 'neutral' },
 ];
+
+// Get default ElevenLabs voice based on gender
+const getDefaultElevenLabsVoice = (gender: 'male' | 'female' | undefined) => {
+  if (gender === 'female') {
+    return 'CDrROTHWaKY3O9vD3F3t'; // Argentine Female
+  }
+  return 'FrrTxu4nrplZwLlMy2kD'; // Argentine Male (default)
+};
 
 const CharacterEditor: React.FC<{
   profile: CharacterProfile;
@@ -75,7 +83,27 @@ const CharacterEditor: React.FC<{
           <label className="text-xs text-gray-500 block mb-1">Gender</label>
           <select
             value={profile.gender || 'male'}
-            onChange={(e) => onChange({ ...profile, gender: e.target.value as 'male' | 'female' })}
+            onChange={(e) => {
+              const newGender = e.target.value as 'male' | 'female';
+              // If using ElevenLabs and the voice is one of the Argentine defaults, update it to match new gender
+              const argentineMale = 'FrrTxu4nrplZwLlMy2kD';
+              const argentineFemale = 'CDrROTHWaKY3O9vD3F3t';
+              let newVoiceId = profile.elevenLabsVoiceId;
+              
+              if (ttsProvider === 'elevenlabs') {
+                // Auto-switch between Argentine voices when gender changes
+                if (profile.elevenLabsVoiceId === argentineMale && newGender === 'female') {
+                  newVoiceId = argentineFemale;
+                } else if (profile.elevenLabsVoiceId === argentineFemale && newGender === 'male') {
+                  newVoiceId = argentineMale;
+                } else if (!profile.elevenLabsVoiceId) {
+                  // No voice set, use default for new gender
+                  newVoiceId = getDefaultElevenLabsVoice(newGender);
+                }
+              }
+              
+              onChange({ ...profile, gender: newGender, elevenLabsVoiceId: newVoiceId });
+            }}
             className="w-full bg-[#111] border border-[#333] rounded px-2 py-1 text-sm text-white"
           >
             <option value="male">Male</option>
@@ -138,7 +166,7 @@ const CharacterEditor: React.FC<{
         ) : (
           <>
             <select
-              value={isCustomElevenLabsVoice || showCustomVoiceId ? 'custom' : (profile.elevenLabsVoiceId || ELEVENLABS_PRESET_VOICES[0].id)}
+              value={isCustomElevenLabsVoice || showCustomVoiceId ? 'custom' : (profile.elevenLabsVoiceId || getDefaultElevenLabsVoice(profile.gender))}
               onChange={(e) => {
                 const selectedId = e.target.value;
                 if (selectedId === 'custom') {
@@ -150,11 +178,22 @@ const CharacterEditor: React.FC<{
               }}
               className="w-full bg-[#111] border border-[#333] rounded px-2 py-1 text-sm text-white"
             >
-              {ELEVENLABS_PRESET_VOICES.map(voice => (
-                <option key={voice.id} value={voice.id}>
-                  {voice.name} - {voice.description}
-                </option>
-              ))}
+              {/* Show matching gender voices first, then others */}
+              {ELEVENLABS_PRESET_VOICES
+                .filter(v => v.gender === profile.gender || v.gender === 'neutral')
+                .map(voice => (
+                  <option key={voice.id} value={voice.id}>
+                    {voice.name} - {voice.description}
+                  </option>
+                ))}
+              <option disabled>──────────</option>
+              {ELEVENLABS_PRESET_VOICES
+                .filter(v => v.gender !== profile.gender && v.gender !== 'neutral')
+                .map(voice => (
+                  <option key={voice.id} value={voice.id} className="text-gray-500">
+                    {voice.name} - {voice.description}
+                  </option>
+                ))}
             </select>
             
             {(showCustomVoiceId || isCustomElevenLabsVoice) && (

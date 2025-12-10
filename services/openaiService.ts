@@ -108,19 +108,27 @@ export const generateScriptWithGPT = async (
   const hostB = config.characters.hostB;
 
   const hostProfilePrompt = `
-hostA:
-- name: ${hostA.name}
-- voice: ${hostA.voiceName}
-- outfit: ${hostA.outfit || 'dark hoodie'}
-- personality: ${hostA.personality || hostA.bio}
-- gender: ${hostA.gender || 'male'}
+=== HOST PROFILES (CRITICAL: Each host MUST speak according to their personality) ===
 
-hostB:
-- name: ${hostB.name}
-- voice: ${hostB.voiceName}
-- outfit: ${hostB.outfit || 'teal blazer and white shirt'}
-- personality: ${hostB.personality || hostB.bio}
-- gender: ${hostB.gender || 'female'}
+HOST A (${hostA.name}):
+- Gender: ${hostA.gender || 'male'}
+- Outfit: ${hostA.outfit || 'dark hoodie'}
+- PERSONALITY & IDEOLOGY: ${hostA.personality || hostA.bio}
+- SPEAKING STYLE: ${hostA.name} MUST express opinions that align with their personality above. 
+  If they are pro-market/libertarian: celebrate free enterprise, private investment, deregulation.
+  If they are progressive: question environmental impact, corporate accountability, social costs.
+
+HOST B (${hostB.name}):
+- Gender: ${hostB.gender || 'female'}
+- Outfit: ${hostB.outfit || 'teal blazer and white shirt'}
+- PERSONALITY & IDEOLOGY: ${hostB.personality || hostB.bio}
+- SPEAKING STYLE: ${hostB.name} MUST express opinions that align with their personality above.
+  They should provide CONTRAST to Host A - challenging or supporting from their own ideological stance.
+
+⚠️ CRITICAL RULE: Each host's dialogue MUST reflect their specific personality/ideology.
+- If a host is described as "free-market, libertarian" → they should CELEBRATE private enterprise, be skeptical of regulations
+- If a host is described as "progressive, social equity" → they should QUESTION corporate motives, environmental impact
+- DO NOT MIX UP THE IDEOLOGIES - each host has a DISTINCT viewpoint that creates debate
 `.trim();
 
   const narrativeInstructions = `
@@ -144,6 +152,14 @@ Dialogue Rules:
 - Tone: conversational podcast banter (${config.tone})
 - 80–130 words per scene (40–80 for Hot Take scenes)
 - Reference news sources naturally in dialogue
+
+⚠️ PERSONALITY ENFORCEMENT:
+- ${hostA.name}'s lines MUST match their described personality/ideology
+- ${hostB.name}'s lines MUST match their described personality/ideology  
+- Create IDEOLOGICAL CONTRAST between hosts based on their personalities
+- If host is libertarian/pro-market → pro-business, anti-regulation dialogue
+- If host is progressive/social → pro-worker, pro-environment, critical of corporations
+- DO NOT SWAP or INVERT their viewpoints!
 `.trim();
 
   const metadataRules = `

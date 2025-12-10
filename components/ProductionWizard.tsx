@@ -648,7 +648,12 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
     if (production.selected_news_ids) {
       setSelectedNewsIds(production.selected_news_ids);
     }
+    // Sync script history when production changes
+    if (production.script_history) {
+      setScriptHistory(production.script_history);
+    }
   }, [production.id]); // Only sync when production ID changes (loading a different production)
+  
 
   // All wizard steps
   const allSteps: ProductionStep[] = [
@@ -934,6 +939,8 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
       });
       
       // Save to script history before updating production
+      // Use production.script_history as source of truth (not local state which might be stale)
+      const existingHistory = production.script_history || [];
       const newHistoryItem: ScriptHistoryItem = {
         id: crypto.randomUUID(),
         generatedAt: new Date().toISOString(),
@@ -942,7 +949,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
         analysis: undefined // Will be filled when analyzed
       };
       
-      const updatedHistory = [...scriptHistory, newHistoryItem];
+      const updatedHistory = [...existingHistory, newHistoryItem];
       setScriptHistory(updatedHistory);
       
       const updatedProduction: Production = {
@@ -1842,8 +1849,10 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
                           setScriptAnalysis(analysis);
                           
                           // Save analysis to the most recent script in history
-                          if (scriptHistory.length > 0) {
-                            const updatedHistory = [...scriptHistory];
+                          // Use localProduction.script_history as source of truth
+                          const existingHistory = localProduction.script_history || [];
+                          if (existingHistory.length > 0) {
+                            const updatedHistory = [...existingHistory];
                             const latestIndex = updatedHistory.length - 1;
                             updatedHistory[latestIndex] = {
                               ...updatedHistory[latestIndex],
@@ -2047,6 +2056,8 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
                             }));
                             
                             // Save to script history with improvements info
+                            // Use localProduction.script_history as source of truth (not local state which might be stale)
+                            const existingHistory = localProduction.script_history || [];
                             const newHistoryItem: ScriptHistoryItem = {
                               id: crypto.randomUUID(),
                               generatedAt: new Date().toISOString(),
@@ -2056,7 +2067,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
                               improvements
                             };
                             
-                            const updatedHistory = [...scriptHistory, newHistoryItem];
+                            const updatedHistory = [...existingHistory, newHistoryItem];
                             setScriptHistory(updatedHistory);
                             
                             const updatedProduction: Production = {
