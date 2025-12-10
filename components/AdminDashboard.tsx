@@ -2258,7 +2258,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                                               metadata,
                                               user.accessToken,
                                               null,
-                                              (percent) => setUploadProgress(percent)
+                                              (percent) => setUploadProgress(percent),
+                                              config.language // Pass channel language for YouTube metadata
                                             );
                                             
                                             const youtubeId = youtubeUrl.split('/').pop() || '';

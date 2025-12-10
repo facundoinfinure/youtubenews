@@ -1238,7 +1238,8 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
         metadata,
         user.accessToken,
         null,
-        () => {} // onProgress callback (not used in wizard)
+        () => {}, // onProgress callback (not used in wizard)
+        config.language // Pass channel language for YouTube metadata
       );
       
       const youtubeId = youtubeUrl.split('/').pop() || '';

@@ -1624,7 +1624,8 @@ const App: React.FC = () => {
         viralMeta,
         user.accessToken,
         thumbnailBlob,
-        (percent) => setUploadStatus(`Uploading: ${Math.round(percent)}%`)
+        (percent) => setUploadStatus(`Uploading: ${Math.round(percent)}%`),
+        channelConfig.language // Pass channel language for YouTube metadata
       );
       setUploadStatus("✅ Published! " + videoUrl);
       toast.success('Video uploaded successfully!');

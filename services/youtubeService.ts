@@ -14,20 +14,53 @@ const getClientId = () => {
 
 // Login handled via Supabase Auth now
 
+// Map channel language config to YouTube language codes
+const LANGUAGE_CODE_MAP: Record<string, string> = {
+  'English': 'en',
+  'Spanish': 'es',
+  'Portuguese': 'pt',
+  'French': 'fr',
+  'German': 'de',
+  'Italian': 'it',
+  'Japanese': 'ja',
+  'Korean': 'ko',
+  'Chinese': 'zh',
+  'Russian': 'ru',
+  'Arabic': 'ar',
+  'Hindi': 'hi',
+};
+
+/**
+ * Get YouTube language code from channel language setting
+ * @param language - Channel language (e.g., "Spanish", "English")
+ * @returns YouTube language code (e.g., "es", "en")
+ */
+const getYouTubeLanguageCode = (language?: string): string => {
+  if (!language) return 'en';
+  return LANGUAGE_CODE_MAP[language] || 'en';
+};
+
 export const uploadVideoToYouTube = async (
   blob: Blob,
   metadata: ViralMetadata,
   accessToken: string,
   thumbnailBlob: Blob | null,
-  onProgress: (percent: number) => void
+  onProgress: (percent: number) => void,
+  channelLanguage?: string // Optional: channel language setting (e.g., "Spanish")
 ): Promise<string> => {
   try {
+    // Get YouTube language code from channel language
+    const languageCode = getYouTubeLanguageCode(channelLanguage);
+    console.log(`[YouTube] 🌐 Setting video language to: ${languageCode} (from channel: ${channelLanguage || 'default'})`);
+
     const metadataObj = {
       snippet: {
         title: metadata.title,
         description: metadata.description,
         tags: metadata.tags,
         categoryId: "25", // News & Politics
+        defaultLanguage: languageCode, // Language of title/description
+        defaultAudioLanguage: languageCode, // Language spoken in video
       },
       status: {
         privacyStatus: "private", // Default to private for safety
