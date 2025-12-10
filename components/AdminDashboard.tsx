@@ -30,11 +30,33 @@ interface AdminDashboardProps {
   user: UserProfile | null;
 }
 
+// ElevenLabs predefined voices
+const ELEVENLABS_PRESET_VOICES = [
+  { id: 'FrrTxu4nrplZwLlMy2kD', name: 'Argentine Male', description: 'Male Argentine Spanish ⭐' },
+  { id: 'CDrROTHWaKY3O9vD3F3t', name: 'Argentine Female', description: 'Female Argentine Spanish ⭐' },
+  { id: 'pNInz6obpgDQGcFmaJgB', name: 'Adam', description: 'Male, Deep & Narrative' },
+  { id: 'EXAVITQu4vr4xnSDxMaL', name: 'Sarah', description: 'Female, Soft & Warm' },
+  { id: '21m00Tcm4TlvDq8ikWAM', name: 'Rachel', description: 'Female, American' },
+  { id: 'AZnzlk1XvdvUeBnXmlld', name: 'Domi', description: 'Female, Expressive' },
+  { id: 'MF3mGyEYCl7XYWbV9V6O', name: 'Elli', description: 'Female, Young & Bright' },
+  { id: 'TxGEqnHWrfWFTfGW9XjX', name: 'Josh', description: 'Male, Deep & Authoritative' },
+  { id: 'VR6AewLTigWG4xSOukaG', name: 'Arnold', description: 'Male, Powerful' },
+  { id: 'custom', name: 'Custom Voice ID', description: 'Enter your own ElevenLabs Voice ID' },
+];
+
 const CharacterEditor: React.FC<{
   profile: CharacterProfile;
   onChange: (p: CharacterProfile) => void;
   label: string;
-}> = ({ profile, onChange, label }) => {
+  ttsProvider?: 'openai' | 'elevenlabs';
+}> = ({ profile, onChange, label, ttsProvider = 'openai' }) => {
+  const [showCustomVoiceId, setShowCustomVoiceId] = useState(false);
+  
+  // Check if current voice is a custom ElevenLabs voice
+  const isCustomElevenLabsVoice = ttsProvider === 'elevenlabs' && 
+    profile.elevenLabsVoiceId && 
+    !ELEVENLABS_PRESET_VOICES.find(v => v.id === profile.elevenLabsVoiceId && v.id !== 'custom');
+
   return (
     <div className="bg-[#1a1a1a] p-4 rounded-lg border border-[#333] space-y-3">
       <h4 className="text-yellow-500 font-bold uppercase text-sm border-b border-[#333] pb-2">{label}</h4>
@@ -97,19 +119,62 @@ const CharacterEditor: React.FC<{
 
       <div>
         <label className="text-xs text-gray-500 block mb-1">Voice</label>
-        <select
-          value={profile.voiceName}
-          onChange={(e) => onChange({ ...profile, voiceName: e.target.value })}
-          className="w-full bg-[#111] border border-[#333] rounded px-2 py-1 text-sm text-white"
-        >
-          <option value="echo">echo - Male, Warm ⭐</option>
-          <option value="onyx">onyx - Male, Deep</option>
-          <option value="fable">fable - Male, British</option>
-          <option value="alloy">alloy - Neutral</option>
-          <option value="shimmer">shimmer - Female, Expressive ⭐</option>
-          <option value="nova">nova - Female, Warm</option>
-        </select>
-        <p className="text-xs text-gray-600 mt-1">OpenAI TTS voice for this host</p>
+        {ttsProvider === 'openai' ? (
+          <>
+            <select
+              value={profile.voiceName}
+              onChange={(e) => onChange({ ...profile, voiceName: e.target.value })}
+              className="w-full bg-[#111] border border-[#333] rounded px-2 py-1 text-sm text-white"
+            >
+              <option value="echo">echo - Male, Warm ⭐</option>
+              <option value="onyx">onyx - Male, Deep</option>
+              <option value="fable">fable - Male, British</option>
+              <option value="alloy">alloy - Neutral</option>
+              <option value="shimmer">shimmer - Female, Expressive ⭐</option>
+              <option value="nova">nova - Female, Warm</option>
+            </select>
+            <p className="text-xs text-gray-600 mt-1">OpenAI TTS voice for this host</p>
+          </>
+        ) : (
+          <>
+            <select
+              value={isCustomElevenLabsVoice || showCustomVoiceId ? 'custom' : (profile.elevenLabsVoiceId || ELEVENLABS_PRESET_VOICES[0].id)}
+              onChange={(e) => {
+                const selectedId = e.target.value;
+                if (selectedId === 'custom') {
+                  setShowCustomVoiceId(true);
+                } else {
+                  setShowCustomVoiceId(false);
+                  onChange({ ...profile, elevenLabsVoiceId: selectedId });
+                }
+              }}
+              className="w-full bg-[#111] border border-[#333] rounded px-2 py-1 text-sm text-white"
+            >
+              {ELEVENLABS_PRESET_VOICES.map(voice => (
+                <option key={voice.id} value={voice.id}>
+                  {voice.name} - {voice.description}
+                </option>
+              ))}
+            </select>
+            
+            {(showCustomVoiceId || isCustomElevenLabsVoice) && (
+              <input
+                type="text"
+                value={profile.elevenLabsVoiceId || ''}
+                placeholder="Enter ElevenLabs Voice ID (e.g., pNInz6obpgDQGcFmaJgB)"
+                onChange={(e) => onChange({ ...profile, elevenLabsVoiceId: e.target.value })}
+                className="w-full bg-[#111] border border-[#333] rounded px-2 py-1 text-sm text-white mt-2"
+              />
+            )}
+            
+            <p className="text-xs text-gray-600 mt-1">
+              ElevenLabs voice for this host. 
+              <a href="https://elevenlabs.io/voice-library" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline ml-1">
+                Browse voice library →
+              </a>
+            </p>
+          </>
+        )}
       </div>
     </div>
   );
@@ -1082,6 +1147,56 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                   <input type="checkbox" checked={tempConfig.captionsEnabled} onChange={e => setTempConfig({ ...tempConfig, captionsEnabled: e.target.checked })} className="w-5 h-5" />
                   <label className="text-sm text-white">Enable Auto-Captions</label>
                 </div>
+                
+                {/* TTS Provider Selection */}
+                <div className="col-span-2 mt-4">
+                  <label className="text-sm text-gray-400 block mb-2">TTS Provider (Voice Generation)</label>
+                  <div className="flex gap-4">
+                    <label className={`
+                      flex items-center gap-3 px-4 py-3 rounded-lg cursor-pointer transition-all border-2
+                      ${tempConfig.ttsProvider !== 'elevenlabs' 
+                        ? 'bg-emerald-500/10 border-emerald-500/50 text-emerald-400' 
+                        : 'bg-[#111] border-[#333] text-gray-400 hover:border-[#555]'}
+                    `}>
+                      <input 
+                        type="radio" 
+                        name="ttsProvider" 
+                        checked={tempConfig.ttsProvider !== 'elevenlabs'} 
+                        onChange={() => setTempConfig({ ...tempConfig, ttsProvider: 'openai' })}
+                        className="hidden"
+                      />
+                      <span className="text-xl">🤖</span>
+                      <div>
+                        <div className="font-medium">OpenAI TTS</div>
+                        <div className="text-xs opacity-70">Fast & affordable, 6 voices</div>
+                      </div>
+                    </label>
+                    <label className={`
+                      flex items-center gap-3 px-4 py-3 rounded-lg cursor-pointer transition-all border-2
+                      ${tempConfig.ttsProvider === 'elevenlabs' 
+                        ? 'bg-purple-500/10 border-purple-500/50 text-purple-400' 
+                        : 'bg-[#111] border-[#333] text-gray-400 hover:border-[#555]'}
+                    `}>
+                      <input 
+                        type="radio" 
+                        name="ttsProvider" 
+                        checked={tempConfig.ttsProvider === 'elevenlabs'} 
+                        onChange={() => setTempConfig({ ...tempConfig, ttsProvider: 'elevenlabs' })}
+                        className="hidden"
+                      />
+                      <span className="text-xl">🎙️</span>
+                      <div>
+                        <div className="font-medium">ElevenLabs</div>
+                        <div className="text-xs opacity-70">Premium quality, custom voices</div>
+                      </div>
+                    </label>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-2">
+                    {tempConfig.ttsProvider === 'elevenlabs' 
+                      ? '⚡ ElevenLabs ofrece voces de alta calidad con acentos regionales (Español Argentino). Requiere API key configurada.'
+                      : '💡 OpenAI TTS es rápido y económico. Ideal para producción de alto volumen.'}
+                  </p>
+                </div>
               </div>
             </div>
 
@@ -1091,11 +1206,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                 label="Host A (Left)"
                 profile={tempConfig.characters.hostA}
                 onChange={(p) => setTempConfig({ ...tempConfig, characters: { ...tempConfig.characters, hostA: p } })}
+                ttsProvider={tempConfig.ttsProvider || 'openai'}
               />
               <CharacterEditor
                 label="Host B (Right)"
                 profile={tempConfig.characters.hostB}
                 onChange={(p) => setTempConfig({ ...tempConfig, characters: { ...tempConfig.characters, hostB: p } })}
+                ttsProvider={tempConfig.ttsProvider || 'openai'}
               />
             </div>
 

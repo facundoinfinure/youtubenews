@@ -702,48 +702,64 @@ export const buildPodcastStyleEdit = (
   }
 
   // === FORMAT-SPECIFIC OVERLAY PRESETS ===
-  // Adjust sizes and positions based on aspect ratio - PROFESSIONAL BROADCAST STYLE
+  // RENOVATED DESIGN - Premium broadcast style with modern aesthetics
   const overlayPresets = isVertical ? {
-    // 9:16 / 4:5 (Vertical - Shorts/Reels/TikTok) - OPTIMIZED FOR MOBILE
+    // 9:16 / 4:5 (Vertical - Shorts/Reels/TikTok) - PREMIUM MOBILE DESIGN
     lowerThird: {
-      banner: { width: 1080, height: 140, y: -0.38 },
-      badge: { width: 400, height: 80, x: 0, y: -0.30, fontSize: 36 },
-      headline: { width: 980, height: 120, x: 0, y: -0.38, fontSize: 38 }
+      // Wider banner with gradient-ready structure
+      banner: { width: 1080, height: 180, y: -0.42 },
+      // Sleek category badge with rounded feel
+      badge: { width: 320, height: 52, x: 0, y: -0.32, fontSize: 24 },
+      // Clean headline area
+      headline: { width: 960, height: 90, x: 0, y: -0.42, fontSize: 32 }
     },
-    date: { x: 0.38, y: 0.44, fontSize: 24, width: 220, height: 50 },
-    live: { x: -0.38, y: 0.44, fontSize: 26, width: 140, height: 50 },
-    branding: { x: 0.38, y: 0.38, fontSize: 22, width: 200, height: 45 },
-    breakingNews: { width: 900, height: 70, y: -0.25, fontSize: 32 },
-    hostName: { width: 600, height: 90, y: -0.44, fontSize: 32 }
+    // Modern date badge - top right corner
+    date: { x: 0.35, y: 0.42, fontSize: 20, width: 180, height: 44 },
+    // LIVE indicator - pulsing red
+    live: { x: -0.35, y: 0.42, fontSize: 18, width: 100, height: 40 },
+    // Channel branding - subtle top corner
+    branding: { x: 0.35, y: 0.36, fontSize: 18, width: 160, height: 38 },
+    // Breaking news - dramatic center strip
+    breakingNews: { width: 800, height: 60, y: -0.22, fontSize: 26 },
+    // Host name plate - sleek left-aligned
+    hostName: { width: 280, height: 56, y: -0.48, fontSize: 22, accentWidth: 4 }
   } : {
-    // 16:9 (Landscape - YouTube) - PROFESSIONAL BROADCAST
+    // 16:9 (Landscape - YouTube) - CINEMA BROADCAST DESIGN
     lowerThird: {
-      banner: { width: 1920, height: 160, y: -0.40 },
-      badge: { width: 420, height: 100, x: -0.35, y: -0.40, fontSize: 48 },
-      headline: { width: 1200, height: 120, x: 0.12, y: -0.40, fontSize: 46 }
+      // Full-width cinematic lower third
+      banner: { width: 1920, height: 200, y: -0.42 },
+      // Premium category badge with accent
+      badge: { width: 300, height: 70, x: -0.38, y: -0.42, fontSize: 32 },
+      // Spacious headline with professional typography
+      headline: { width: 1100, height: 100, x: 0.05, y: -0.42, fontSize: 38 }
     },
-    date: { x: 0.42, y: 0.44, fontSize: 28, width: 280, height: 60 },
-    live: { x: -0.42, y: 0.44, fontSize: 30, width: 160, height: 55 },
-    branding: { x: 0.42, y: 0.38, fontSize: 24, width: 220, height: 50 },
-    breakingNews: { width: 700, height: 80, y: -0.28, fontSize: 40 },
-    hostName: { width: 700, height: 100, y: -0.44, fontSize: 40 }
+    // Date display - sleek corner badge
+    date: { x: 0.40, y: 0.42, fontSize: 22, width: 200, height: 48 },
+    // LIVE indicator with recording dot
+    live: { x: -0.40, y: 0.42, fontSize: 22, width: 120, height: 44 },
+    // Channel branding - professional corner
+    branding: { x: 0.40, y: 0.36, fontSize: 20, width: 180, height: 42 },
+    // Breaking news - impactful banner
+    breakingNews: { width: 600, height: 70, y: -0.25, fontSize: 32 },
+    // Host name plate - broadcast style
+    hostName: { width: 320, height: 65, y: -0.48, fontSize: 26, accentWidth: 6 }
   };
 
-  // === NEWS-STYLE OVERLAYS ===
+  // === NEWS-STYLE OVERLAYS - PREMIUM BROADCAST DESIGN ===
   if (config.newsStyle?.enabled) {
     const newsConfig = config.newsStyle;
     const presets = overlayPresets;
     
-    // TRACK 2: Lower Third Banner (if enabled) - PROFESSIONAL BROADCAST STYLE
+    // LOWER THIRD - PREMIUM MULTI-LAYER DESIGN
     if (newsConfig.lowerThird?.enabled) {
-      const primaryColor = newsConfig.lowerThird.primaryColor || '#ff3333';
-      const secondaryColor = newsConfig.lowerThird.secondaryColor || '#1a1a1a';
+      const primaryColor = newsConfig.lowerThird.primaryColor || '#e63946'; // Modern red
+      const secondaryColor = newsConfig.lowerThird.secondaryColor || '#0d1b2a'; // Deep navy
       const textColor = newsConfig.lowerThird.textColor || '#ffffff';
-      const accentColor = '#ffcc00'; // Gold accent for professional look
-      const category = newsConfig.lowerThird.category || 'BREAKING NEWS';
+      const accentGold = '#ffd60a'; // Vibrant gold accent
+      const category = newsConfig.lowerThird.category || 'BREAKING';
       const headline = options.headline || options.episodeTitle || options.channelName || '';
 
-      // Main banner background with gradient effect (dark base)
+      // LAYER 1: Main dark banner with subtle transparency
       tracks.unshift({
         clips: [{
           asset: {
@@ -755,16 +771,16 @@ export const buildPodcastStyleEdit = (
             height: presets.lowerThird.banner.height,
             background: { color: secondaryColor }
           },
-          start: 0.3,
+          start: 0.2,
           length: totalDuration,
           offset: { x: 0, y: presets.lowerThird.banner.y },
           position: 'center',
-          opacity: 0.95,
+          opacity: 0.92,
           transition: { in: 'slideUp' }
         }]
       });
 
-      // Accent bar (thin colored line on top of banner)
+      // LAYER 2: Top accent strip (primary color - dramatic reveal)
       tracks.unshift({
         clips: [{
           asset: {
@@ -773,71 +789,64 @@ export const buildPodcastStyleEdit = (
             alignment: { horizontal: 'center', vertical: 'center' },
             font: { color: '#000000', family: 'Roboto', size: 10, lineHeight: 1 },
             width: presets.lowerThird.banner.width,
-            height: isVertical ? 8 : 10,
+            height: isVertical ? 6 : 8,
             background: { color: primaryColor }
           },
-          start: 0.4,
+          start: 0.35,
           length: totalDuration,
-          offset: { x: 0, y: presets.lowerThird.banner.y + (isVertical ? 0.038 : 0.042) },
+          offset: { x: 0, y: presets.lowerThird.banner.y + (isVertical ? 0.048 : 0.052) },
           position: 'center',
           transition: { in: 'slideRight' }
         }]
       });
 
-      // Category badge with bold styling
-      if (isVertical) {
-        // For vertical: badge centered above banner
-        tracks.unshift({
-          clips: [{
-            asset: {
-              type: 'text',
-              text: category.toUpperCase(),
-              alignment: { horizontal: 'center', vertical: 'center' },
-              font: { 
-                color: secondaryColor, 
-                family: 'Oswald', 
-                size: presets.lowerThird.badge.fontSize, 
-                lineHeight: 1 
-              },
-              width: presets.lowerThird.badge.width,
-              height: presets.lowerThird.badge.height,
-              background: { color: accentColor }
-            },
-            start: 0.5,
-            length: totalDuration,
-            offset: { x: presets.lowerThird.badge.x, y: presets.lowerThird.badge.y },
-            position: 'center',
-            transition: { in: 'slideDown' }
-          }]
-        });
-      } else {
-        // For landscape: badge on LEFT side with accent color
-        tracks.unshift({
-          clips: [{
-            asset: {
-              type: 'text',
-              text: category.toUpperCase(),
-              alignment: { horizontal: 'center', vertical: 'center' },
-              font: { 
-                color: secondaryColor, 
-                family: 'Oswald', 
-                size: presets.lowerThird.badge.fontSize, 
-                lineHeight: 1 
-              },
-              width: presets.lowerThird.badge.width,
-              height: presets.lowerThird.badge.height,
-              background: { color: accentColor }
-            },
-            start: 0.5,
-            length: totalDuration,
-            offset: { x: presets.lowerThird.badge.x, y: presets.lowerThird.badge.y },
-            position: 'center',
-            transition: { in: 'slideRight' }
-          }]
-        });
-      }
+      // LAYER 3: Secondary thin gold line (elegant detail)
+      tracks.unshift({
+        clips: [{
+          asset: {
+            type: 'text',
+            text: '',
+            alignment: { horizontal: 'center', vertical: 'center' },
+            font: { color: '#000000', family: 'Roboto', size: 10, lineHeight: 1 },
+            width: presets.lowerThird.banner.width * 0.7,
+            height: isVertical ? 2 : 3,
+            background: { color: accentGold }
+          },
+          start: 0.5,
+          length: totalDuration,
+          offset: { x: isVertical ? 0 : 0.1, y: presets.lowerThird.banner.y + (isVertical ? 0.042 : 0.045) },
+          position: 'center',
+          opacity: 0.8,
+          transition: { in: 'slideRight' }
+        }]
+      });
 
-      // Headline text with professional styling
+      // LAYER 4: Category badge - modern pill design
+      tracks.unshift({
+        clips: [{
+          asset: {
+            type: 'text',
+            text: category.toUpperCase(),
+            alignment: { horizontal: 'center', vertical: 'center' },
+            font: { 
+              color: '#000000', 
+              family: 'Montserrat Bold', 
+              size: presets.lowerThird.badge.fontSize, 
+              lineHeight: 1 
+            },
+            width: presets.lowerThird.badge.width,
+            height: presets.lowerThird.badge.height,
+            background: { color: accentGold }
+          },
+          start: 0.4,
+          length: totalDuration,
+          offset: { x: presets.lowerThird.badge.x, y: presets.lowerThird.badge.y },
+          position: 'center',
+          transition: { in: isVertical ? 'slideDown' : 'slideRight' }
+        }]
+      });
+
+      // LAYER 5: Headline text with premium typography
       if (headline) {
         tracks.unshift({
           clips: [{
@@ -847,27 +856,29 @@ export const buildPodcastStyleEdit = (
               alignment: { horizontal: isVertical ? 'center' : 'left', vertical: 'center' },
               font: { 
                 color: textColor, 
-                family: 'Roboto Medium', 
+                family: 'Montserrat SemiBold', 
                 size: presets.lowerThird.headline.fontSize, 
-                lineHeight: 1.15 
+                lineHeight: 1.2 
               },
               width: presets.lowerThird.headline.width,
               height: presets.lowerThird.headline.height
             },
-            start: 0.8,
+            start: 0.6,
             length: totalDuration,
             offset: { x: presets.lowerThird.headline.x, y: presets.lowerThird.headline.y },
             position: 'center',
-            transition: { in: isVertical ? 'slideUp' : 'slideRight' }
+            transition: { in: isVertical ? 'fade' : 'slideRight' }
           }]
         });
       }
     }
 
-    // TRACK: Date display (if enabled in overlays) - PROFESSIONAL STYLE
+    // DATE DISPLAY - MODERN FLOATING BADGE DESIGN
     if (config.overlays?.showDate) {
       const dateText = formatNewsDate();
-      // Date background pill
+      const primaryColor = newsConfig.lowerThird?.primaryColor || '#e63946';
+      
+      // Date pill background - dark with subtle border effect
       tracks.unshift({
         clips: [{
           asset: {
@@ -877,28 +888,49 @@ export const buildPodcastStyleEdit = (
             font: { color: '#000000', family: 'Roboto', size: 10, lineHeight: 1 },
             width: presets.date.width,
             height: presets.date.height,
-            background: { color: '#1a1a1a' }
+            background: { color: '#0d1b2a' }
           },
-          start: 1.2,
+          start: 0.8,
           length: totalDuration,
           offset: { x: presets.date.x, y: presets.date.y },
           position: 'center',
-          opacity: 0.9,
+          opacity: 0.95,
           transition: { in: 'fade' }
         }]
       });
-      // Date text
+      
+      // Date accent line (left border effect)
+      tracks.unshift({
+        clips: [{
+          asset: {
+            type: 'text',
+            text: '',
+            alignment: { horizontal: 'center', vertical: 'center' },
+            font: { color: '#000000', family: 'Roboto', size: 10, lineHeight: 1 },
+            width: 4,
+            height: presets.date.height - 8,
+            background: { color: primaryColor }
+          },
+          start: 0.9,
+          length: totalDuration,
+          offset: { x: presets.date.x - (isVertical ? 0.08 : 0.05), y: presets.date.y },
+          position: 'center',
+          transition: { in: 'slideDown' }
+        }]
+      });
+      
+      // Date text - clean typography
       tracks.unshift({
         clips: [{
           asset: {
             type: 'text',
             text: dateText,
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: '#ffffff', family: 'Oswald', size: presets.date.fontSize, lineHeight: 1 },
-            width: presets.date.width - 20,
-            height: presets.date.height - 10
+            font: { color: '#ffffff', family: 'Montserrat SemiBold', size: presets.date.fontSize, lineHeight: 1 },
+            width: presets.date.width - 16,
+            height: presets.date.height - 8
           },
-          start: 1.4,
+          start: 1.0,
           length: totalDuration,
           offset: { x: presets.date.x, y: presets.date.y },
           position: 'center',
@@ -907,9 +939,9 @@ export const buildPodcastStyleEdit = (
       });
     }
 
-    // TRACK: LIVE indicator (if enabled) - PULSING RED DOT STYLE
+    // LIVE INDICATOR - PREMIUM RECORDING STYLE
     if (config.overlays?.showLiveIndicator) {
-      // Live background
+      // Live background - red pill
       tracks.unshift({
         clips: [{
           asset: {
@@ -919,39 +951,61 @@ export const buildPodcastStyleEdit = (
             font: { color: '#000000', family: 'Roboto', size: 10, lineHeight: 1 },
             width: presets.live.width,
             height: presets.live.height,
-            background: { color: '#cc0000' }
+            background: { color: '#dc2626' }
           },
-          start: 0.3,
+          start: 0.2,
           length: totalDuration,
           offset: { x: presets.live.x, y: presets.live.y },
           position: 'center',
           transition: { in: 'fade' }
         }]
       });
-      // Live text
+      
+      // Recording dot indicator (white dot before text)
+      tracks.unshift({
+        clips: [{
+          asset: {
+            type: 'text',
+            text: '●',
+            alignment: { horizontal: 'center', vertical: 'center' },
+            font: { color: '#ffffff', family: 'Arial', size: isVertical ? 12 : 14, lineHeight: 1 },
+            width: 24,
+            height: 24
+          },
+          start: 0.3,
+          length: totalDuration,
+          offset: { x: presets.live.x - (isVertical ? 0.04 : 0.025), y: presets.live.y },
+          position: 'center',
+          transition: { in: 'fade' }
+        }]
+      });
+      
+      // LIVE text - bold and clean
       tracks.unshift({
         clips: [{
           asset: {
             type: 'text',
             text: 'LIVE',
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: '#ffffff', family: 'Oswald', size: presets.live.fontSize, lineHeight: 1 },
-            width: presets.live.width - 20,
-            height: presets.live.height - 10
+            font: { color: '#ffffff', family: 'Montserrat Bold', size: presets.live.fontSize, lineHeight: 1 },
+            width: presets.live.width - 30,
+            height: presets.live.height - 8
           },
-          start: 0.5,
+          start: 0.4,
           length: totalDuration,
-          offset: { x: presets.live.x, y: presets.live.y },
+          offset: { x: presets.live.x + (isVertical ? 0.02 : 0.015), y: presets.live.y },
           position: 'center',
           transition: { in: 'fade' }
         }]
       });
     }
 
-    // TRACK: Breaking News banner (appears briefly at start) - URGENT STYLE
+    // BREAKING NEWS BANNER - URGENT DRAMATIC REVEAL
     if (config.overlays?.showBreakingNews) {
       const breakingText = config.overlays.breakingNewsText || 'BREAKING NEWS';
-      // Breaking news background
+      const primaryColor = newsConfig.lowerThird?.primaryColor || '#dc2626';
+      
+      // Background strip - dramatic red
       tracks.unshift({
         clips: [{
           asset: {
@@ -959,40 +1013,63 @@ export const buildPodcastStyleEdit = (
             text: '',
             alignment: { horizontal: 'center', vertical: 'center' },
             font: { color: '#000000', family: 'Roboto', size: 10, lineHeight: 1 },
-            width: presets.breakingNews.width + 40,
+            width: presets.breakingNews.width + 80,
             height: presets.breakingNews.height,
-            background: { color: '#cc0000' }
+            background: { color: primaryColor }
           },
           start: 0,
-          length: 6,
+          length: 5,
           offset: { x: 0, y: presets.breakingNews.y },
           position: 'center',
-          transition: { in: 'slideDown', out: 'slideUp' }
+          transition: { in: 'slideDown', out: 'fade' }
         }]
       });
-      // Breaking news text
+      
+      // Gold accent line above
+      tracks.unshift({
+        clips: [{
+          asset: {
+            type: 'text',
+            text: '',
+            alignment: { horizontal: 'center', vertical: 'center' },
+            font: { color: '#000000', family: 'Roboto', size: 10, lineHeight: 1 },
+            width: presets.breakingNews.width + 80,
+            height: 4,
+            background: { color: '#ffd60a' }
+          },
+          start: 0.1,
+          length: 4.8,
+          offset: { x: 0, y: presets.breakingNews.y + (isVertical ? 0.018 : 0.02) },
+          position: 'center',
+          transition: { in: 'slideRight', out: 'fade' }
+        }]
+      });
+      
+      // Breaking text with impact
       tracks.unshift({
         clips: [{
           asset: {
             type: 'text',
             text: breakingText.toUpperCase(),
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: '#ffffff', family: 'Oswald', size: presets.breakingNews.fontSize, lineHeight: 1 },
+            font: { color: '#ffffff', family: 'Montserrat Bold', size: presets.breakingNews.fontSize, lineHeight: 1 },
             width: presets.breakingNews.width,
-            height: presets.breakingNews.height - 10
+            height: presets.breakingNews.height - 8
           },
-          start: 0.2,
-          length: 5.5,
+          start: 0.15,
+          length: 4.7,
           offset: { x: 0, y: presets.breakingNews.y },
           position: 'center',
-          transition: { in: 'slideDown', out: 'slideUp' }
+          transition: { in: 'slideDown', out: 'fade' }
         }]
       });
     }
 
-    // TRACK: Channel branding (if enabled) - PROFESSIONAL CORNER BADGE
+    // CHANNEL BRANDING - PREMIUM CORNER BADGE
     if (newsConfig.showChannelBranding && options.channelName) {
-      // Branding background
+      const accentGold = '#ffd60a';
+      
+      // Dark background pill
       tracks.unshift({
         clips: [{
           asset: {
@@ -1002,28 +1079,29 @@ export const buildPodcastStyleEdit = (
             font: { color: '#000000', family: 'Roboto', size: 10, lineHeight: 1 },
             width: presets.branding.width,
             height: presets.branding.height,
-            background: { color: '#1a1a1a' }
+            background: { color: '#0d1b2a' }
           },
-          start: 1.8,
+          start: 1.5,
           length: totalDuration,
           offset: { x: presets.branding.x, y: presets.branding.y },
           position: 'center',
-          opacity: 0.85,
+          opacity: 0.92,
           transition: { in: 'fade' }
         }]
       });
-      // Branding text
+      
+      // Channel name with gold accent
       tracks.unshift({
         clips: [{
           asset: {
             type: 'text',
             text: options.channelName.toUpperCase(),
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: '#ffcc00', family: 'Oswald', size: presets.branding.fontSize, lineHeight: 1 },
-            width: presets.branding.width - 20,
-            height: presets.branding.height - 10
+            font: { color: accentGold, family: 'Montserrat Bold', size: presets.branding.fontSize, lineHeight: 1 },
+            width: presets.branding.width - 16,
+            height: presets.branding.height - 8
           },
-          start: 2,
+          start: 1.7,
           length: totalDuration,
           offset: { x: presets.branding.x, y: presets.branding.y },
           position: 'center',
@@ -1032,26 +1110,27 @@ export const buildPodcastStyleEdit = (
       });
     }
 
-    // === NEWS TICKER (Scrolling Headlines) === PROFESSIONAL BROADCAST STYLE
+    // === NEWS TICKER - PREMIUM SCROLLING HEADLINES ===
     if (newsConfig.ticker?.enabled && options.newsHeadlines && options.newsHeadlines.length > 0) {
       const tickerConfig = newsConfig.ticker;
-      const tickerBgColor = tickerConfig.backgroundColor || '#1a1a1a';
+      const tickerBgColor = tickerConfig.backgroundColor || '#0d1b2a'; // Deep navy
       const tickerTextColor = tickerConfig.textColor || '#ffffff';
-      const tickerAccentColor = '#cc0000'; // Red accent
+      const primaryColor = newsConfig.lowerThird?.primaryColor || '#e63946';
+      const accentGold = '#ffd60a';
       
-      // Ticker positioning based on format - positioned at very bottom
+      // Ticker positioning - sleek bottom bar
       const tickerPresets = isVertical
-        ? { y: -0.47, height: 55, fontSize: 22, width: 1080 }
-        : { y: -0.465, height: 60, fontSize: 26, width: 1920 };
+        ? { y: -0.48, height: 48, fontSize: 18, width: 1080 }
+        : { y: -0.475, height: 52, fontSize: 22, width: 1920 };
       
-      // Speed settings (how long ticker text takes to scroll across)
-      const speedDurations = { slow: 30, normal: 22, fast: 15 };
+      // Speed settings
+      const speedDurations = { slow: 35, normal: 25, fast: 18 };
       const scrollDuration = speedDurations[tickerConfig.speed || 'normal'];
       
-      // Create ticker text (join all headlines with separator) - no emoji for cleaner look
-      const tickerText = options.newsHeadlines.map(h => h.toUpperCase()).join('    ●    ');
+      // Create ticker text with stylish separators
+      const tickerText = options.newsHeadlines.map(h => h.toUpperCase()).join('    ◆    ');
       
-      // Ticker background bar (dark)
+      // LAYER 1: Main ticker background - dark navy
       tracks.unshift({
         clips: [{
           asset: {
@@ -1063,16 +1142,16 @@ export const buildPodcastStyleEdit = (
             height: tickerPresets.height,
             background: { color: tickerBgColor }
           },
-          start: 1.5,
-          length: totalDuration - 1.5,
+          start: 1.2,
+          length: totalDuration - 1.2,
           offset: { x: 0, y: tickerPresets.y },
           position: 'center',
-          opacity: 0.95,
+          opacity: 0.96,
           transition: { in: 'slideUp' }
         }]
       });
       
-      // Ticker accent line (red line on top)
+      // LAYER 2: Top accent line - primary color
       tracks.unshift({
         clips: [{
           asset: {
@@ -1082,20 +1161,58 @@ export const buildPodcastStyleEdit = (
             font: { color: '#000000', family: 'Roboto', size: 10, lineHeight: 1 },
             width: tickerPresets.width * 1.1,
             height: 4,
-            background: { color: tickerAccentColor }
+            background: { color: primaryColor }
           },
-          start: 1.7,
-          length: totalDuration - 1.7,
-          offset: { x: 0, y: tickerPresets.y + (isVertical ? 0.015 : 0.016) },
+          start: 1.4,
+          length: totalDuration - 1.4,
+          offset: { x: 0, y: tickerPresets.y + (isVertical ? 0.013 : 0.014) },
           position: 'center',
           transition: { in: 'slideRight' }
         }]
       });
       
-      // Animated ticker text - slides from right to left
-      // We create multiple clips to create continuous scrolling effect
+      // LAYER 3: "LATEST" badge on left side
+      tracks.unshift({
+        clips: [{
+          asset: {
+            type: 'text',
+            text: '',
+            alignment: { horizontal: 'center', vertical: 'center' },
+            font: { color: '#000000', family: 'Roboto', size: 10, lineHeight: 1 },
+            width: isVertical ? 100 : 120,
+            height: tickerPresets.height - 8,
+            background: { color: primaryColor }
+          },
+          start: 1.5,
+          length: totalDuration - 1.5,
+          offset: { x: isVertical ? -0.40 : -0.44, y: tickerPresets.y },
+          position: 'center',
+          transition: { in: 'slideRight' }
+        }]
+      });
+      
+      // "LATEST" text
+      tracks.unshift({
+        clips: [{
+          asset: {
+            type: 'text',
+            text: 'LATEST',
+            alignment: { horizontal: 'center', vertical: 'center' },
+            font: { color: '#ffffff', family: 'Montserrat Bold', size: isVertical ? 14 : 16, lineHeight: 1 },
+            width: isVertical ? 90 : 110,
+            height: tickerPresets.height - 12
+          },
+          start: 1.6,
+          length: totalDuration - 1.6,
+          offset: { x: isVertical ? -0.40 : -0.44, y: tickerPresets.y },
+          position: 'center',
+          transition: { in: 'fade' }
+        }]
+      });
+      
+      // LAYER 4: Scrolling headlines
       const tickerClips: any[] = [];
-      let tickerStartTime = 2.5;
+      let tickerStartTime = 2.0;
       
       while (tickerStartTime < totalDuration - 2) {
         tickerClips.push({
@@ -1105,21 +1222,21 @@ export const buildPodcastStyleEdit = (
             alignment: { horizontal: 'left', vertical: 'center' },
             font: { 
               color: tickerTextColor, 
-              family: 'Roboto', 
+              family: 'Roboto Medium', 
               size: tickerPresets.fontSize, 
               lineHeight: 1 
             },
-            width: tickerPresets.width * 3, // Wide enough for scrolling text
-            height: tickerPresets.height - 10
+            width: tickerPresets.width * 3,
+            height: tickerPresets.height - 12
           },
           start: tickerStartTime,
           length: Math.min(scrollDuration, totalDuration - tickerStartTime - 1),
-          offset: { x: 0, y: tickerPresets.y },
+          offset: { x: isVertical ? 0.05 : 0.03, y: tickerPresets.y },
           position: 'center',
-          effect: 'slideLeftSlow' // Creates scrolling effect
+          effect: 'slideLeftSlow'
         });
         
-        tickerStartTime += scrollDuration - 2; // Overlap for continuous scroll
+        tickerStartTime += scrollDuration - 3;
       }
       
       if (tickerClips.length > 0) {
@@ -1128,18 +1245,40 @@ export const buildPodcastStyleEdit = (
     }
   }
 
-  // === HOST NAMES TRACK ===
-  // Show speaker name when they start talking - Professional style with accent color
+  // === HOST NAME PLATES - PREMIUM BROADCAST STYLE ===
   if (config.overlays?.showHostNames && scenesWithTiming.length > 0) {
     const hostNameClips: any[] = [];
-    const accentColor = config.newsStyle?.lowerThird?.primaryColor || '#ff0000';
-    const hostNamePresets = isVertical 
-      ? { y: -0.28, fontSize: 16, width: 220, height: 38, accentWidth: 6 }
-      : { y: -0.30, fontSize: 20, width: 280, height: 45, accentWidth: 8 };
+    const primaryColor = config.newsStyle?.lowerThird?.primaryColor || '#e63946';
+    const accentGold = '#ffd60a';
+    const hostNamePresets = overlayPresets.hostName;
     
     scenesWithTiming.forEach((scene) => {
       if (scene.speaker) {
-        // Accent bar (colored left border effect)
+        const showDuration = Math.min(4, scene.duration - 0.4);
+        
+        // LAYER 1: Dark background plate
+        hostNameClips.push({
+          asset: {
+            type: 'text',
+            text: '',
+            alignment: { horizontal: 'center', vertical: 'center' },
+            font: { color: '#000000', family: 'Roboto', size: 10, lineHeight: 1 },
+            width: hostNamePresets.width,
+            height: hostNamePresets.height,
+            background: { color: '#0d1b2a' }
+          },
+          start: scene.start + 0.15,
+          length: showDuration,
+          offset: { 
+            x: isVertical ? -0.28 : -0.36, 
+            y: hostNamePresets.y 
+          },
+          position: 'center',
+          opacity: 0.95,
+          transition: { in: 'slideRight', out: 'fade' }
+        });
+        
+        // LAYER 2: Primary color accent bar (left edge)
         hostNameClips.push({
           asset: {
             type: 'text',
@@ -1148,19 +1287,41 @@ export const buildPodcastStyleEdit = (
             font: { color: '#000000', family: 'Roboto', size: 10, lineHeight: 1 },
             width: hostNamePresets.accentWidth,
             height: hostNamePresets.height,
-            background: { color: accentColor }
+            background: { color: primaryColor }
           },
           start: scene.start + 0.2,
-          length: Math.min(3.5, scene.duration - 0.3),
+          length: showDuration - 0.1,
           offset: { 
-            x: isVertical ? -0.32 : -0.40, 
+            x: isVertical ? -0.40 : -0.45, 
             y: hostNamePresets.y 
           },
           position: 'center',
           transition: { in: 'slideRight', out: 'fade' }
         });
         
-        // Name text with dark background
+        // LAYER 3: Gold accent line (top)
+        hostNameClips.push({
+          asset: {
+            type: 'text',
+            text: '',
+            alignment: { horizontal: 'center', vertical: 'center' },
+            font: { color: '#000000', family: 'Roboto', size: 10, lineHeight: 1 },
+            width: hostNamePresets.width - 10,
+            height: 2,
+            background: { color: accentGold }
+          },
+          start: scene.start + 0.25,
+          length: showDuration - 0.15,
+          offset: { 
+            x: isVertical ? -0.28 : -0.36, 
+            y: hostNamePresets.y + (isVertical ? 0.016 : 0.018) 
+          },
+          position: 'center',
+          opacity: 0.7,
+          transition: { in: 'slideRight', out: 'fade' }
+        });
+        
+        // LAYER 4: Speaker name - clean typography
         hostNameClips.push({
           asset: {
             type: 'text',
@@ -1168,18 +1329,17 @@ export const buildPodcastStyleEdit = (
             alignment: { horizontal: 'left', vertical: 'center' },
             font: { 
               color: '#ffffff', 
-              family: 'Oswald', 
+              family: 'Montserrat SemiBold', 
               size: hostNamePresets.fontSize, 
               lineHeight: 1 
             },
-            width: hostNamePresets.width,
-            height: hostNamePresets.height,
-            background: { color: '#111111' }
+            width: hostNamePresets.width - 20,
+            height: hostNamePresets.height - 12
           },
           start: scene.start + 0.3,
-          length: Math.min(3, scene.duration - 0.5),
+          length: showDuration - 0.2,
           offset: { 
-            x: isVertical ? -0.22 : -0.32, 
+            x: isVertical ? -0.26 : -0.34, 
             y: hostNamePresets.y 
           },
           position: 'center',
@@ -1389,11 +1549,16 @@ export const buildPodcastStyleEdit = (
     fontsToLoad.push({ src: config.fonts.accent });
   }
   
-  // Add default professional fonts (Shotstack hosted)
+  // Add premium professional fonts (Shotstack hosted + Google Fonts)
   const defaultFonts = [
-    'https://templates.shotstack.io/basic-text-overlay/6ab63510-5d0e-401b-86b0-d46e87df0a91/source.ttf', // Montserrat Bold
-    'https://templates.shotstack.io/breaking-news-channel-template-urgent-announcements-sales/30e1f15f-b0f0-4c6e-bc2c-8a5f3a8478ef/source.ttf', // Oswald
-    'https://templates.shotstack.io/breaking-news-channel-template-urgent-announcements-sales/ef4d1738-75fd-4808-84b9-119a36c79c3b/source.ttf'  // Roboto
+    // Montserrat family - Primary display font
+    'https://fonts.gstatic.com/s/montserrat/v26/JTUSjIg1_i6t8kCHKm459WRhyyTh89ZNpQ.woff2', // Montserrat Bold
+    'https://fonts.gstatic.com/s/montserrat/v26/JTUSjIg1_i6t8kCHKm459WlhyyTh89ZNpQ.woff2', // Montserrat SemiBold
+    // Roboto family - Body/ticker font
+    'https://fonts.gstatic.com/s/roboto/v30/KFOmCnqEu92Fr1Mu4mxK.woff2', // Roboto Medium
+    // Fallback from Shotstack templates
+    'https://templates.shotstack.io/basic-text-overlay/6ab63510-5d0e-401b-86b0-d46e87df0a91/source.ttf', // Montserrat Bold (backup)
+    'https://templates.shotstack.io/breaking-news-channel-template-urgent-announcements-sales/ef4d1738-75fd-4808-84b9-119a36c79c3b/source.ttf'  // Roboto (backup)
   ];
   
   defaultFonts.forEach(fontUrl => {
