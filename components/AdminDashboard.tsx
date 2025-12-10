@@ -935,6 +935,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                   </select>
                 </div>
                 <div>
+                  <label className="text-sm text-gray-400 block mb-1">News Source (Topic Token)</label>
+                  <select 
+                    value={tempConfig.topicToken || ''} 
+                    onChange={e => setTempConfig({ ...tempConfig, topicToken: e.target.value || undefined })} 
+                    className="w-full bg-[#111] border border-[#333] p-2 rounded text-white"
+                  >
+                    <option value="">Default (US Business)</option>
+                    <option value="CAAqJQgKIh9DQkFTRVFvSEwyMHZNR3BuWkJJR1pYTXROREU1S0FBUAE">🇦🇷 Argentina - Noticias Generales</option>
+                    <option value="CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx6TVdZU0FtVnVHZ0pWVXlnQVAB">🇺🇸 USA - Business</option>
+                    <option value="CAAqJggKIiBDQkFTRWdvSUwyMHZNRGRqTVhZU0FtVnVHZ0pWVXlnQVAB">🇺🇸 USA - Technology</option>
+                    <option value="CAAqKAgKIiJDQkFTRXdvSkwyMHZNREZ0T1hJek1CSUdaWE10TkRFNUtBQQ">🌍 World Headlines (Spanish)</option>
+                  </select>
+                  <p className="text-xs text-gray-500 mt-1">Determina de dónde se buscan las noticias. Para otros países, copia el topic_token de Google News.</p>
+                </div>
+                <div>
+                  <label className="text-sm text-gray-400 block mb-1">Custom Topic Token (opcional)</label>
+                  <input 
+                    type="text" 
+                    value={tempConfig.topicToken || ''} 
+                    onChange={e => setTempConfig({ ...tempConfig, topicToken: e.target.value || undefined })}
+                    placeholder="Pega aquí un topic_token personalizado"
+                    className="w-full bg-[#111] border border-[#333] p-2 rounded text-white text-xs font-mono"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Ve a news.google.com, navega al tema deseado, y copia el token de la URL</p>
+                </div>
+                <div>
                   <label className="text-sm text-gray-400 block mb-1">Overall Tone</label>
                   <input type="text" value={tempConfig.tone} onChange={e => setTempConfig({ ...tempConfig, tone: e.target.value })} className="w-full bg-[#111] border border-[#333] p-2 rounded text-white" />
                 </div>
