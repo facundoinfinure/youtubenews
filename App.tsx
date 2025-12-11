@@ -1969,7 +1969,7 @@ const App: React.FC = () => {
   // At this point, state cannot be LOGIN or ADMIN_DASHBOARD (handled by early returns above)
   // --------------------------------------------------------------------------------
   return (
-    <div className="min-h-screen bg-[#0f0f0f] text-white flex flex-col font-sans">
+    <div className="min-h-screen bg-[#0f0f0f] text-white flex flex-col font-sans overflow-x-hidden w-full max-w-full">
       <header className="bg-[#0f0f0f] px-6 py-3 flex justify-between items-center sticky top-0 z-50 border-b border-[#272727]">
         <div className="flex items-center gap-4">
           <button className="text-white p-2 hover:bg-[#272727] rounded-full">
@@ -2040,8 +2040,8 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      <main className="flex-grow flex flex-col md:flex-row p-6 gap-6 max-w-[1800px] mx-auto w-full">
-        <div className="flex-grow w-full md:w-[70%] lg:w-[75%] space-y-4">
+      <main className="flex-grow flex flex-col md:flex-row p-3 sm:p-4 md:p-6 gap-4 md:gap-6 max-w-[1800px] mx-auto w-full overflow-x-hidden">
+        <div className="flex-grow w-full md:w-[70%] lg:w-[75%] space-y-4 min-w-0">
 
           {/* CONTAINER AREA */}
           {/* IdleState gets full-size container, not constrained by video format */}
@@ -2099,7 +2099,7 @@ const App: React.FC = () => {
             <div className={`w-full bg-black rounded-xl overflow-hidden shadow-lg relative flex flex-col transition-all duration-500 ${config.format === '9:16' ? 'max-w-[400px] mx-auto aspect-[9/16]' : 'aspect-video'}`}>
               {state === AppState.SELECTING_NEWS ? (
               // 2. SELECTION PHASE
-              <div className="p-4 bg-[#0a0a0a] h-full overflow-y-auto">
+              <div className="p-3 sm:p-4 bg-[#0a0a0a] h-full overflow-y-auto overflow-x-hidden">
                 <NewsSelector
                   news={allNews}
                   date={parseLocalDate(selectedDate)}
@@ -2127,13 +2127,13 @@ const App: React.FC = () => {
                 <p className="text-gray-400 max-w-md">
                   {logs.length > 0 ? logs[logs.length - 1] : "An error occurred during production."}
                 </p>
-                <div className="flex gap-4">
+                <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 w-full sm:w-auto">
                   <button
                     onClick={() => {
                       setState(AppState.IDLE);
                       setLogs([]);
                     }}
-                    className="btn-secondary"
+                    className="btn-secondary min-h-[44px] px-5 sm:px-6 py-3 sm:py-2.5 text-sm sm:text-base"
                   >
                     Go Back
                   </button>
@@ -2143,7 +2143,7 @@ const App: React.FC = () => {
                       setLogs([]);
                       initiateNewsSearch();
                     }}
-                    className="btn-primary"
+                    className="btn-primary min-h-[44px] px-5 sm:px-6 py-3 sm:py-2.5 text-sm sm:text-base"
                   >
                     Retry
                   </button>
@@ -2210,7 +2210,7 @@ const App: React.FC = () => {
                         toast.success('Production aborted. Resume from dashboard when ready.');
                       }
                     }}
-                    className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg font-bold text-sm transition-colors"
+                    className="px-5 sm:px-6 py-3 sm:py-2.5 bg-red-600 hover:bg-red-500 text-white rounded-lg font-bold text-sm sm:text-base transition-colors min-h-[44px]"
                   >
                     🛑 Abort
                   </button>
@@ -2220,7 +2220,7 @@ const App: React.FC = () => {
           </div>
 
           <div className="space-y-4">
-            <h1 className="text-2xl font-bold line-clamp-2">
+            <h1 className="text-xl sm:text-2xl font-bold line-clamp-2">
               {viralMeta ? viralMeta.title : `${config.channelName} Daily Update`}
             </h1>
 
@@ -2238,16 +2238,16 @@ const App: React.FC = () => {
               </div>
             )}
 
-            <div className="flex items-center justify-between flex-wrap gap-4 border-b border-[#272727] pb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-black border border-white/20" style={{ backgroundColor: config.logoColor1 }}>
+            <div className="flex items-center justify-between flex-wrap gap-3 sm:gap-4 border-b border-[#272727] pb-4">
+              <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
+                <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center font-bold text-black border border-white/20 flex-shrink-0" style={{ backgroundColor: config.logoColor1 }}>
                   {config.channelName[0]}
                 </div>
-                <div>
-                  <div className="font-bold text-sm">{config.channelName}</div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-bold text-sm sm:text-base truncate">{config.channelName}</div>
                   <div className="text-xs text-gray-400">1.2M subscribers</div>
                 </div>
-                <button className="ml-4 bg-white text-black rounded-full px-4 py-1.5 text-sm font-medium hover:bg-gray-200">Subscribe</button>
+                <button className="ml-2 sm:ml-4 bg-white text-black rounded-full px-4 sm:px-5 py-2.5 sm:py-2 text-sm font-medium hover:bg-gray-200 min-h-[44px] flex-shrink-0">Subscribe</button>
               </div>
             </div>
 
@@ -2270,17 +2270,17 @@ const App: React.FC = () => {
             </div>
 
             {(thumbnailDataUrl || thumbnailVariant) && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                 {thumbnailDataUrl && (
-                  <div className="bg-[#1b1b1b] border border-[#2a2a2a] rounded-xl p-3 space-y-2">
-                    <div className="text-xs uppercase tracking-[0.3em] text-gray-400">Thumbnail A</div>
-                    <img src={thumbnailDataUrl} alt="Thumbnail A" className="w-full h-48 object-cover rounded-lg" />
+                  <div className="bg-[#1b1b1b] border border-[#2a2a2a] rounded-xl p-3 sm:p-4 space-y-2">
+                    <div className="text-xs sm:text-sm uppercase tracking-[0.3em] text-gray-400">Thumbnail A</div>
+                    <img src={thumbnailDataUrl} alt="Thumbnail A" className="w-full h-40 sm:h-48 object-cover rounded-lg" />
                   </div>
                 )}
                 {thumbnailVariant && (
-                  <div className="bg-[#1b1b1b] border border-[#2a2a2a] rounded-xl p-3 space-y-2">
-                    <div className="text-xs uppercase tracking-[0.3em] text-gray-400">Thumbnail B</div>
-                    <img src={thumbnailVariant} alt="Thumbnail B" className="w-full h-48 object-cover rounded-lg" />
+                  <div className="bg-[#1b1b1b] border border-[#2a2a2a] rounded-xl p-3 sm:p-4 space-y-2">
+                    <div className="text-xs sm:text-sm uppercase tracking-[0.3em] text-gray-400">Thumbnail B</div>
+                    <img src={thumbnailVariant} alt="Thumbnail B" className="w-full h-40 sm:h-48 object-cover rounded-lg" />
                   </div>
                 )}
               </div>
@@ -2302,7 +2302,7 @@ const App: React.FC = () => {
                     <button
                       onClick={handleComposeVideo}
                       disabled={!isCompositionAvailable()}
-                      className={`px-4 py-2 rounded-lg font-bold transition ${
+                      className={`px-4 sm:px-5 py-3 sm:py-2.5 rounded-lg font-bold transition min-h-[44px] text-sm sm:text-base ${
                         isCompositionAvailable()
                           ? 'bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white'
                           : 'bg-gray-700 text-gray-500 cursor-not-allowed'
@@ -2325,19 +2325,19 @@ const App: React.FC = () => {
                       <span>✅</span>
                       <span className="font-medium">Video composed successfully!</span>
                     </div>
-                    <div className="flex flex-wrap gap-3">
+                    <div className="flex flex-wrap gap-2 sm:gap-3">
                       <a
                         href={composedVideoUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold transition"
+                        className="flex items-center justify-center gap-2 px-4 sm:px-5 py-3 sm:py-2.5 bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold transition min-h-[44px] text-sm sm:text-base flex-1 sm:flex-initial"
                       >
                         <span>🔗</span> Open Video
                       </a>
                       <a
                         href={composedVideoUrl}
                         download={`${config.channelName}_${selectedDate}.mp4`}
-                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold transition"
+                        className="flex items-center justify-center gap-2 px-4 sm:px-5 py-3 sm:py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold transition min-h-[44px] text-sm sm:text-base flex-1 sm:flex-initial"
                       >
                         <span>⬇️</span> Download
                       </a>
@@ -2346,7 +2346,7 @@ const App: React.FC = () => {
                           navigator.clipboard.writeText(composedVideoUrl);
                           toast.success('URL copied to clipboard!');
                         }}
-                        className="flex items-center gap-2 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-bold transition"
+                        className="flex items-center justify-center gap-2 px-4 sm:px-5 py-3 sm:py-2.5 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-bold transition min-h-[44px] text-sm sm:text-base flex-1 sm:flex-initial"
                       >
                         <span>📋</span> Copy URL
                       </button>
@@ -2356,7 +2356,7 @@ const App: React.FC = () => {
                           setComposedVideoUrl(null);
                           toast('Ready to re-compose with updated settings', { icon: '🔄' });
                         }}
-                        className="flex items-center gap-2 px-4 py-2 bg-yellow-600 hover:bg-yellow-500 text-white rounded-lg font-bold transition"
+                        className="flex items-center justify-center gap-2 px-4 sm:px-5 py-3 sm:py-2.5 bg-yellow-600 hover:bg-yellow-500 text-white rounded-lg font-bold transition min-h-[44px] text-sm sm:text-base flex-1 sm:flex-initial"
                       >
                         <span>🔄</span> Re-compose
                       </button>

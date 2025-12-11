@@ -202,12 +202,29 @@ For EACH scene provide:
 - video_mode: "hostA" | "hostB" (ALTERNATE between hosts for dynamic pacing - NEVER use "both")
 - model: "infinite_talk" (always use this model)
 - shot: default "medium", "closeup" for Hook/Conflict, "wide" for Payoff
+- soundEffects (OPTIONAL): Suggest appropriate sound effects for this scene with PRECISE timing:
+  * type: "transition" (for scene changes), "emphasis" (for key points), "notification" (for breaking news), "ambient" (for background atmosphere), or "none"
+  * description: Brief description of the desired sound (e.g., "whoosh", "ding", "drum roll", "news alert", "swoosh", "pop")
+  * startTime: EXACT timing - "start" (0s into scene), "end" (at scene end), "middle" (middle of scene), or a NUMBER (seconds into scene, e.g., 2.5)
+  * duration: EXACT duration in seconds (e.g., 0.5, 1.0, 1.5, 2.0) - keep short (0.3-2.0s for most effects)
+  * endTime: OPTIONAL explicit end time in seconds (if not provided, calculated as startTime + duration)
+  * volume: 0.3-0.5 (lower volume for background effects)
+
+SOUND EFFECT GUIDELINES:
+- Use "transition" type for scene changes (especially when topic changes) - duration: 0.5-1.5s, startTime: "start" or 0
+- Use "emphasis" for dramatic moments, key revelations, or important statistics - duration: 0.3-1.0s, startTime: specific moment in dialogue
+- Use "notification" for breaking news or urgent information - duration: 0.5-1.0s, startTime: "start" or when news is mentioned
+- Use "ambient" sparingly for atmospheric scenes - duration: 2.0-5.0s, startTime: "start" or "middle"
+- Use "none" for most scenes (don't overuse sound effects)
+- Keep volume low (0.3-0.5) so effects enhance but don't distract from dialogue
+- Be PRECISE with timing - specify exact seconds when the effect should start and how long it should last
 
 CRITICAL RULES:
 - ALWAYS alternate between hostA and hostB scenes for dynamic pacing
 - NEVER create scenes with both hosts together - each scene focuses on ONE character
 - Keep scenes SHORT (40-80 words) for fast-paced, dynamic delivery
 - Use "text" field with that host's dialogue
+- For soundEffects: ALWAYS specify startTime and duration when type is not "none"
 `.trim();
 
   const outputFormat = `
@@ -221,21 +238,38 @@ Return STRICT JSON (no markdown) with this exact format:
       "text": "${hostA.name}'s dialogue (40-80 words)",
       "video_mode": "hostA",
       "model": "infinite_talk",
-      "shot": "closeup"
+      "shot": "closeup",
+      "soundEffects": {
+        "type": "transition",
+        "description": "whoosh",
+        "startTime": "start",
+        "duration": 1.0,
+        "volume": 0.4
+      }
     },
     "2": {
       "title": "Another Scene Title",
       "text": "${hostB.name}'s dialogue (40-80 words)",
       "video_mode": "hostB",
       "model": "infinite_talk",
-      "shot": "medium"
+      "shot": "medium",
+      "soundEffects": {
+        "type": "none"
+      }
     },
     "3": {
       "title": "Third Scene Title",
       "text": "${hostA.name}'s dialogue (40-80 words)",
       "video_mode": "hostA",
       "model": "infinite_talk",
-      "shot": "medium"
+      "shot": "medium",
+      "soundEffects": {
+        "type": "emphasis",
+        "description": "drum roll",
+        "startTime": 3.5,
+        "duration": 0.8,
+        "volume": 0.3
+      }
     }
   }
 }
@@ -244,6 +278,7 @@ CRITICAL:
 - ALTERNATE between hostA and hostB for every scene (hostA → hostB → hostA → hostB...)
 - NEVER use video_mode "both" - each scene features ONE host only
 - Keep dialogue SHORT (40-80 words) for dynamic, fast-paced delivery
+- Include soundEffects for scenes where it enhances the narrative (use "none" if not needed)
 `.trim();
 
   // Build ethical guardrails prompt from config

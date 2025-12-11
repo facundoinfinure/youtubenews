@@ -1,0 +1,22 @@
+# Coloca aquí los archivos de audio antes de ejecutar setup-audio-assets.ts
+# 
+# Estructura:
+# audio-assets/
+#   music/
+#     podcast.mp3
+#     energetic.mp3
+#     calm.mp3
+#     dramatic.mp3
+#     news.mp3
+#     corporate.mp3
+#   sound-effects/
+#     transition-whoosh.mp3
+#     transition-swoosh.mp3
+#     transition-swish.mp3
+#     emphasis-drum-roll.mp3
+#     emphasis-pop.mp3
+#     emphasis-hit.mp3
+#     notification-news-alert.mp3
+#     notification-ding.mp3
+#     notification-bell.mp3
+#     ambient-newsroom.mp3

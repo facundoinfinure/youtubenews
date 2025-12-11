@@ -37,6 +37,24 @@ export interface Scene {
   video_mode: VideoMode;
   model: "infinite_talk" | "infinite_talk_multi"; // infinite_talk_multi kept for backwards compat
   shot: ShotType;
+  
+  // Sound effects and audio enhancements
+  soundEffects?: {
+    // Suggested sound effect type for this scene
+    type?: 'transition' | 'emphasis' | 'notification' | 'ambient' | 'none';
+    // Description of the desired sound effect
+    description?: string;
+    // Start time: 'start' | 'end' | 'middle' | number (seconds into scene)
+    startTime?: 'start' | 'end' | 'middle' | number;
+    // Duration of the sound effect in seconds
+    duration?: number;
+    // End time: optional explicit end time (if not provided, calculated from startTime + duration)
+    endTime?: number;
+    // Volume level (0-1)
+    volume?: number;
+    // URL to the sound effect file (stored in Supabase Storage)
+    url?: string;
+  };
 }
 
 export interface ScriptWithScenes {
@@ -200,6 +218,9 @@ export interface RenderConfig {
     enabled: boolean;
     url?: string;
     volume: number; // 0-1
+    style?: 'energetic' | 'calm' | 'dramatic' | 'news' | 'podcast' | 'corporate' | 'none';
+    fadeIn?: number; // Fade in duration in seconds
+    fadeOut?: number; // Fade out duration in seconds
   };
   
   // Sound Effects (v2.7) - Transition and scene change sounds

@@ -145,9 +145,9 @@ export const IdleState: React.FC<IdleStateProps> = ({
                 {/* Start Button */}
                 <button 
                   onClick={onStartWizard || onStart} 
-                  className="flex-shrink-0 bg-accent-500 hover:bg-accent-400 text-white px-6 py-3 rounded-xl 
+                  className="w-full sm:w-auto flex-shrink-0 bg-accent-500 hover:bg-accent-400 text-white px-6 py-3.5 sm:py-3 rounded-xl 
                            font-semibold shadow-lg shadow-accent-500/20 hover:shadow-xl hover:shadow-accent-500/30
-                           transition-all flex items-center justify-center gap-2"
+                           transition-all flex items-center justify-center gap-2 min-h-[44px] text-sm sm:text-base"
                 >
                   <IconPlay size={18} />
                   Start Production

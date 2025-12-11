@@ -11,6 +11,10 @@
     "api/serpapi.ts": {
       "maxDuration": 15,
       "memory": 256
+    },
+    "api/upload-audio.ts": {
+      "maxDuration": 300,
+      "memory": 512
     }
   },
   "headers": [

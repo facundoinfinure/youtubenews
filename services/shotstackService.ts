@@ -562,6 +562,15 @@ export interface PodcastScene {
   duration: number; // Duration in seconds (from video metadata or estimate)
   speaker?: string; // Optional speaker name
   text?: string;    // Optional text/dialogue for subtitles
+  soundEffects?: {
+    type?: 'transition' | 'emphasis' | 'notification' | 'ambient' | 'none';
+    description?: string;
+    startTime?: 'start' | 'end' | 'middle' | number; // When the effect should start
+    duration?: number; // Duration of sound effect in seconds
+    endTime?: number; // Optional explicit end time (if not provided, calculated from startTime + duration)
+    volume?: number;
+    url?: string; // URL to sound effect audio file (stored in Supabase Storage)
+  };
 }
 
 /**
@@ -1510,52 +1519,139 @@ export const buildPodcastStyleEdit = (
   };
 
   // === SOUND EFFECTS TRACK ===
-  // Add transition sound effects for dynamic pacing
-  if (config.soundEffects?.enabled && scenesWithTiming.length > 1) {
-    const soundEffectClips: any[] = [];
-    
-    // Add transition sounds at scene changes (only if enabled and URLs are provided)
-    if (config.soundEffects?.enabled) {
-      scenesWithTiming.forEach((scene, index) => {
-        if (index > 0) {
-          // Add whoosh/transition sound at each scene change
-          const transitionSound = config.soundEffects?.transitionSound?.trim();
-          if (transitionSound && isValidAudioUrl(transitionSound)) {
-            soundEffectClips.push({
-              asset: {
-                type: 'audio',
-                src: transitionSound,
-                volume: config.soundEffects?.transitionVolume || 0.4
-              },
-              start: Math.max(0, scene.start - 0.3), // Start slightly before transition
-              length: 1.5 // Short sound effect
-            });
-          } else if (transitionSound && !isValidAudioUrl(transitionSound)) {
-            console.warn(`[Shotstack] ⚠️ Skipping invalid transition sound URL: ${transitionSound}`);
-          }
-          
-          // Add scene change notification sound (optional)
-          const sceneChangeSound = config.soundEffects?.sceneChangeSound?.trim();
-          if (sceneChangeSound && isValidAudioUrl(sceneChangeSound) && index % 3 === 0) {
-            soundEffectClips.push({
-              asset: {
-                type: 'audio',
-                src: sceneChangeSound,
-                volume: config.soundEffects?.sceneChangeVolume || 0.3
-              },
-              start: scene.start + 0.5,
-              length: 1
-            });
-          } else if (sceneChangeSound && !isValidAudioUrl(sceneChangeSound)) {
-            console.warn(`[Shotstack] ⚠️ Skipping invalid scene change sound URL: ${sceneChangeSound}`);
-          }
+  // Add sound effects from scene metadata and config
+  const soundEffectClips: any[] = [];
+  
+  // First, add sound effects from scene metadata (if available)
+  scenesWithTiming.forEach((scene: any, index) => {
+    // Check if scene has soundEffects metadata
+    if (scene.soundEffects && scene.soundEffects.type && scene.soundEffects.type !== 'none') {
+      const effectUrl = scene.soundEffects.url; // URL should be provided in scene metadata
+      
+      if (effectUrl && isValidAudioUrl(effectUrl)) {
+        // Calculate precise start time
+        let effectStart = scene.start;
+        const startTime = scene.soundEffects.startTime;
+        
+        if (typeof startTime === 'number') {
+          // Explicit number in seconds
+          effectStart = scene.start + startTime;
+        } else if (startTime === 'end') {
+          // At end of scene
+          effectStart = scene.start + scene.duration - (scene.soundEffects.duration || 1.5);
+        } else if (startTime === 'middle') {
+          // Middle of scene
+          effectStart = scene.start + (scene.duration / 2) - ((scene.soundEffects.duration || 1.5) / 2);
         }
-      });
+        // 'start' or undefined means 0 (beginning of scene)
+        
+        // Use explicit duration or calculate from endTime
+        let effectDuration = scene.soundEffects.duration || 1.5;
+        if (scene.soundEffects.endTime !== undefined) {
+          // If endTime is provided, calculate duration from it
+          const calculatedEnd = typeof startTime === 'number' 
+            ? scene.start + scene.soundEffects.endTime
+            : effectStart + effectDuration;
+          effectDuration = calculatedEnd - effectStart;
+        }
+        
+        // Ensure effect doesn't exceed scene boundaries
+        const maxEndTime = scene.start + scene.duration;
+        const effectEndTime = effectStart + effectDuration;
+        if (effectEndTime > maxEndTime) {
+          effectDuration = maxEndTime - effectStart;
+        }
+        
+        if (effectDuration > 0 && effectStart >= 0) {
+          soundEffectClips.push({
+            asset: {
+              type: 'audio',
+              src: effectUrl,
+              volume: scene.soundEffects.volume || 0.4
+            },
+            start: Math.max(0, effectStart),
+            length: Math.max(0.1, effectDuration) // Minimum 0.1s duration
+          });
+          
+          console.log(`🔊 [Shotstack] Sound effect: ${scene.soundEffects.type} at ${effectStart.toFixed(2)}s for ${effectDuration.toFixed(2)}s`);
+        }
+      } else if (effectUrl && !isValidAudioUrl(effectUrl)) {
+        console.warn(`[Shotstack] ⚠️ Skipping invalid sound effect URL from scene: ${effectUrl}`);
+      } else if (!effectUrl) {
+        console.warn(`[Shotstack] ⚠️ Scene ${index + 1} has sound effect metadata but no URL provided`);
+      }
     }
     
-    if (soundEffectClips.length > 0) {
-      console.log(`🔊 [Podcast Composition] Adding ${soundEffectClips.length} sound effects`);
-      tracks.push({ clips: soundEffectClips });
+    // Also add transition sounds at scene changes (if enabled in config)
+    if (config.soundEffects?.enabled && index > 0) {
+      const transitionSound = config.soundEffects?.transitionSound?.trim();
+      if (transitionSound && isValidAudioUrl(transitionSound)) {
+        soundEffectClips.push({
+          asset: {
+            type: 'audio',
+            src: transitionSound,
+            volume: config.soundEffects?.transitionVolume || 0.4
+          },
+          start: Math.max(0, scene.start - 0.3), // Start slightly before transition
+          length: 1.5 // Short sound effect
+        });
+      } else if (transitionSound && !isValidAudioUrl(transitionSound)) {
+        console.warn(`[Shotstack] ⚠️ Skipping invalid transition sound URL: ${transitionSound}`);
+      }
+      
+      // Add scene change notification sound (optional)
+      const sceneChangeSound = config.soundEffects?.sceneChangeSound?.trim();
+      if (sceneChangeSound && isValidAudioUrl(sceneChangeSound) && index % 3 === 0) {
+        soundEffectClips.push({
+          asset: {
+            type: 'audio',
+            src: sceneChangeSound,
+            volume: config.soundEffects?.sceneChangeVolume || 0.3
+          },
+          start: scene.start + 0.5,
+          length: 1
+        });
+      } else if (sceneChangeSound && !isValidAudioUrl(sceneChangeSound)) {
+        console.warn(`[Shotstack] ⚠️ Skipping invalid scene change sound URL: ${sceneChangeSound}`);
+      }
+    }
+  });
+  
+  if (soundEffectClips.length > 0) {
+    console.log(`🔊 [Podcast Composition] Adding ${soundEffectClips.length} sound effects`);
+    tracks.push({ clips: soundEffectClips });
+  }
+
+  // === BACKGROUND MUSIC TRACK ===
+  // Add background music if provided
+  if (config.backgroundMusic?.enabled && config.backgroundMusic?.url) {
+    const musicUrl = config.backgroundMusic.url.trim();
+    if (isValidAudioUrl(musicUrl)) {
+      const musicVolume = config.backgroundMusic.volume || 0.2; // Low volume for background
+      const musicFadeIn = config.backgroundMusic.fadeIn || 1;
+      const musicFadeOut = config.backgroundMusic.fadeOut || 2;
+      
+      // Add background music as a separate audio track
+      tracks.push({
+        clips: [{
+          asset: {
+            type: 'audio',
+            src: musicUrl,
+            volume: musicVolume
+          },
+          start: 0,
+          length: totalDuration, // Play for entire video duration
+          effect: 'fadeIn', // Fade in at start
+          transition: {
+            in: 'fade',
+            out: 'fade'
+          }
+        }]
+      });
+      
+      console.log(`🎵 [Podcast Composition] Adding background music (volume: ${musicVolume})`);
+    } else {
+      console.warn(`[Shotstack] ⚠️ Skipping invalid background music URL: ${musicUrl}`);
     }
   }
 
@@ -2106,12 +2202,24 @@ export const renderProductionToShotstack = async (
       console.log(`📏 [Shotstack] Segment ${index}: Estimated duration from ${wordCount} words: ${sceneDuration}s`);
     }
     
+    // Include sound effects metadata from scene if available
+    const soundEffects = sceneInfo?.soundEffects;
+    
     scenes.push({
       video_url: status.videoUrl,
       title,
       duration: sceneDuration,
       speaker,
-      text // Include text for subtitles
+      text, // Include text for subtitles
+      soundEffects: soundEffects ? {
+        type: soundEffects.type,
+        description: soundEffects.description,
+        startTime: soundEffects.startTime,
+        duration: soundEffects.duration,
+        endTime: soundEffects.endTime,
+        volume: soundEffects.volume,
+        url: undefined // URL will be fetched from Supabase Storage
+      } : undefined
     });
   }
 
@@ -2171,6 +2279,57 @@ export const renderProductionToShotstack = async (
   }
   
   console.log(`🎬 [Shotstack] News headlines for ticker: ${newsHeadlines.length} items`);
+
+  // Generate background music and sound effects if enabled
+  // Import ElevenLabs service for audio generation
+  const { generateProductionAudio } = await import('./elevenlabsService');
+  
+  if (config.backgroundMusic?.enabled || config.soundEffects?.enabled) {
+    try {
+      // Get scene durations for accurate timing
+      const sceneDurations = scenes.map(s => s.duration);
+      
+      // Get channel ID from production if available
+      const channelId = production.channel_id;
+      
+      const audioAssets = await generateProductionAudio(
+        scenes.map(s => ({ soundEffects: s.soundEffects })),
+        config.backgroundMusic?.style || 'podcast',
+        channelId,
+        sceneDurations
+      );
+      
+      // Update scenes with sound effect URLs from Supabase Storage
+      if (audioAssets.soundEffects.length > 0) {
+        let effectIndex = 0;
+        scenes.forEach((scene, index) => {
+          if (scene.soundEffects && scene.soundEffects.type !== 'none') {
+            const effect = audioAssets.soundEffects[effectIndex];
+            if (effect) {
+              scene.soundEffects.url = effect.url;
+              // Preserve original duration and timing from script
+              // The renderer will use these precise values
+              if (!scene.soundEffects.duration) {
+                scene.soundEffects.duration = effect.duration;
+              }
+              if (!scene.soundEffects.volume) {
+                scene.soundEffects.volume = effect.volume;
+              }
+              effectIndex++;
+            }
+          }
+        });
+      }
+      
+      // Set background music URL if found in Supabase Storage
+      if (audioAssets.backgroundMusic && config.backgroundMusic) {
+        config.backgroundMusic.url = audioAssets.backgroundMusic;
+      }
+    } catch (error) {
+      console.warn(`[Shotstack] ⚠️ Could not fetch audio assets from Supabase: ${(error as Error).message}`);
+      // Continue without audio assets
+    }
+  }
 
   // Render with full configuration
   return await renderPodcastVideo(scenes, {

@@ -757,6 +757,149 @@ export const uploadAudioToStorage = async (
   }
 };
 
+/**
+ * Upload background music to Supabase Storage
+ * @param audioFile - File, Blob, or base64 string
+ * @param fileName - Name for the file (e.g., "podcast-bg-music.mp3")
+ * @param channelId - Optional channel ID for organization
+ */
+export const uploadBackgroundMusic = async (
+  audioFile: File | Blob | string,
+  fileName: string,
+  channelId?: string
+): Promise<string | null> => {
+  if (!supabase) return null;
+
+  try {
+    const folder = channelId ? `channels/${channelId}/music` : 'music';
+    const filePath = `${folder}/${fileName}`;
+    
+    // Check if file already exists
+    const exists = await checkFileExists('channel-assets', filePath);
+    if (exists) {
+      const { data: urlData } = supabase.storage
+        .from('channel-assets')
+        .getPublicUrl(filePath);
+      console.log(`✅ Background music already exists, reusing: ${fileName}`);
+      return urlData.publicUrl;
+    }
+
+    // Convert to blob if needed
+    let blob: Blob;
+    if (typeof audioFile === 'string') {
+      // Base64 string
+      const base64Data = audioFile.split(',')[1] || audioFile;
+      const byteCharacters = atob(base64Data);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      blob = new Blob([byteArray], { type: 'audio/mpeg' });
+    } else {
+      blob = audioFile;
+    }
+
+    // Upload to Supabase Storage
+    const { data, error } = await supabase.storage
+      .from('channel-assets')
+      .upload(filePath, blob, {
+        contentType: 'audio/mpeg',
+        upsert: true
+      });
+
+    if (error) {
+      console.error("Error uploading background music:", error);
+      return null;
+    }
+
+    // Get public URL
+    const { data: urlData } = supabase.storage
+      .from('channel-assets')
+      .getPublicUrl(data.path);
+
+    console.log(`✅ Background music uploaded: ${fileName}`);
+    return urlData.publicUrl;
+  } catch (e) {
+    console.error("Error processing background music upload:", e);
+    return null;
+  }
+};
+
+/**
+ * Upload sound effect to Supabase Storage
+ * @param audioFile - File, Blob, or base64 string
+ * @param effectType - Type of effect (e.g., "transition", "emphasis")
+ * @param description - Description of the effect (e.g., "whoosh", "ding")
+ * @param channelId - Optional channel ID for organization
+ */
+export const uploadSoundEffect = async (
+  audioFile: File | Blob | string,
+  effectType: string,
+  description: string,
+  channelId?: string
+): Promise<string | null> => {
+  if (!supabase) return null;
+
+  try {
+    // Create safe filename from type and description
+    const safeDescription = description.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+    const fileName = `${effectType}-${safeDescription}.mp3`;
+    const folder = channelId ? `channels/${channelId}/sound-effects` : 'sound-effects';
+    const filePath = `${folder}/${fileName}`;
+    
+    // Check if file already exists
+    const exists = await checkFileExists('channel-assets', filePath);
+    if (exists) {
+      const { data: urlData } = supabase.storage
+        .from('channel-assets')
+        .getPublicUrl(filePath);
+      console.log(`✅ Sound effect already exists, reusing: ${fileName}`);
+      return urlData.publicUrl;
+    }
+
+    // Convert to blob if needed
+    let blob: Blob;
+    if (typeof audioFile === 'string') {
+      // Base64 string
+      const base64Data = audioFile.split(',')[1] || audioFile;
+      const byteCharacters = atob(base64Data);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      blob = new Blob([byteArray], { type: 'audio/mpeg' });
+    } else {
+      blob = audioFile;
+    }
+
+    // Upload to Supabase Storage
+    const { data, error } = await supabase.storage
+      .from('channel-assets')
+      .upload(filePath, blob, {
+        contentType: 'audio/mpeg',
+        upsert: true
+      });
+
+    if (error) {
+      console.error("Error uploading sound effect:", error);
+      return null;
+    }
+
+    // Get public URL
+    const { data: urlData } = supabase.storage
+      .from('channel-assets')
+      .getPublicUrl(data.path);
+
+    console.log(`✅ Sound effect uploaded: ${fileName}`);
+    return urlData.publicUrl;
+  } catch (e) {
+    console.error("Error processing sound effect upload:", e);
+    return null;
+  }
+};
+
 export const getAudioFromStorage = async (audioUrl: string): Promise<string | null> => {
   if (!supabase) return null;
 

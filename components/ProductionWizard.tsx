@@ -122,7 +122,7 @@ const StepIndicator: React.FC<{
   };
 
   return (
-    <div className="flex items-center gap-1 min-w-max px-2 sm:px-4 py-3 bg-white/[0.02] rounded-xl border border-white/5">
+    <div className="flex items-center gap-1 px-2 sm:px-4 py-3 bg-white/[0.02] rounded-xl border border-white/5 overflow-x-auto scrollbar-hide">
         {steps.filter(s => s !== 'done').map((step, index) => {
           const status = getStepStatus(step);
           const isCurrent = step === currentStep;
@@ -132,16 +132,16 @@ const StepIndicator: React.FC<{
             <React.Fragment key={step}>
               <div 
                 ref={(el) => { stepRefs.current[step] = el; }}
-                className={`flex items-center gap-2 flex-shrink-0 px-3 py-2 rounded-lg transition-all
+                className={`flex items-center gap-2 flex-shrink-0 px-2 sm:px-3 py-2 rounded-lg transition-all min-h-[44px] touch-manipulation
                   ${isCurrent ? 'bg-accent-500/10 ring-1 ring-accent-500/30' : ''}
-                  ${isNavigable && !isCurrent ? 'cursor-pointer hover:bg-white/5' : ''}
+                  ${isNavigable && !isCurrent ? 'cursor-pointer hover:bg-white/5 active:bg-white/10' : ''}
                 `}
                 onClick={() => isNavigable && onStepClick?.(step)}
                 title={isNavigable ? `Go to: ${getStepDisplayName(step)}` : undefined}
               >
                 <div 
                   className={`
-                    w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-xs
+                    w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-sm sm:text-base flex-shrink-0
                     transition-all duration-300
                     ${status === 'completed' ? 'bg-emerald-500 text-white' : ''}
                     ${status === 'in_progress' || isCurrent ? 'bg-accent-500 text-white shadow-lg shadow-accent-500/30' : ''}
@@ -153,7 +153,7 @@ const StepIndicator: React.FC<{
                 </div>
                 <span 
                   className={`
-                    text-xs font-medium hidden sm:block whitespace-nowrap
+                    text-xs sm:text-sm font-medium hidden md:block whitespace-nowrap
                     ${isCurrent ? 'text-accent-400' : status === 'completed' ? 'text-emerald-400' : 'text-white/40'}
                   `}
                 >
@@ -163,7 +163,7 @@ const StepIndicator: React.FC<{
               
               {index < steps.length - 2 && (
                 <div className={`
-                  w-4 sm:w-8 h-px mx-1 flex-shrink-0
+                  w-3 sm:w-6 md:w-8 h-px mx-0.5 sm:mx-1 flex-shrink-0
                   ${status === 'completed' ? 'bg-emerald-500' : 'bg-white/10'}
                 `} />
               )}

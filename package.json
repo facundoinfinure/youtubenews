@@ -2,12 +2,6 @@
   "name": "chimpnews",
   "version": "1.0.0",
   "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
-  },
   "dependencies": {
     "@google/genai": "^1.0.0",
     "@supabase/supabase-js": "^2.39.0",
@@ -24,7 +18,16 @@
     "autoprefixer": "^10.4.14",
     "postcss": "^8.4.27",
     "tailwindcss": "^3.3.3",
+    "tsx": "^4.7.0",
     "typescript": "^5.0.2",
     "vite": "^4.4.5"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "setup-audio": "tsx scripts/setup-audio-assets.ts",
+    "download-audio": "tsx scripts/download-and-upload-audio.ts"
   }
 }

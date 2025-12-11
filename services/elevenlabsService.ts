@@ -375,6 +375,268 @@ export const checkElevenLabsConfig = (): { configured: boolean; message: string 
 };
 
 // =============================================================================================
+// BACKGROUND MUSIC & SOUND EFFECTS
+// =============================================================================================
+
+/**
+ * Sound effect types for scenes
+ */
+export type SoundEffectType = 'transition' | 'emphasis' | 'notification' | 'ambient' | 'none';
+
+/**
+ * Background music styles
+ */
+export type BackgroundMusicStyle = 
+  | 'energetic' 
+  | 'calm' 
+  | 'dramatic' 
+  | 'news' 
+  | 'podcast' 
+  | 'corporate'
+  | 'none';
+
+/**
+ * Generate or get URL for background music from Supabase Storage
+ * 
+ * This function looks for existing music files in Supabase Storage or
+ * expects you to upload music files manually to the storage bucket.
+ * 
+ * Storage path: channel-assets/music/{style}-{channelId}.mp3 or channel-assets/music/{style}.mp3
+ * 
+ * @param style - Music style
+ * @param duration - Duration in seconds (optional, for looping)
+ * @param channelId - Optional channel ID for channel-specific music
+ */
+export const getBackgroundMusicUrl = async (
+  style: BackgroundMusicStyle = 'podcast',
+  duration?: number,
+  channelId?: string
+): Promise<string | null> => {
+  if (style === 'none') return null;
+  
+  // Import Supabase service dynamically to avoid circular dependencies
+  const { supabase } = await import('./supabaseService');
+  
+  if (!supabase) {
+    console.warn(`[ElevenLabs] ⚠️ Supabase not initialized, cannot fetch background music`);
+    return null;
+  }
+  
+  try {
+    // Try channel-specific music first
+    const fileName = channelId 
+      ? `channels/${channelId}/music/${style}.mp3`
+      : `music/${style}.mp3`;
+    
+    // Check if file exists
+    const { data: urlData } = supabase.storage
+      .from('channel-assets')
+      .getPublicUrl(fileName);
+    
+    // Verify file exists by trying to fetch it
+    const response = await fetch(urlData.publicUrl, { method: 'HEAD' });
+    if (response.ok) {
+      console.log(`[ElevenLabs] ✅ Found background music: ${style} (${urlData.publicUrl})`);
+      return urlData.publicUrl;
+    }
+    
+    // Fallback: try generic music file
+    if (channelId) {
+      const genericFileName = `music/${style}.mp3`;
+      const { data: genericUrlData } = supabase.storage
+        .from('channel-assets')
+        .getPublicUrl(genericFileName);
+      
+      const genericResponse = await fetch(genericUrlData.publicUrl, { method: 'HEAD' });
+      if (genericResponse.ok) {
+        console.log(`[ElevenLabs] ✅ Found generic background music: ${style}`);
+        return genericUrlData.publicUrl;
+      }
+    }
+    
+    console.warn(`[ElevenLabs] ⚠️ Background music not found in storage: ${fileName}`);
+    console.warn(`[ElevenLabs] 💡 Upload music files to: channel-assets/${fileName}`);
+    return null;
+  } catch (error) {
+    console.warn(`[ElevenLabs] ⚠️ Error fetching background music:`, (error as Error).message);
+    return null;
+  }
+};
+
+/**
+ * Generate or get URL for sound effect from Supabase Storage
+ * 
+ * This function looks for existing sound effect files in Supabase Storage.
+ * Files should be uploaded to: channel-assets/sound-effects/{type}-{description}.mp3
+ * 
+ * @param type - Sound effect type
+ * @param description - Description of the effect (e.g., "whoosh", "ding")
+ * @param channelId - Optional channel ID for channel-specific effects
+ */
+export const getSoundEffectUrl = async (
+  type: SoundEffectType,
+  description?: string,
+  channelId?: string
+): Promise<string | null> => {
+  if (type === 'none') return null;
+  
+  // Import Supabase service dynamically to avoid circular dependencies
+  const { supabase } = await import('./supabaseService');
+  
+  if (!supabase) {
+    console.warn(`[ElevenLabs] ⚠️ Supabase not initialized, cannot fetch sound effect`);
+    return null;
+  }
+  
+  try {
+    // Create safe filename from type and description
+    const safeDescription = (description || type).replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+    const fileName = channelId
+      ? `channels/${channelId}/sound-effects/${type}-${safeDescription}.mp3`
+      : `sound-effects/${type}-${safeDescription}.mp3`;
+    
+    // Check if file exists
+    const { data: urlData } = supabase.storage
+      .from('channel-assets')
+      .getPublicUrl(fileName);
+    
+    // Verify file exists by trying to fetch it
+    const response = await fetch(urlData.publicUrl, { method: 'HEAD' });
+    if (response.ok) {
+      console.log(`[ElevenLabs] ✅ Found sound effect: ${type}-${safeDescription} (${urlData.publicUrl})`);
+      return urlData.publicUrl;
+    }
+    
+    // Fallback: try generic sound effect (without description)
+    const genericFileName = channelId
+      ? `channels/${channelId}/sound-effects/${type}.mp3`
+      : `sound-effects/${type}.mp3`;
+    
+    const { data: genericUrlData } = supabase.storage
+      .from('channel-assets')
+      .getPublicUrl(genericFileName);
+    
+    const genericResponse = await fetch(genericUrlData.publicUrl, { method: 'HEAD' });
+    if (genericResponse.ok) {
+      console.log(`[ElevenLabs] ✅ Found generic sound effect: ${type}`);
+      return genericUrlData.publicUrl;
+    }
+    
+    console.warn(`[ElevenLabs] ⚠️ Sound effect not found in storage: ${fileName}`);
+    console.warn(`[ElevenLabs] 💡 Upload sound effect files to: channel-assets/${fileName}`);
+    return null;
+  } catch (error) {
+    console.warn(`[ElevenLabs] ⚠️ Error fetching sound effect:`, (error as Error).message);
+    return null;
+  }
+};
+
+/**
+ * Generate background music and sound effects for a production
+ * 
+ * This function processes scenes and fetches appropriate audio assets from Supabase Storage
+ * 
+ * @param scenes - Array of scenes with sound effect metadata
+ * @param musicStyle - Style of background music
+ * @param channelId - Optional channel ID for channel-specific audio
+ * @param sceneDurations - Optional array of actual scene durations (if not provided, estimates)
+ */
+export const generateProductionAudio = async (
+  scenes: Array<{
+    soundEffects?: {
+      type?: SoundEffectType;
+      description?: string;
+      startTime?: 'start' | 'end' | 'middle' | number;
+      duration?: number;
+      endTime?: number;
+      volume?: number;
+    };
+  }>,
+  musicStyle: BackgroundMusicStyle = 'podcast',
+  channelId?: string,
+  sceneDurations?: number[]
+): Promise<{
+  backgroundMusic: string | null;
+  soundEffects: Array<{
+    url: string;
+    start: number;
+    duration: number;
+    volume: number;
+    type: SoundEffectType;
+  }>;
+}> => {
+  // Calculate total duration from scene durations or estimate
+  const totalDuration = sceneDurations 
+    ? sceneDurations.reduce((acc, d) => acc + d, 0)
+    : scenes.length * 10; // Estimate 10s per scene
+  
+  // Fetch background music from Supabase Storage
+  const backgroundMusic = await getBackgroundMusicUrl(musicStyle, totalDuration, channelId);
+  
+  // Fetch sound effects for each scene
+  const soundEffects: Array<{
+    url: string;
+    start: number;
+    duration: number;
+    volume: number;
+    type: SoundEffectType;
+  }> = [];
+  
+  let currentTime = 0;
+  for (let i = 0; i < scenes.length; i++) {
+    const scene = scenes[i];
+    const sceneDuration = sceneDurations?.[i] || 10; // Use actual duration or estimate
+    
+    if (scene.soundEffects?.type && scene.soundEffects.type !== 'none') {
+      const effectUrl = await getSoundEffectUrl(
+        scene.soundEffects.type,
+        scene.soundEffects.description,
+        channelId
+      );
+      
+      if (effectUrl) {
+        // Calculate precise start time
+        let effectStart = currentTime;
+        const startTime = scene.soundEffects.startTime;
+        
+        if (typeof startTime === 'number') {
+          effectStart = currentTime + startTime;
+        } else if (startTime === 'end') {
+          effectStart = currentTime + sceneDuration - (scene.soundEffects.duration || 1.5);
+        } else if (startTime === 'middle') {
+          effectStart = currentTime + (sceneDuration / 2) - ((scene.soundEffects.duration || 1.5) / 2);
+        }
+        // 'start' or undefined means 0 (beginning of scene)
+        
+        // Use explicit duration or calculate from endTime
+        let effectDuration = scene.soundEffects.duration || 1.5;
+        if (scene.soundEffects.endTime !== undefined) {
+          const calculatedEnd = typeof startTime === 'number'
+            ? currentTime + scene.soundEffects.endTime
+            : effectStart + effectDuration;
+          effectDuration = calculatedEnd - effectStart;
+        }
+        
+        soundEffects.push({
+          url: effectUrl,
+          start: effectStart,
+          duration: effectDuration,
+          volume: scene.soundEffects.volume || 0.4,
+          type: scene.soundEffects.type
+        });
+      }
+    }
+    
+    currentTime += sceneDuration;
+  }
+  
+  return {
+    backgroundMusic,
+    soundEffects
+  };
+};
+
+// =============================================================================================
 // EXPORTS
 // =============================================================================================
 
@@ -385,6 +647,9 @@ export const ElevenLabsService = {
   getVoiceId: getElevenLabsVoiceId,
   estimateDuration: estimateAudioDuration,
   checkConfig: checkElevenLabsConfig,
+  getBackgroundMusicUrl,
+  getSoundEffectUrl,
+  generateProductionAudio,
   VOICES: ELEVENLABS_VOICES,
   MODELS: ELEVENLABS_MODELS,
   PRESETS: VOICE_PRESETS,
