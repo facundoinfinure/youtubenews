@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { ChannelConfig, CharacterProfile, StoredVideo, Channel, UserProfile, Production, RenderConfig, DEFAULT_RENDER_CONFIG, DEFAULT_ETHICAL_GUARDRAILS, ShotstackTransitionType, ShotstackEffectType, ShotstackFilterType } from '../types';
-import { fetchVideosFromDB, saveConfigToDB, getAllChannels, saveChannel, getChannelById, uploadImageToStorage, getIncompleteProductions, getAllProductions, getPublishedProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction, updateSegmentStatus, saveProduction, saveVideoToDB, connectYouTube, deleteNewsForChannel } from '../services/supabaseService';
+import { fetchVideosFromDB, saveConfigToDB, getAllChannels, saveChannel, getChannelById, uploadImageToStorage, uploadChannelLogo, getIncompleteProductions, getAllProductions, getPublishedProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction, updateSegmentStatus, saveProduction, saveVideoToDB, connectYouTube, deleteNewsForChannel } from '../services/supabaseService';
 import { uploadVideoToYouTube } from '../services/youtubeService';
 import { generateSeedImage } from '../services/geminiService';
 import { CostTracker } from '../services/CostTracker';
@@ -2920,12 +2920,49 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
 
             {(() => {
               const renderConfig: RenderConfig = tempConfig.renderConfig || DEFAULT_RENDER_CONFIG;
+              const [isUploadingLogo, setIsUploadingLogo] = React.useState(false);
               
               const updateRenderConfig = (updates: Partial<RenderConfig>) => {
                 setTempConfig({
                   ...tempConfig,
                   renderConfig: { ...renderConfig, ...updates }
                 });
+              };
+              
+              // Handle logo file upload
+              const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                
+                // Validate file type
+                if (!file.type.startsWith('image/')) {
+                  toast.error('Please select an image file');
+                  return;
+                }
+                
+                // Validate file size (max 5MB)
+                if (file.size > 5 * 1024 * 1024) {
+                  toast.error('Image must be less than 5MB');
+                  return;
+                }
+                
+                setIsUploadingLogo(true);
+                try {
+                  const logoUrl = await uploadChannelLogo(file, activeChannel?.id || 'default');
+                  if (logoUrl) {
+                    updateRenderConfig({
+                      watermark: { ...renderConfig.watermark!, url: logoUrl }
+                    });
+                    toast.success('Logo uploaded successfully!');
+                  } else {
+                    toast.error('Failed to upload logo');
+                  }
+                } catch (error) {
+                  console.error('Error uploading logo:', error);
+                  toast.error('Error uploading logo');
+                } finally {
+                  setIsUploadingLogo(false);
+                }
               };
 
               return (
@@ -3137,17 +3174,68 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
 
                       {renderConfig.watermark?.enabled && (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pl-8">
-                          <div className="space-y-2">
-                            <label className="text-sm text-gray-400 block">Logo URL</label>
-                            <input
-                              type="text"
-                              value={renderConfig.watermark?.url || ''}
-                              onChange={(e) => updateRenderConfig({
-                                watermark: { ...renderConfig.watermark!, url: e.target.value }
-                              })}
-                              placeholder="https://example.com/logo.png"
-                              className="w-full bg-[#111] border border-[#333] rounded-lg px-3 py-2 text-white text-sm"
-                            />
+                          <div className="space-y-2 md:col-span-2">
+                            <label className="text-sm text-gray-400 block">Logo / Watermark</label>
+                            <div className="flex flex-col sm:flex-row gap-3">
+                              {/* File Upload Button */}
+                              <label className={`
+                                flex items-center justify-center gap-2 px-4 py-2 rounded-lg cursor-pointer
+                                transition-all border border-dashed
+                                ${isUploadingLogo 
+                                  ? 'bg-cyan-500/10 border-cyan-500/50 text-cyan-400' 
+                                  : 'bg-[#111] border-[#444] hover:border-cyan-500 text-gray-300 hover:text-white'}
+                              `}>
+                                {isUploadingLogo ? (
+                                  <>
+                                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                    </svg>
+                                    <span className="text-sm">Uploading...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <span>📤</span>
+                                    <span className="text-sm font-medium">Upload Logo</span>
+                                  </>
+                                )}
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  onChange={handleLogoUpload}
+                                  disabled={isUploadingLogo}
+                                  className="hidden"
+                                />
+                              </label>
+                              
+                              {/* URL Input */}
+                              <input
+                                type="text"
+                                value={renderConfig.watermark?.url || ''}
+                                onChange={(e) => updateRenderConfig({
+                                  watermark: { ...renderConfig.watermark!, url: e.target.value }
+                                })}
+                                placeholder="https://example.com/logo.png"
+                                className="flex-1 bg-[#111] border border-[#333] rounded-lg px-3 py-2 text-white text-sm"
+                              />
+                            </div>
+                            
+                            {/* Logo Preview */}
+                            {renderConfig.watermark?.url && (
+                              <div className="flex items-center gap-3 p-3 bg-[#111] rounded-lg border border-[#333]">
+                                <img 
+                                  src={renderConfig.watermark.url} 
+                                  alt="Logo preview" 
+                                  className="h-12 w-auto object-contain bg-white/5 rounded p-1"
+                                  onError={(e) => {
+                                    (e.target as HTMLImageElement).style.display = 'none';
+                                  }}
+                                />
+                                <span className="text-xs text-gray-400 truncate flex-1">
+                                  {renderConfig.watermark.url}
+                                </span>
+                              </div>
+                            )}
                           </div>
 
                           <div className="space-y-2">

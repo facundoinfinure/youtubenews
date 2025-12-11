@@ -617,6 +617,50 @@ export const uploadImageToStorage = async (imageDataUrl: string, fileName: strin
   }
 };
 
+/**
+ * Upload channel logo to Supabase Storage
+ * Used for watermarks and channel branding
+ */
+export const uploadChannelLogo = async (
+  file: File,
+  channelId: string
+): Promise<string | null> => {
+  if (!supabase) return null;
+
+  try {
+    // Generate a unique filename based on channel ID
+    const fileExt = file.name.split('.').pop() || 'png';
+    const fileName = `channel-logos/${channelId}/logo.${fileExt}`;
+    
+    // Upload to Supabase Storage (upsert to replace if exists)
+    const { data, error } = await supabase.storage
+      .from('channel-assets')
+      .upload(fileName, file, {
+        contentType: file.type,
+        upsert: true
+      });
+
+    if (error) {
+      console.error("❌ Error uploading channel logo:", error);
+      if (error.message?.includes('Bucket not found')) {
+        console.error("   Storage bucket 'channel-assets' not found. Please create it in Supabase Dashboard.");
+      }
+      return null;
+    }
+
+    // Get public URL
+    const { data: urlData } = supabase.storage
+      .from('channel-assets')
+      .getPublicUrl(fileName);
+
+    console.log(`✅ Channel logo uploaded: ${urlData.publicUrl}`);
+    return urlData.publicUrl;
+  } catch (e) {
+    console.error("Error uploading channel logo:", e);
+    return null;
+  }
+};
+
 export const uploadAudioToStorage = async (
   audioBase64: string,
   productionId: string,
