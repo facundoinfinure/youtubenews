@@ -1087,7 +1087,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                                   : 'hover:bg-[#222]'
                               }`}
                             >
-                              <h4 className="font-bold text-sm line-clamp-2 mb-2">{prod.metadata?.title || prod.title}</h4>
+                              <h4 className="font-bold text-sm line-clamp-2 mb-2">{prod.viral_metadata?.title || `Production ${prod.news_date}`}</h4>
                               <div className="flex justify-between text-xs text-gray-500 mb-2">
                                 <span>{prod.published_at ? new Date(prod.published_at).toLocaleDateString() : 'N/A'}</span>
                                 <span className="text-cyan-400 font-medium">{(prod.analytics?.view_count || 0).toLocaleString()} views</span>

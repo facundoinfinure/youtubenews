@@ -660,7 +660,9 @@ export interface Production {
 
 export type AnalyticsPeriod = 'today' | 'yesterday' | '7days' | '14days' | '28days' | '90days';
 
-export interface VideoAnalytics {
+// Note: VideoAnalytics (simple) is defined above for StoredVideo
+// This is the full YouTube Analytics record for the analytics tab
+export interface YouTubeVideoAnalytics {
   id: string;
   production_id: string;
   channel_id: string;

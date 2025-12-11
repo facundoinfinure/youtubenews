@@ -411,7 +411,6 @@ ${languageInstruction}
 
 SPEAKER: ${speaker}
 SPEAKER PERSONALITY: ${character.personality}
-SPEAKER IDEOLOGY: ${character.ideology || 'Neutral'}
 TONE: ${config.tone || 'Conversational'}
 
 The scene should:
@@ -616,9 +615,7 @@ Return ONLY valid JSON: {"title": "...", "title_variants": ["...", "..."], "desc
   }
 
   console.error("[Metadata] ❌ All models failed, using defaults");
-  // Fallback respects language
-  const isSpanish = (config.language || '').toLowerCase().includes('spanish') || 
-                    (config.language || '').toLowerCase().includes('español');
+  // Fallback respects language (reuse isSpanish from outer scope)
   const fallbackTitle = isSpanish ? "Últimas Noticias" : "Breaking News";
   return { 
     title: fallbackTitle, 
