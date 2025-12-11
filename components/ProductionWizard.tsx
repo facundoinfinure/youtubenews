@@ -18,8 +18,9 @@ import {
   ScriptWithScenes,
   ScriptHistoryItem
 } from '../types';
-import { saveProduction, updateSegmentStatus } from '../services/supabaseService';
+import { saveProduction, updateSegmentStatus, deleteAudioFromStorage } from '../services/supabaseService';
 import { uploadVideoToYouTube } from '../services/youtubeService';
+import { SceneList } from './SceneCard';
 import { renderProductionToShotstack } from '../services/shotstackService';
 import { parseLocalDate } from '../utils/dateUtils';
 import { analyzeScriptForShorts, regenerateScene, ScriptAnalysis } from '../services/geminiService';
@@ -1291,6 +1292,9 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
   
   // Regenerate a single audio
   const handleRegenerateAudio = async (index: number) => {
+    // Delete old audio from storage first (cleanup)
+    await deleteAudioFromStorage(production.id, index);
+    
     // Mark as pending first
     const pendingStatus = {
       ...(production.segment_status || {}),
@@ -1302,6 +1306,146 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
     
     // Now generate just this one
     await handleGenerateAudios(index);
+  };
+
+  // Update scene text (editable scenes in script_review)
+  const handleUpdateSceneText = async (sceneIndex: string, newText: string) => {
+    if (!localProduction.scenes?.scenes?.[sceneIndex]) return;
+    
+    // Create updated scenes with proper typing
+    const updatedScenes: ScriptWithScenes = {
+      title: localProduction.scenes.title,
+      narrative_used: localProduction.scenes.narrative_used,
+      scenes: {
+        ...localProduction.scenes.scenes,
+        [sceneIndex]: {
+          ...localProduction.scenes.scenes[sceneIndex],
+          text: newText
+        }
+      }
+    };
+    
+    // Also update segments array to keep them in sync
+    const updatedSegments = [...(localProduction.segments || [])];
+    const segmentIdx = parseInt(sceneIndex);
+    if (updatedSegments[segmentIdx]) {
+      updatedSegments[segmentIdx] = {
+        ...updatedSegments[segmentIdx],
+        text: newText
+      };
+    }
+    
+    // Update production
+    const updated: Production = {
+      ...localProduction,
+      scenes: updatedScenes,
+      segments: updatedSegments
+    };
+    
+    setLocalProduction(updated);
+    await saveProduction(updated);
+    onUpdateProduction(updated);
+    
+    // If audio was already generated for this segment, mark it as needing regeneration
+    const status = localProduction.segment_status?.[segmentIdx];
+    if (status?.audio === 'done') {
+      await updateSegmentStatus(production.id, segmentIdx, { 
+        audio: 'pending', // Mark as pending to indicate it needs regeneration
+        audioUrl: undefined // Clear old URL
+      });
+      toast.success('Texto guardado. El audio necesita regenerarse.');
+    } else {
+      toast.success('Texto guardado');
+    }
+  };
+
+  // Regenerate a single scene using AI
+  const handleRegenerateScene = async (sceneIndex: string) => {
+    const currentScene = localProduction.scenes?.scenes?.[sceneIndex];
+    if (!currentScene) return;
+    
+    setIsLoading(true);
+    try {
+      toast.loading(`🔄 Regenerando escena ${parseInt(sceneIndex) + 1}...`, { id: 'regen-scene' });
+      
+      // Get context from surrounding scenes
+      const allScenes = localProduction.scenes?.scenes || {};
+      const sceneKeys = Object.keys(allScenes).sort((a, b) => parseInt(a) - parseInt(b));
+      const currentIdx = sceneKeys.indexOf(sceneIndex);
+      const prevScene = currentIdx > 0 ? allScenes[sceneKeys[currentIdx - 1]] : null;
+      const nextScene = currentIdx < sceneKeys.length - 1 ? allScenes[sceneKeys[currentIdx + 1]] : null;
+      
+      // Call AI to regenerate
+      const newScene = await regenerateScene(
+        currentScene,
+        prevScene?.text || null,
+        nextScene?.text || null,
+        config.characters.hostA.name,
+        config.characters.hostB.name,
+        config.language
+      );
+      
+      if (!newScene) {
+        throw new Error('No se pudo regenerar la escena');
+      }
+      
+      // Ensure we have the full scenes structure
+      if (!localProduction.scenes) {
+        throw new Error('No hay escenas en la producción');
+      }
+      
+      // Create updated scenes with proper typing
+      const updatedScenes: ScriptWithScenes = {
+        title: localProduction.scenes.title,
+        narrative_used: localProduction.scenes.narrative_used,
+        scenes: {
+          ...localProduction.scenes.scenes,
+          [sceneIndex]: {
+            ...currentScene,
+            text: newScene.text,
+            title: newScene.title || currentScene.title
+          }
+        }
+      };
+      
+      // Also update segments array
+      const updatedSegments = [...(localProduction.segments || [])];
+      const segmentIdx = parseInt(sceneIndex);
+      if (updatedSegments[segmentIdx]) {
+        updatedSegments[segmentIdx] = {
+          ...updatedSegments[segmentIdx],
+          text: newScene.text,
+          sceneTitle: newScene.title || currentScene.title
+        };
+      }
+      
+      // Update production
+      const updated: Production = {
+        ...localProduction,
+        scenes: updatedScenes,
+        segments: updatedSegments
+      };
+      
+      setLocalProduction(updated);
+      await saveProduction(updated);
+      onUpdateProduction(updated);
+      
+      // Mark audio as needing regeneration if it was already done
+      const status = localProduction.segment_status?.[segmentIdx];
+      if (status?.audio === 'done') {
+        await updateSegmentStatus(production.id, segmentIdx, { 
+          audio: 'pending', // Mark as pending to indicate needs regeneration
+          audioUrl: undefined // Clear old URL
+        });
+      }
+      
+      toast.success(`✅ Escena ${parseInt(sceneIndex) + 1} regenerada`, { id: 'regen-scene' });
+    } catch (error) {
+      console.error('Error regenerating scene:', error);
+      toast.error(`Error: ${(error as Error).message}`, { id: 'regen-scene' });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   // Step 6: Generate all videos IN PARALLEL (only pending ones)
@@ -2232,23 +2376,17 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
               </div>
             )}
             
-            <div className="space-y-3 max-h-[250px] overflow-y-auto pr-2">
-              {Object.entries(scenes).map(([key, scene]) => (
-                <div key={key} className="bg-[#1a1a1a] p-4 rounded-lg border border-[#333]">
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="text-xs bg-cyan-500/20 text-cyan-400 px-2 py-1 rounded">
-                      Escena {key}
-                    </span>
-                    <span className="text-xs bg-purple-500/20 text-purple-400 px-2 py-1 rounded">
-                      {scene.video_mode === 'hostA' ? config.characters.hostA.name : config.characters.hostB.name}
-                    </span>
-                    {scene.title && (
-                      <span className="text-xs text-gray-400">"{scene.title}"</span>
-                    )}
-                  </div>
-                  <p className="text-gray-300 text-sm">{scene.text}</p>
-                </div>
-              ))}
+            {/* Scene List with Edit/Regenerate capabilities */}
+            <div className="max-h-[350px] overflow-y-auto pr-2">
+              <SceneList
+                scenes={scenes}
+                hostAName={config.characters.hostA.name}
+                hostBName={config.characters.hostB.name}
+                segmentStatus={localProduction.segment_status}
+                onUpdateSceneText={handleUpdateSceneText}
+                onRegenerateScene={handleRegenerateScene}
+                disabled={isLoading}
+              />
             </div>
             
             <div className="flex justify-between">

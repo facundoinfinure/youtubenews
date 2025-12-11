@@ -865,6 +865,8 @@ const normalizeProduction = (data: any): Production => ({
   // v2.4 Wizard state for step-by-step flow
   wizard_state: data.wizard_state ?? undefined,
   fetched_news: data.fetched_news ?? undefined,
+  // v2.5 Script history for comparison and rollback
+  script_history: data.script_history ?? undefined,
 });
 
 export const saveProduction = async (
@@ -923,6 +925,8 @@ export const saveProduction = async (
     // v2.4 Wizard state for step-by-step flow
     if (production.wizard_state !== undefined) updateData.wizard_state = production.wizard_state;
     if (production.fetched_news !== undefined) updateData.fetched_news = production.fetched_news;
+    // v2.5 Script history for comparison and rollback
+    if (production.script_history !== undefined) updateData.script_history = production.script_history;
 
     console.log(`💾 [Production] Updating ${production.id} with fields:`, Object.keys(updateData).join(', '));
 
@@ -987,7 +991,9 @@ export const saveProduction = async (
       published_at: production.published_at || null,
       // v2.4 Wizard state for step-by-step flow
       wizard_state: production.wizard_state || null,
-      fetched_news: production.fetched_news || null
+      fetched_news: production.fetched_news || null,
+      // v2.5 Script history for comparison and rollback
+      script_history: production.script_history || null
     };
 
     console.log(`💾 [Production] Creating new production for channel ${production.channel_id}`);
@@ -1252,8 +1258,8 @@ export const updateSegmentStatus = async (
   productionId: string,
   segmentIndex: number,
   updates: {
-    audio?: 'pending' | 'generating' | 'done' | 'failed';
-    video?: 'pending' | 'generating' | 'done' | 'failed';
+    audio?: 'pending' | 'generating' | 'done' | 'failed' | 'stale'; // 'stale' = text changed, needs regeneration
+    video?: 'pending' | 'generating' | 'done' | 'failed' | 'stale';
     audioUrl?: string;
     videoUrl?: string;
     // For "both" scenes - separate audio URLs for each host
@@ -1370,20 +1376,105 @@ export const getSegmentsNeedingRegeneration = async (
   }
 };
 
+/**
+ * Delete a single audio file from Storage
+ * Useful when regenerating audio (deletes old before generating new)
+ */
+export const deleteAudioFromStorage = async (
+  productionId: string,
+  segmentIndex: number
+): Promise<boolean> => {
+  if (!supabase) return false;
+
+  try {
+    const fileName = `productions/${productionId}/audio/segment-${segmentIndex}.mp3`;
+    const { error } = await supabase.storage
+      .from('channel-assets')
+      .remove([fileName]);
+    
+    if (error) {
+      console.warn(`⚠️ Could not delete old audio: ${error.message}`);
+      return false;
+    }
+    
+    console.log(`🗑️ Deleted old audio: segment-${segmentIndex}`);
+    return true;
+  } catch (e) {
+    console.warn("Error deleting audio from storage:", e);
+    return false;
+  }
+};
+
+/**
+ * Delete all assets for a production from Storage
+ * Called before deleting the production from DB
+ */
+export const deleteProductionAssets = async (productionId: string): Promise<boolean> => {
+  if (!supabase) return false;
+
+  try {
+    // List and delete all audio files
+    const { data: audioFiles, error: listError } = await supabase.storage
+      .from('channel-assets')
+      .list(`productions/${productionId}/audio`);
+    
+    if (audioFiles && audioFiles.length > 0) {
+      const audioFilePaths = audioFiles.map(f => `productions/${productionId}/audio/${f.name}`);
+      const { error: deleteError } = await supabase.storage
+        .from('channel-assets')
+        .remove(audioFilePaths);
+      
+      if (deleteError) {
+        console.warn(`⚠️ Error deleting audio files: ${deleteError.message}`);
+      } else {
+        console.log(`🗑️ Deleted ${audioFilePaths.length} audio files for production ${productionId}`);
+      }
+    }
+
+    // Try to delete the production folder (might fail if other files exist, that's OK)
+    try {
+      await supabase.storage
+        .from('channel-assets')
+        .remove([`productions/${productionId}`]);
+    } catch {
+      // Folder deletion is optional
+    }
+
+    return true;
+  } catch (e) {
+    console.error("Error deleting production assets:", e);
+    return false;
+  }
+};
+
+/**
+ * Delete a production and all its associated assets
+ * Cleans up Storage files before deleting DB record
+ */
 export const deleteProduction = async (id: string): Promise<boolean> => {
   if (!supabase) return false;
 
-  const { error } = await supabase
-    .from('productions')
-    .delete()
-    .eq('id', id);
+  try {
+    // 1. Delete all assets from Storage first
+    await deleteProductionAssets(id);
 
-  if (error) {
-    console.error("Error deleting production:", error);
+    // 2. Delete the production record from DB
+    const { error } = await supabase
+      .from('productions')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      console.error("Error deleting production from DB:", error);
+      return false;
+    }
+
+    console.log(`✅ Production ${id} and all assets deleted successfully`);
+    return true;
+  } catch (e) {
+    console.error("Error in deleteProduction:", e);
     return false;
   }
-
-  return true;
 };
 
 // =============================================================================================

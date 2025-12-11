@@ -24,8 +24,9 @@ const getProxyUrl = (): string => {
 
 /**
  * Make a request to OpenAI via proxy with retry logic
+ * Exported for use in geminiService.ts regenerateScene
  */
-const openaiRequest = async (
+export const openaiRequest = async (
   endpoint: string,
   body: any,
   options: { retries?: number; timeout?: number } = {}

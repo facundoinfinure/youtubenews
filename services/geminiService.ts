@@ -44,7 +44,7 @@ import {
   checkOpenAIConfig,
   createTitleVariantFallback,
   analyzeScriptForShorts,
-  regenerateScene
+  openaiRequest // For local regenerateScene implementation
 } from "./openaiService";
 import type { ScriptAnalysis } from "./openaiService";
 import { 
@@ -1883,6 +1883,82 @@ export const getCompositionStatus = () => {
   };
 };
 
-// Re-export script analysis and scene regeneration for YouTube Shorts
-export { analyzeScriptForShorts, regenerateScene };
+// Re-export script analysis for YouTube Shorts
+export { analyzeScriptForShorts };
 export type { ScriptAnalysis };
+
+// Simplified scene regeneration function for ProductionWizard
+// This is a wrapper around the more complex regenerateScene from openaiService
+export const regenerateScene = async (
+  currentScene: { title?: string; text: string; video_mode: string; shot?: string; model?: string },
+  prevSceneText: string | null,
+  nextSceneText: string | null,
+  hostAName: string,
+  hostBName: string,
+  language: string
+): Promise<{ title: string; text: string } | null> => {
+  const speaker = currentScene.video_mode === 'hostA' ? hostAName : hostBName;
+  
+  // Language handling
+  const isSpanish = (language || '').toLowerCase().includes('spanish') || 
+                    (language || '').toLowerCase().includes('español');
+  
+  const languageInstruction = isSpanish
+    ? `IMPORTANTE: Genera el contenido COMPLETAMENTE en ESPAÑOL.`
+    : `Generate content in English.`;
+  
+  const systemPrompt = `You are a scriptwriter for a news podcast. You need to regenerate a single scene.
+
+${languageInstruction}
+
+SPEAKER: ${speaker}
+STYLE: Conversational podcast banter
+
+The scene should:
+- Be 40-80 words
+- Match the speaker's personality
+- Flow naturally from the previous scene and into the next
+- Keep the podcast banter style
+
+Return ONLY valid JSON:
+{
+  "title": "Short catchy scene title (3-6 words)",
+  "text": "The regenerated dialogue (40-80 words)"
+}`;
+
+  const userPrompt = `PREVIOUS SCENE:
+${prevSceneText || '(This is the first scene)'}
+
+CURRENT SCENE TO REGENERATE:
+Title: ${currentScene.title || 'Scene'}
+Original text: ${currentScene.text}
+
+NEXT SCENE:
+${nextSceneText || '(This is the last scene)'}
+
+Please regenerate this scene with fresh dialogue that improves on the original.`;
+
+  try {
+    const response = await openaiRequest('chat/completions', {
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
+      response_format: { type: 'json_object' },
+      temperature: 0.8
+    }, { timeout: 20000 });
+
+    CostTracker.track('scene_regenerate', 'gpt-4o-mini', 0.002);
+
+    const result = JSON.parse(response.choices[0].message.content);
+    
+    return {
+      title: result.title || currentScene.title || 'Scene',
+      text: result.text || currentScene.text
+    };
+  } catch (error) {
+    console.error(`[Scene Regen] Failed to regenerate scene:`, error);
+    return null;
+  }
+};
