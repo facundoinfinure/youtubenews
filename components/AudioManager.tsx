@@ -219,21 +219,6 @@ export const AudioManager: React.FC<AudioManagerProps> = ({ channelId, onRefresh
 
         effectsResult2 = await effects2Response.json();
         console.log(`[AudioManager] Sound effects batch 2 result:`, effectsResult2);
-        
-        // Combine both results
-        effectsResult = {
-          success: effectsResult1.success && effectsResult2.success,
-          results: {
-            soundEffects: { ...effectsResult1.results.soundEffects, ...effectsResult2.results.soundEffects },
-            errors: [...(effectsResult1.results.errors || []), ...(effectsResult2.results.errors || [])]
-          },
-          summary: {
-            soundEffectsUploaded: (effectsResult1.summary?.soundEffectsUploaded || 0) + (effectsResult2.summary?.soundEffectsUploaded || 0),
-            fromCache: (effectsResult1.summary?.fromCache || 0) + (effectsResult2.summary?.fromCache || 0),
-            generated: (effectsResult1.summary?.generated || 0) + (effectsResult2.summary?.generated || 0),
-            errors: (effectsResult1.summary?.errors || 0) + (effectsResult2.summary?.errors || 0)
-          }
-        };
       } catch (error: any) {
         console.error('Error generating sound effects:', error);
         toast.dismiss('audio-generation');
@@ -241,12 +226,33 @@ export const AudioManager: React.FC<AudioManagerProps> = ({ channelId, onRefresh
         throw error;
       }
       
+      // Combine both sound effects results
+      const effectsResult = {
+        success: effectsResult1?.success && effectsResult2?.success,
+        results: {
+          soundEffects: { 
+            ...(effectsResult1?.results?.soundEffects || {}), 
+            ...(effectsResult2?.results?.soundEffects || {}) 
+          },
+          errors: [
+            ...(effectsResult1?.results?.errors || []), 
+            ...(effectsResult2?.results?.errors || [])
+          ]
+        },
+        summary: {
+          soundEffectsUploaded: (effectsResult1?.summary?.soundEffectsUploaded || 0) + (effectsResult2?.summary?.soundEffectsUploaded || 0),
+          fromCache: (effectsResult1?.summary?.fromCache || 0) + (effectsResult2?.summary?.fromCache || 0),
+          generated: (effectsResult1?.summary?.generated || 0) + (effectsResult2?.summary?.generated || 0),
+          errors: (effectsResult1?.summary?.errors || 0) + (effectsResult2?.summary?.errors || 0)
+        }
+      };
+      
       toast.dismiss('audio-generation');
       
       // Combine results
-      const totalGenerated = (musicResult?.summary?.generated || 0) + (effectsResult?.summary?.generated || 0);
-      const totalFromCache = (musicResult?.summary?.fromCache || 0) + (effectsResult?.summary?.fromCache || 0);
-      const totalErrors = (musicResult?.errors?.length || 0) + (effectsResult?.errors?.length || 0);
+      const totalGenerated = (musicResult?.summary?.generated || 0) + (effectsResult.summary?.generated || 0);
+      const totalFromCache = (musicResult?.summary?.fromCache || 0) + (effectsResult.summary?.fromCache || 0);
+      const totalErrors = (musicResult?.results?.errors?.length || 0) + (effectsResult.results?.errors?.length || 0);
       
       if (totalGenerated > 0 || totalFromCache > 0) {
         toast.success(`${totalGenerated + totalFromCache} archivos procesados (${totalGenerated} nuevos, ${totalFromCache} desde cache)`);
@@ -255,7 +261,7 @@ export const AudioManager: React.FC<AudioManagerProps> = ({ channelId, onRefresh
       }
       
       if (totalErrors > 0) {
-        const allErrors = [...(musicResult?.results?.errors || []), ...(effectsResult?.results?.errors || [])];
+        const allErrors = [...(musicResult?.results?.errors || []), ...(effectsResult.results?.errors || [])];
         console.warn('[AudioManager] Errors during generation:', allErrors);
         
         // Check for specific error types
