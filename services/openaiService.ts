@@ -210,21 +210,21 @@ For EACH scene provide:
 - shot: default "medium", "closeup" for Hook/Conflict, "wide" for Payoff
 - soundEffects (OPTIONAL): Suggest appropriate sound effects for this scene with PRECISE timing:
   * type: "transition" (for scene changes), "emphasis" (for key points), "notification" (for breaking news), "ambient" (for background atmosphere), or "none"
-  * description: Brief description of the desired sound. **CRITICAL**: Only use sound effects that are AVAILABLE in storage:
+  * description: **CRITICAL - USE EXACT NAMES ONLY**: You MUST use the EXACT description name as listed below. Copy it exactly, character by character:
 ${availableSoundEffects.length > 0 
-  ? availableSoundEffects.reduce((acc: Array<{ type: string; descriptions: string[] }>, effect: { type: SoundEffectType; description: string }) => {
-      const existing = acc.find((e: { type: string; descriptions: string[] }) => e.type === effect.type);
+  ? availableSoundEffects.reduce((acc: Array<{ type: string; exactNames: Array<{ description: string; exactName: string }> }>, effect: { type: SoundEffectType; description: string; exactName: string }) => {
+      const existing = acc.find((e: { type: string; exactNames: Array<{ description: string; exactName: string }> }) => e.type === effect.type);
       if (existing) {
-        existing.descriptions.push(effect.description);
+        existing.exactNames.push({ description: effect.description, exactName: effect.exactName });
       } else {
-        acc.push({ type: effect.type, descriptions: [effect.description] });
+        acc.push({ type: effect.type, exactNames: [{ description: effect.description, exactName: effect.exactName }] });
       }
       return acc;
-    }, [] as Array<{ type: string; descriptions: string[] }>).map((effect: { type: string; descriptions: string[] }) => 
-      `    - For "${effect.type}" type: ${effect.descriptions.map((d: string) => `"${d}"`).join(', ')}`
-    ).join('\n')
+    }, [] as Array<{ type: string; exactNames: Array<{ description: string; exactName: string }> }>).map((effect: { type: string; exactNames: Array<{ description: string; exactName: string }> }) => 
+      `    - For "${effect.type}" type, use EXACTLY one of these descriptions: ${effect.exactNames.map((e: { description: string; exactName: string }) => `"${e.description}"`).join(', ')}`
+    ).join('\n') + `\n  * Available exact names in storage: ${availableSoundEffects.map((e: { exactName: string }) => e.exactName).join(', ')}`
   : '    - No sound effects available. Use "none" for all scenes.'}
-  * **IMPORTANT**: If a sound effect is not listed above, use "none" instead. Do not invent sound effect descriptions.
+  * **CRITICAL RULE**: The "description" field MUST match EXACTLY one of the descriptions listed above. Do NOT modify, abbreviate, or change the description in any way. Copy it exactly as shown.
   * startTime: EXACT timing - "start" (0s into scene), "end" (at scene end), "middle" (middle of scene), or a NUMBER (seconds into scene, e.g., 2.5)
   * duration: EXACT duration in seconds (e.g., 0.5, 1.0, 1.5, 2.0) - keep short (0.3-2.0s for most effects)
   * endTime: OPTIONAL explicit end time in seconds (if not provided, calculated as startTime + duration)

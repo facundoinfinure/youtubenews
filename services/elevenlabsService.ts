@@ -465,11 +465,11 @@ export const getBackgroundMusicUrl = async (
 
 /**
  * List available sound effects from Supabase Storage
- * Returns array of available sound effect descriptions
+ * Returns array with exact filenames (without extension) to use in prompts
  */
 export const listAvailableSoundEffects = async (
   channelId?: string
-): Promise<Array<{ type: SoundEffectType; description: string }>> => {
+): Promise<Array<{ type: SoundEffectType; description: string; exactName: string }>> => {
   const { supabase } = await import('./supabaseService');
   
   if (!supabase) {
@@ -491,24 +491,30 @@ export const listAvailableSoundEffects = async (
       return [];
     }
     
-    const soundEffects: Array<{ type: SoundEffectType; description: string }> = [];
+    const soundEffects: Array<{ type: SoundEffectType; description: string; exactName: string }> = [];
     
     if (files && files.length > 0) {
+      console.log(`[ElevenLabs] 📋 Found ${files.length} files in storage:`, files.map(f => f.name).join(', '));
+      
       for (const file of files) {
+        // Remove .mp3 extension to get exact name
+        const exactName = file.name.replace(/\.mp3$/i, '');
+        
         // Parse filename: {type}-{description}.mp3
-        const name = file.name.replace(/\.mp3$/i, '');
-        const parts = name.split('-');
+        const parts = exactName.split('-');
         if (parts.length >= 2) {
           const type = parts[0] as SoundEffectType;
-          const description = parts.slice(1).join('-');
+          const description = parts.slice(1).join('-'); // Keep original format with hyphens
+          
           if (['transition', 'emphasis', 'notification', 'ambient'].includes(type)) {
-            soundEffects.push({ type, description });
+            soundEffects.push({ type, description, exactName });
+            console.log(`[ElevenLabs] ✓ Added: type="${type}", description="${description}", exactName="${exactName}"`);
           }
         }
       }
     }
     
-    console.log(`[ElevenLabs] 📋 Found ${soundEffects.length} available sound effects`);
+    console.log(`[ElevenLabs] 📋 Total available sound effects: ${soundEffects.length}`);
     return soundEffects;
   } catch (error) {
     console.warn(`[ElevenLabs] ⚠️ Error listing sound effects:`, (error as Error).message);
@@ -542,22 +548,53 @@ export const getSoundEffectUrl = async (
   }
   
   try {
-    // Create safe filename from type and description
-    const safeDescription = (description || type).replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
-    const fileName = channelId
-      ? `channels/${channelId}/sound-effects/${type}-${safeDescription}.mp3`
-      : `sound-effects/${type}-${safeDescription}.mp3`;
+    // First, try to list files and find exact match
+    const folderPath = channelId
+      ? `channels/${channelId}/sound-effects`
+      : `sound-effects`;
     
-    // Check if file exists
-    const { data: urlData } = supabase.storage
+    const { data: files, error: listError } = await supabase.storage
       .from('channel-assets')
-      .getPublicUrl(fileName);
+      .list(folderPath);
     
-    // Verify file exists by trying to fetch it
-    const response = await fetch(urlData.publicUrl, { method: 'HEAD' });
-    if (response.ok) {
-      console.log(`[ElevenLabs] ✅ Found sound effect: ${type}-${safeDescription} (${urlData.publicUrl})`);
-      return urlData.publicUrl;
+    if (!listError && files && files.length > 0) {
+      // Try to find exact match first using description as provided
+      const exactDescription = description || type;
+      const expectedFileName = `${type}-${exactDescription}.mp3`;
+      const exactMatch = files.find(f => f.name.toLowerCase() === expectedFileName.toLowerCase());
+      
+      if (exactMatch) {
+        const { data: urlData } = supabase.storage
+          .from('channel-assets')
+          .getPublicUrl(`${folderPath}/${exactMatch.name}`);
+        
+        const response = await fetch(urlData.publicUrl, { method: 'HEAD' });
+        if (response.ok) {
+          console.log(`[ElevenLabs] ✅ Found exact match: ${exactMatch.name} (${urlData.publicUrl})`);
+          return urlData.publicUrl;
+        }
+      }
+      
+      // Try partial match: look for files that start with type- and contain description
+      const descriptionLower = exactDescription.toLowerCase();
+      const partialMatch = files.find(f => {
+        const nameLower = f.name.toLowerCase();
+        return nameLower.startsWith(`${type}-`) && 
+               nameLower.includes(descriptionLower) &&
+               nameLower.endsWith('.mp3');
+      });
+      
+      if (partialMatch) {
+        const { data: urlData } = supabase.storage
+          .from('channel-assets')
+          .getPublicUrl(`${folderPath}/${partialMatch.name}`);
+        
+        const response = await fetch(urlData.publicUrl, { method: 'HEAD' });
+        if (response.ok) {
+          console.log(`[ElevenLabs] ✅ Found partial match: ${partialMatch.name} (${urlData.publicUrl})`);
+          return urlData.publicUrl;
+        }
+      }
     }
     
     // Fallback: try generic sound effect (without description)
@@ -575,8 +612,8 @@ export const getSoundEffectUrl = async (
       return genericUrlData.publicUrl;
     }
     
-    console.warn(`[ElevenLabs] ⚠️ Sound effect not found in storage: ${fileName}`);
-    console.warn(`[ElevenLabs] 💡 Upload sound effect files to: channel-assets/${fileName}`);
+    console.warn(`[ElevenLabs] ⚠️ Sound effect not found in storage: ${type}-${description || type}`);
+    console.warn(`[ElevenLabs] 💡 Available files in ${folderPath}:`, files?.map(f => f.name).join(', ') || 'none');
     return null;
   } catch (error) {
     console.warn(`[ElevenLabs] ⚠️ Error fetching sound effect:`, (error as Error).message);
@@ -767,16 +804,14 @@ export const generateProductionAudio = async (
     const sceneDuration = sceneDurations?.[i] || 10; // Use actual duration or estimate
     
     if (scene.soundEffects?.type && scene.soundEffects.type !== 'none') {
-      // If this effect was missing and we just generated files, retry fetching
-      const safeDescription = (scene.soundEffects.description || scene.soundEffects.type)
-        .replace(/[^a-zA-Z0-9]/g, '-')
-        .toLowerCase();
-      const effectKey = `${scene.soundEffects.type}-${safeDescription}`;
+      // Use description exactly as provided (should match storage filename)
+      const effectDescription = scene.soundEffects.description || scene.soundEffects.type;
+      const effectKey = `${scene.soundEffects.type}-${effectDescription}`;
       const wasMissing = missingEffects.includes(effectKey);
       
       let effectUrl = await getSoundEffectUrl(
         scene.soundEffects.type,
-        scene.soundEffects.description,
+        effectDescription, // Use exact description
         channelId
       );
       

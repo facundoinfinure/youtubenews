@@ -2304,16 +2304,18 @@ export const renderProductionToShotstack = async (
       if (audioAssets.soundEffects.length > 0) {
         scenes.forEach((scene, sceneIndex) => {
           if (scene.soundEffects && scene.soundEffects.type && scene.soundEffects.type !== 'none') {
-            // Find matching sound effect by type and description
-            const safeDescription = (scene.soundEffects.description || scene.soundEffects.type)
-              .replace(/[^a-zA-Z0-9]/g, '-')
-              .toLowerCase();
+            // Use description exactly as provided (should match storage filename)
+            const effectDescription = scene.soundEffects.description || scene.soundEffects.type;
             
-            // Try to find exact match first
-            let matchedEffect = audioAssets.soundEffects.find(effect => 
-              effect.type === scene.soundEffects!.type &&
-              effect.url.includes(safeDescription)
-            );
+            // Try to find exact match by type and description
+            // We need to match the URL which contains the filename
+            let matchedEffect = audioAssets.soundEffects.find(effect => {
+              if (effect.type !== scene.soundEffects!.type) return false;
+              // Check if URL contains the description (exact match in filename)
+              const urlLower = effect.url.toLowerCase();
+              const descriptionLower = effectDescription.toLowerCase();
+              return urlLower.includes(descriptionLower);
+            });
             
             // If no exact match, find by type and start time (assuming order matches)
             if (!matchedEffect) {
