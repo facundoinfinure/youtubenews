@@ -165,7 +165,13 @@ async function generateMusicWithElevenLabs(
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`ElevenLabs Music API error: ${response.status} - ${errorText}`);
+      let errorMessage = `ElevenLabs Music API error: ${response.status} - ${errorText}`;
+      
+      if (response.status === 403) {
+        errorMessage += ' (Forbidden - Verifica que tu API key tenga permisos para Music API y que tu plan incluya acceso)';
+      }
+      
+      throw new Error(errorMessage);
     }
 
     // ElevenLabs Music API retorna audio como stream
@@ -212,7 +218,13 @@ async function generateSoundEffectWithElevenLabs(
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`ElevenLabs Sound Effects API error: ${response.status} - ${errorText}`);
+      let errorMessage = `ElevenLabs Sound Effects API error: ${response.status} - ${errorText}`;
+      
+      if (response.status === 403) {
+        errorMessage += ' (Forbidden - Verifica que tu API key tenga permisos para Sound Effects API y que tu plan incluya acceso)';
+      }
+      
+      throw new Error(errorMessage);
     }
 
     // ElevenLabs Sound Effects API retorna audio como stream
@@ -272,6 +284,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     // Verificar ElevenLabs API Key (solo necesario si vamos a generar)
     const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
+    
+    console.log('[Upload Audio] Starting process...');
+    console.log('[Upload Audio] ELEVENLABS_API_KEY configured:', !!ELEVENLABS_API_KEY);
 
     // Obtener variables de entorno de Supabase
     const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
@@ -332,7 +347,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
           }
         } catch (error: any) {
-          results.errors.push({ file: `${style}.mp3`, error: error.message });
+          const errorMsg = error.message || String(error);
+          console.error(`[Error] Failed to process ${style}.mp3:`, errorMsg);
+          results.errors.push({ file: `${style}.mp3`, error: errorMsg });
         }
       }
     }
@@ -373,7 +390,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
           }
         } catch (error: any) {
-          results.errors.push({ file: `${name}.mp3`, error: error.message });
+          const errorMsg = error.message || String(error);
+          console.error(`[Error] Failed to process ${name}.mp3:`, errorMsg);
+          results.errors.push({ file: `${name}.mp3`, error: errorMsg });
         }
       }
     }
@@ -395,10 +414,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
   } catch (error: any) {
-    console.error('Error en upload-audio:', error);
+    console.error('[Upload Audio] ❌ Fatal error:', error);
     return res.status(500).json({
       error: 'Internal server error',
-      message: error.message
+      message: error.message || String(error),
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 }
