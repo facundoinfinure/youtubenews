@@ -533,6 +533,7 @@ export const getSoundEffectUrl = async (
 
 /**
  * Generate missing audio files via upload-audio API endpoint
+ * Works in both client and server environments
  */
 async function generateMissingAudioFiles(
   missingMusic: string[],
@@ -543,7 +544,26 @@ async function generateMissingAudioFiles(
   }
 
   try {
-    const vercelUrl = import.meta.env.VITE_BACKEND_URL || window.location.origin;
+    // Get base URL - works in both client and server
+    let vercelUrl: string;
+    if (typeof window !== 'undefined') {
+      // Client-side
+      vercelUrl = import.meta.env.VITE_BACKEND_URL || window.location.origin;
+    } else {
+      // Server-side (Vercel serverless function)
+      // Try to get from environment or construct from request
+      vercelUrl = process.env.VITE_BACKEND_URL || 
+                  process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` :
+                  'https://' + (process.env.VERCEL ? `${process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_PROJECT_PRODUCTION_URL}` : 'localhost:3000');
+      
+      // Fallback: if we can't determine URL, log warning and skip
+      if (!vercelUrl || vercelUrl.includes('localhost') || vercelUrl === 'https://undefined') {
+        console.warn(`[Audio] Cannot determine backend URL in server context. Skipping audio generation.`);
+        console.warn(`[Audio] Set VITE_BACKEND_URL or VERCEL_URL environment variable.`);
+        return;
+      }
+    }
+    
     const body: any = {
       music: missingMusic.length > 0,
       soundEffects: missingEffects.length > 0,
@@ -553,6 +573,7 @@ async function generateMissingAudioFiles(
     // but for now, we'll generate all missing files of each type
     
     console.log(`[Audio] Generating missing audio files: ${missingMusic.length} music, ${missingEffects.length} effects`);
+    console.log(`[Audio] Calling: ${vercelUrl}/api/upload-audio`);
     
     const response = await fetch(`${vercelUrl}/api/upload-audio`, {
       method: 'POST',
@@ -635,12 +656,17 @@ export const generateProductionAudio = async (
 
   if (!backgroundMusic) {
     missingMusic.push(musicStyle);
+    console.log(`[Audio] Missing background music: ${musicStyle}`);
+  } else {
+    console.log(`[Audio] ✅ Background music found: ${musicStyle}`);
   }
 
   // Check each needed sound effect
+  console.log(`[Audio] Checking ${neededEffects.size} unique sound effects...`);
   for (const effectKey of neededEffects) {
     const [type, ...descParts] = effectKey.split('-');
     const description = descParts.join('-');
+    console.log(`[Audio] Checking effect: ${effectKey} (type: ${type}, description: ${description})`);
     const effectUrl = await getSoundEffectUrl(
       type as SoundEffectType,
       description,
@@ -648,6 +674,9 @@ export const generateProductionAudio = async (
     );
     if (!effectUrl) {
       missingEffects.push(effectKey);
+      console.log(`[Audio] Missing effect: ${effectKey}`);
+    } else {
+      console.log(`[Audio] ✅ Effect found: ${effectKey}`);
     }
   }
 
@@ -657,11 +686,16 @@ export const generateProductionAudio = async (
     await generateMissingAudioFiles(missingMusic, missingEffects);
     
     // Wait a bit for files to be uploaded (Supabase might need a moment)
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    await new Promise(resolve => setTimeout(resolve, 3000));
     
     // Retry fetching background music
     if (missingMusic.length > 0) {
       backgroundMusic = await getBackgroundMusicUrl(musicStyle, totalDuration, channelId);
+      if (backgroundMusic) {
+        console.log(`[Audio] ✅ Background music found after generation: ${musicStyle}`);
+      } else {
+        console.warn(`[Audio] ⚠️ Background music still not found after generation: ${musicStyle}`);
+      }
     }
   }
   
@@ -680,11 +714,29 @@ export const generateProductionAudio = async (
     const sceneDuration = sceneDurations?.[i] || 10; // Use actual duration or estimate
     
     if (scene.soundEffects?.type && scene.soundEffects.type !== 'none') {
-      const effectUrl = await getSoundEffectUrl(
+      // If this effect was missing and we just generated files, retry fetching
+      const safeDescription = (scene.soundEffects.description || scene.soundEffects.type)
+        .replace(/[^a-zA-Z0-9]/g, '-')
+        .toLowerCase();
+      const effectKey = `${scene.soundEffects.type}-${safeDescription}`;
+      const wasMissing = missingEffects.includes(effectKey);
+      
+      let effectUrl = await getSoundEffectUrl(
         scene.soundEffects.type,
         scene.soundEffects.description,
         channelId
       );
+      
+      // If it was missing and still not found, try one more time after a short delay
+      if (!effectUrl && wasMissing) {
+        console.log(`[Audio] Retrying fetch for effect: ${effectKey}`);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        effectUrl = await getSoundEffectUrl(
+          scene.soundEffects.type,
+          scene.soundEffects.description,
+          channelId
+        );
+      }
       
       if (effectUrl) {
         // Calculate precise start time
