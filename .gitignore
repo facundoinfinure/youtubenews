@@ -49,3 +49,7 @@ backend/weights/
 # Temporary files
 *.tmp
 *.temp
+temp-audio/
+scripts/audio-assets/*.mp3
+scripts/audio-assets/*.wav
+scripts/audio-assets/*.m4a
