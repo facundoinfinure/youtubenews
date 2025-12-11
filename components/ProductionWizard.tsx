@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { 
   Production, 
@@ -54,7 +54,47 @@ const StepIndicator: React.FC<{
   wizardState: ProductionWizardState;
   onStepClick?: (step: ProductionStep) => void;
   canNavigate?: (step: ProductionStep) => boolean;
-}> = ({ steps, currentStep, wizardState, onStepClick, canNavigate }) => {
+  scrollContainerRef?: React.RefObject<HTMLDivElement>;
+}> = ({ steps, currentStep, wizardState, onStepClick, canNavigate, scrollContainerRef }) => {
+  const stepRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  
+  // Auto-scroll to current step when it changes
+  useEffect(() => {
+    if (!scrollContainerRef?.current) return;
+    
+    const currentStepEl = stepRefs.current[currentStep];
+    const container = scrollContainerRef.current;
+    
+    if (currentStepEl && container) {
+      // Use requestAnimationFrame + setTimeout to ensure DOM has fully updated
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          try {
+            // Get the step's position relative to its parent
+            const stepParent = currentStepEl.parentElement;
+            if (!stepParent) return;
+            
+            // Calculate scroll position to center the step
+            const containerWidth = container.clientWidth;
+            const stepOffsetLeft = currentStepEl.offsetLeft;
+            const stepWidth = currentStepEl.offsetWidth;
+            const parentOffsetLeft = stepParent.offsetLeft || 0;
+            
+            // Calculate scroll to center the step
+            const scrollLeft = stepOffsetLeft + parentOffsetLeft - (containerWidth / 2) + (stepWidth / 2);
+            
+            container.scrollTo({
+              left: Math.max(0, scrollLeft),
+              behavior: 'smooth'
+            });
+          } catch (error) {
+            console.warn('Error scrolling to step:', error);
+          }
+        }, 150); // Delay to ensure DOM is fully updated
+      });
+    }
+  }, [currentStep, scrollContainerRef]);
+  
   const getStepStatus = (step: ProductionStep): SubStepStatus => {
     const stepKey = step.replace('_', '') as keyof ProductionWizardState;
     const stepState = wizardState[stepKey as keyof Omit<ProductionWizardState, 'currentStep'>];
@@ -82,8 +122,7 @@ const StepIndicator: React.FC<{
   };
 
   return (
-    <div className="overflow-x-auto scrollbar-hide pb-2" style={{ WebkitOverflowScrolling: 'touch' }}>
-      <div className="flex items-center gap-1 min-w-max px-2 sm:px-4 py-3 bg-white/[0.02] rounded-xl border border-white/5">
+    <div className="flex items-center gap-1 min-w-max px-2 sm:px-4 py-3 bg-white/[0.02] rounded-xl border border-white/5">
         {steps.filter(s => s !== 'done').map((step, index) => {
           const status = getStepStatus(step);
           const isCurrent = step === currentStep;
@@ -92,8 +131,9 @@ const StepIndicator: React.FC<{
           return (
             <React.Fragment key={step}>
               <div 
+                ref={(el) => { stepRefs.current[step] = el; }}
                 className={`flex items-center gap-2 flex-shrink-0 px-3 py-2 rounded-lg transition-all
-                  ${isCurrent ? 'bg-accent-500/10' : ''}
+                  ${isCurrent ? 'bg-accent-500/10 ring-1 ring-accent-500/30' : ''}
                   ${isNavigable && !isCurrent ? 'cursor-pointer hover:bg-white/5' : ''}
                 `}
                 onClick={() => isNavigable && onStepClick?.(step)}
@@ -113,7 +153,7 @@ const StepIndicator: React.FC<{
                 </div>
                 <span 
                   className={`
-                    text-xs font-medium hidden sm:block
+                    text-xs font-medium hidden sm:block whitespace-nowrap
                     ${isCurrent ? 'text-accent-400' : status === 'completed' ? 'text-emerald-400' : 'text-white/40'}
                   `}
                 >
@@ -642,6 +682,9 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
   // Ref to always have the latest production (avoids stale closures)
   const productionRef = React.useRef(localProduction);
   productionRef.current = localProduction;
+  
+  // Ref for step indicator scroll container
+  const stepIndicatorScrollRef = React.useRef<HTMLDivElement>(null);
   
   // Sync localProduction when prop changes from parent
   useEffect(() => {
@@ -2872,13 +2915,18 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
         </div>
         
         {/* Step Indicator - with clickable navigation and horizontal scroll */}
-        <div className="p-2 sm:p-4 border-b border-[#333] bg-[#111] overflow-x-auto">
+        <div 
+          ref={stepIndicatorScrollRef}
+          className="p-2 sm:p-4 border-b border-[#333] bg-[#111] overflow-x-auto scrollbar-hide" 
+          style={{ WebkitOverflowScrolling: 'touch' }}
+        >
           <StepIndicator 
             steps={allSteps} 
             currentStep={wizardState.currentStep}
             wizardState={wizardState}
             onStepClick={handleStepClick}
             canNavigate={canNavigateToStep}
+            scrollContainerRef={stepIndicatorScrollRef}
           />
         </div>
         

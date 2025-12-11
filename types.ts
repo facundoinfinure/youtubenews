@@ -282,11 +282,12 @@ export const DEFAULT_RENDER_CONFIG: RenderConfig = {
   },
   // Sound effects for dynamic transitions
   soundEffects: {
-    enabled: true,
-    // Free whoosh sound effect (public domain)
-    transitionSound: 'https://cdn.pixabay.com/audio/2022/03/15/audio_942bb0a98b.mp3', // Whoosh transition
+    enabled: false, // Disabled by default - enable only if you have publicly accessible audio URLs
+    // Note: URLs must be publicly accessible (no authentication required) for Shotstack to download them
+    // Example: Use Supabase Storage public URLs or other CDN URLs that don't require authentication
+    transitionSound: '', // Whoosh transition - set a publicly accessible URL here
     transitionVolume: 0.4,
-    sceneChangeSound: 'https://cdn.pixabay.com/audio/2022/03/10/audio_f8c49b0c13.mp3', // Short notification
+    sceneChangeSound: '', // Short notification - set a publicly accessible URL here
     sceneChangeVolume: 0.3
   },
   // News-style overlays defaults

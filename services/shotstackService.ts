@@ -1492,36 +1492,38 @@ export const buildPodcastStyleEdit = (
   if (config.soundEffects?.enabled && scenesWithTiming.length > 1) {
     const soundEffectClips: any[] = [];
     
-    // Add transition sounds at scene changes
-    scenesWithTiming.forEach((scene, index) => {
-      if (index > 0) {
-        // Add whoosh/transition sound at each scene change
-        if (config.soundEffects?.transitionSound) {
-          soundEffectClips.push({
-            asset: {
-              type: 'audio',
-              src: config.soundEffects.transitionSound,
-              volume: config.soundEffects.transitionVolume || 0.4
-            },
-            start: Math.max(0, scene.start - 0.3), // Start slightly before transition
-            length: 1.5 // Short sound effect
-          });
+    // Add transition sounds at scene changes (only if enabled and URLs are provided)
+    if (config.soundEffects?.enabled) {
+      scenesWithTiming.forEach((scene, index) => {
+        if (index > 0) {
+          // Add whoosh/transition sound at each scene change
+          if (config.soundEffects?.transitionSound && config.soundEffects.transitionSound.trim()) {
+            soundEffectClips.push({
+              asset: {
+                type: 'audio',
+                src: config.soundEffects.transitionSound,
+                volume: config.soundEffects.transitionVolume || 0.4
+              },
+              start: Math.max(0, scene.start - 0.3), // Start slightly before transition
+              length: 1.5 // Short sound effect
+            });
+          }
+          
+          // Add scene change notification sound (optional)
+          if (config.soundEffects?.sceneChangeSound && config.soundEffects.sceneChangeSound.trim() && index % 3 === 0) {
+            soundEffectClips.push({
+              asset: {
+                type: 'audio',
+                src: config.soundEffects.sceneChangeSound,
+                volume: config.soundEffects.sceneChangeVolume || 0.3
+              },
+              start: scene.start + 0.5,
+              length: 1
+            });
+          }
         }
-        
-        // Add scene change notification sound (optional)
-        if (config.soundEffects?.sceneChangeSound && index % 3 === 0) {
-          soundEffectClips.push({
-            asset: {
-              type: 'audio',
-              src: config.soundEffects.sceneChangeSound,
-              volume: config.soundEffects.sceneChangeVolume || 0.3
-            },
-            start: scene.start + 0.5,
-            length: 1
-          });
-        }
-      }
-    });
+      });
+    }
     
     if (soundEffectClips.length > 0) {
       console.log(`🔊 [Podcast Composition] Adding ${soundEffectClips.length} sound effects`);
