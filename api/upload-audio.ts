@@ -1,8 +1,8 @@
 /**
  * Vercel Serverless Function para generar y subir archivos de audio a Supabase Storage usando ElevenLabs
  * 
- * Este endpoint genera música de fondo y efectos de sonido usando ElevenLabs API
- * y los sube a Supabase Storage.
+ * Este endpoint VERIFICA PRIMERO si los archivos ya existen en Supabase Storage.
+ * Si existen, los usa directamente. Si no, los genera con ElevenLabs API y los sube.
  * 
  * Uso: POST /api/upload-audio
  * 
@@ -90,6 +90,49 @@ const SOUND_EFFECTS_CONFIG = {
     loop: true,
   },
 };
+
+/**
+ * Verificar si un archivo existe en Supabase Storage y obtener su URL pública
+ */
+async function checkFileExistsInSupabase(
+  supabase: any,
+  storagePath: string
+): Promise<string | null> {
+  try {
+    const pathParts = storagePath.split('/');
+    const fileName = pathParts[pathParts.length - 1];
+    const folderPath = pathParts.slice(0, -1).join('/');
+    
+    // Listar archivos en la carpeta
+    const { data: files, error: listError } = await supabase.storage
+      .from('channel-assets')
+      .list(folderPath);
+    
+    if (listError) {
+      // Si la carpeta no existe, el archivo tampoco existe
+      if (listError.message.includes('not found') || listError.message.includes('Bucket not found')) {
+        return null;
+      }
+      throw listError;
+    }
+    
+    // Verificar si el archivo existe
+    if (files && files.some(f => f.name === fileName)) {
+      // Obtener URL pública
+      const { data: urlData } = supabase.storage
+        .from('channel-assets')
+        .getPublicUrl(storagePath);
+      
+      console.log(`[Supabase] ✅ File exists: ${fileName}`);
+      return urlData.publicUrl;
+    }
+    
+    return null;
+  } catch (error: any) {
+    console.error(`[Supabase] ❌ Error checking file existence:`, error.message);
+    return null;
+  }
+}
 
 /**
  * Generar música usando ElevenLabs Music API
@@ -185,7 +228,7 @@ async function generateSoundEffectWithElevenLabs(
 }
 
 /**
- * Subir buffer de audio a Supabase Storage
+ * Subir buffer de audio a Supabase Storage (sin verificar existencia)
  */
 async function uploadAudioToSupabase(
   supabase: any,
@@ -194,22 +237,6 @@ async function uploadAudioToSupabase(
   fileName: string
 ): Promise<string | null> {
   try {
-    // Verificar si ya existe
-    const pathParts = storagePath.split('/');
-    const folderPath = pathParts.slice(0, -1).join('/');
-    
-    const { data: existingFiles } = await supabase.storage
-      .from('channel-assets')
-      .list(folderPath);
-    
-    if (existingFiles?.some(f => f.name === fileName)) {
-      const { data: urlData } = supabase.storage
-        .from('channel-assets')
-        .getPublicUrl(storagePath);
-      console.log(`[Supabase] ✅ File already exists: ${fileName}`);
-      return urlData.publicUrl;
-    }
-
     // Subir a Supabase
     const { data, error } = await supabase.storage
       .from('channel-assets')
@@ -243,14 +270,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    // Verificar ElevenLabs API Key
+    // Verificar ElevenLabs API Key (solo necesario si vamos a generar)
     const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
-    if (!ELEVENLABS_API_KEY) {
-      return res.status(500).json({ 
-        error: 'ELEVENLABS_API_KEY not configured in Vercel environment variables',
-        message: 'Please configure ELEVENLABS_API_KEY in Vercel Dashboard > Settings > Environment Variables'
-      });
-    }
 
     // Obtener variables de entorno de Supabase
     const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
@@ -268,7 +289,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const results: Record<string, any> = {
       music: {},
       soundEffects: {},
-      errors: []
+      errors: [],
+      stats: {
+        fromCache: 0,
+        generated: 0,
+      }
     };
 
     // Procesar música de fondo
@@ -278,14 +303,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const fileName = `${style}.mp3`;
           const storagePath = `music/${fileName}`;
           
-          // Generar música con ElevenLabs
+          // 1. PRIMERO: Verificar si ya existe en Supabase
+          const existingUrl = await checkFileExistsInSupabase(supabase, storagePath);
+          if (existingUrl) {
+            results.music[style] = existingUrl;
+            results.stats.fromCache++;
+            continue; // Saltar generación
+          }
+          
+          // 2. Si no existe, verificar que tenemos API key y generar con ElevenLabs
+          if (!ELEVENLABS_API_KEY) {
+            results.errors.push({ 
+              file: `${style}.mp3`, 
+              error: 'File not found and ELEVENLABS_API_KEY not configured to generate it' 
+            });
+            continue;
+          }
+          
+          console.log(`[Process] File not found, generating ${fileName} with ElevenLabs...`);
           const audioBuffer = await generateMusicWithElevenLabs(style, config);
           
           if (audioBuffer) {
-            // Subir a Supabase
+            // 3. Subir a Supabase
             const publicUrl = await uploadAudioToSupabase(supabase, audioBuffer, storagePath, fileName);
             if (publicUrl) {
               results.music[style] = publicUrl;
+              results.stats.generated++;
             }
           }
         } catch (error: any) {
@@ -301,14 +344,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const fileName = `${name}.mp3`;
           const storagePath = `sound-effects/${fileName}`;
           
-          // Generar efecto de sonido con ElevenLabs
+          // 1. PRIMERO: Verificar si ya existe en Supabase
+          const existingUrl = await checkFileExistsInSupabase(supabase, storagePath);
+          if (existingUrl) {
+            results.soundEffects[name] = existingUrl;
+            results.stats.fromCache++;
+            continue; // Saltar generación
+          }
+          
+          // 2. Si no existe, verificar que tenemos API key y generar con ElevenLabs
+          if (!ELEVENLABS_API_KEY) {
+            results.errors.push({ 
+              file: `${name}.mp3`, 
+              error: 'File not found and ELEVENLABS_API_KEY not configured to generate it' 
+            });
+            continue;
+          }
+          
+          console.log(`[Process] File not found, generating ${fileName} with ElevenLabs...`);
           const audioBuffer = await generateSoundEffectWithElevenLabs(name, config);
           
           if (audioBuffer) {
-            // Subir a Supabase
+            // 3. Subir a Supabase
             const publicUrl = await uploadAudioToSupabase(supabase, audioBuffer, storagePath, fileName);
             if (publicUrl) {
               results.soundEffects[name] = publicUrl;
+              results.stats.generated++;
             }
           }
         } catch (error: any) {
@@ -322,11 +383,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     return res.status(200).json({
       success: true,
-      message: `Proceso completado: ${successCount} exitosos, ${failCount} fallidos`,
+      message: `Proceso completado: ${successCount} exitosos (${results.stats.fromCache} desde cache, ${results.stats.generated} generados), ${failCount} fallidos`,
       results,
       summary: {
         musicUploaded: Object.keys(results.music).length,
         soundEffectsUploaded: Object.keys(results.soundEffects).length,
+        fromCache: results.stats.fromCache,
+        generated: results.stats.generated,
         errors: failCount
       }
     });
