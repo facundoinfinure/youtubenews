@@ -25,6 +25,7 @@ import { renderProductionToShotstack } from '../services/shotstackService';
 import { parseLocalDate } from '../utils/dateUtils';
 import { analyzeScriptForShorts, regenerateScene, ScriptAnalysis } from '../services/geminiService';
 import { getTranslationsForChannel, Translations } from '../utils/i18n';
+import { AudioManager } from './AudioManager';
 
 // =============================================================================================
 // TYPES
@@ -2663,12 +2664,25 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
       case 'render_final':
         return (
           <div className="space-y-6">
-            <div className="text-center py-8">
-              <span className="text-6xl mb-4 block">🎞️</span>
-              <h3 className="text-2xl font-bold text-white mb-2">Renderizar Video Final</h3>
-              <p className="text-gray-400 max-w-md mx-auto">
+            <div className="text-center py-4 sm:py-8">
+              <span className="text-4xl sm:text-6xl mb-2 sm:mb-4 block">🎞️</span>
+              <h3 className="text-xl sm:text-2xl font-bold text-white mb-2">Renderizar Video Final</h3>
+              <p className="text-gray-400 max-w-md mx-auto text-sm sm:text-base">
                 Todos los segmentos están listos. Ahora combinaremos todo en un video final.
               </p>
+            </div>
+            
+            {/* Audio Manager Section */}
+            <div className="bg-[#1a1a1a] border border-[#333] rounded-lg p-4 sm:p-6">
+              <h4 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                🎵 Gestión de Audio
+              </h4>
+              <AudioManager 
+                channelId={channel.id} 
+                onRefresh={() => {
+                  // Refresh could trigger a re-render if needed
+                }}
+              />
             </div>
             
             {production.final_video_url ? (

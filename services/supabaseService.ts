@@ -3239,3 +3239,117 @@ export const getProductionsWithAnalytics = async (
     return [];
   }
 };
+
+/**
+ * List all background music files from Supabase Storage
+ */
+export const listBackgroundMusicFiles = async (
+  channelId?: string
+): Promise<Array<{ name: string; url: string; path: string }>> => {
+  if (!supabase) return [];
+
+  try {
+    const folder = channelId ? `channels/${channelId}/music` : 'music';
+    const { data: files, error } = await supabase.storage
+      .from('channel-assets')
+      .list(folder);
+
+    if (error) {
+      console.error('Error listing background music:', error);
+      return [];
+    }
+
+    if (!files) return [];
+
+    return files
+      .filter(f => f.name.endsWith('.mp3'))
+      .map(file => {
+        const path = `${folder}/${file.name}`;
+        const { data: urlData } = supabase.storage
+          .from('channel-assets')
+          .getPublicUrl(path);
+        return {
+          name: file.name.replace('.mp3', ''),
+          url: urlData.publicUrl,
+          path
+        };
+      });
+  } catch (e) {
+    console.error('Error in listBackgroundMusicFiles:', e);
+    return [];
+  }
+};
+
+/**
+ * List all sound effect files from Supabase Storage
+ */
+export const listSoundEffectFiles = async (
+  channelId?: string
+): Promise<Array<{ name: string; url: string; path: string; type?: string; description?: string }>> => {
+  if (!supabase) return [];
+
+  try {
+    const folder = channelId ? `channels/${channelId}/sound-effects` : 'sound-effects';
+    const { data: files, error } = await supabase.storage
+      .from('channel-assets')
+      .list(folder);
+
+    if (error) {
+      console.error('Error listing sound effects:', error);
+      return [];
+    }
+
+    if (!files) return [];
+
+    return files
+      .filter(f => f.name.endsWith('.mp3'))
+      .map(file => {
+        const path = `${folder}/${file.name}`;
+        const { data: urlData } = supabase.storage
+          .from('channel-assets')
+          .getPublicUrl(path);
+        
+        // Parse type and description from filename (e.g., "transition-whoosh.mp3")
+        const nameWithoutExt = file.name.replace('.mp3', '');
+        const parts = nameWithoutExt.split('-');
+        const type = parts[0];
+        const description = parts.slice(1).join('-');
+        
+        return {
+          name: nameWithoutExt,
+          url: urlData.publicUrl,
+          path,
+          type,
+          description: description || undefined
+        };
+      });
+  } catch (e) {
+    console.error('Error in listSoundEffectFiles:', e);
+    return [];
+  }
+};
+
+/**
+ * Delete an audio file from Supabase Storage
+ */
+export const deleteAudioFile = async (
+  filePath: string
+): Promise<boolean> => {
+  if (!supabase) return false;
+
+  try {
+    const { error } = await supabase.storage
+      .from('channel-assets')
+      .remove([filePath]);
+
+    if (error) {
+      console.error('Error deleting audio file:', error);
+      return false;
+    }
+
+    return true;
+  } catch (e) {
+    console.error('Error in deleteAudioFile:', e);
+    return false;
+  }
+};

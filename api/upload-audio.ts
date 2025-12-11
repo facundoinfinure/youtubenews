@@ -299,7 +299,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const supabase = createClient(supabaseUrl, supabaseKey);
-    const { music = true, soundEffects = true } = req.body || {};
+    const { music = true, soundEffects = true, regenerate = [] } = req.body || {};
+    
+    // regenerate is an array of file names to force regenerate (e.g., ['podcast', 'transition-whoosh'])
 
     const results: Record<string, any> = {
       music: {},
@@ -318,12 +320,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const fileName = `${style}.mp3`;
           const storagePath = `music/${fileName}`;
           
-          // 1. PRIMERO: Verificar si ya existe en Supabase
-          const existingUrl = await checkFileExistsInSupabase(supabase, storagePath);
-          if (existingUrl) {
-            results.music[style] = existingUrl;
-            results.stats.fromCache++;
-            continue; // Saltar generación
+          // 1. PRIMERO: Verificar si ya existe en Supabase (a menos que se fuerce regeneración)
+          const shouldRegenerate = regenerate.includes(style) || regenerate.includes(fileName);
+          if (!shouldRegenerate) {
+            const existingUrl = await checkFileExistsInSupabase(supabase, storagePath);
+            if (existingUrl) {
+              results.music[style] = existingUrl;
+              results.stats.fromCache++;
+              continue; // Saltar generación
+            }
+          } else {
+            console.log(`[Process] Forcing regeneration of ${fileName}...`);
           }
           
           // 2. Si no existe, verificar que tenemos API key y generar con ElevenLabs
@@ -361,12 +368,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const fileName = `${name}.mp3`;
           const storagePath = `sound-effects/${fileName}`;
           
-          // 1. PRIMERO: Verificar si ya existe en Supabase
-          const existingUrl = await checkFileExistsInSupabase(supabase, storagePath);
-          if (existingUrl) {
-            results.soundEffects[name] = existingUrl;
-            results.stats.fromCache++;
-            continue; // Saltar generación
+          // 1. PRIMERO: Verificar si ya existe en Supabase (a menos que se fuerce regeneración)
+          const shouldRegenerate = regenerate.includes(name) || regenerate.includes(fileName);
+          if (!shouldRegenerate) {
+            const existingUrl = await checkFileExistsInSupabase(supabase, storagePath);
+            if (existingUrl) {
+              results.soundEffects[name] = existingUrl;
+              results.stats.fromCache++;
+              continue; // Saltar generación
+            }
+          } else {
+            console.log(`[Process] Forcing regeneration of ${fileName}...`);
           }
           
           // 2. Si no existe, verificar que tenemos API key y generar con ElevenLabs

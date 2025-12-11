@@ -36,6 +36,7 @@ export {
 // Utility components
 export { Ticker } from './Ticker';
 export { ToastProvider } from './ToastProvider';
+export { AudioManager } from './AudioManager';
 
 // Error Handling
 export { ErrorBoundary, InlineErrorBoundary, withErrorBoundary } from './ErrorBoundary';

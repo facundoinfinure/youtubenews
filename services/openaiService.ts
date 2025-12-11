@@ -204,7 +204,11 @@ For EACH scene provide:
 - shot: default "medium", "closeup" for Hook/Conflict, "wide" for Payoff
 - soundEffects (OPTIONAL): Suggest appropriate sound effects for this scene with PRECISE timing:
   * type: "transition" (for scene changes), "emphasis" (for key points), "notification" (for breaking news), "ambient" (for background atmosphere), or "none"
-  * description: Brief description of the desired sound (e.g., "whoosh", "ding", "drum roll", "news alert", "swoosh", "pop")
+  * description: Brief description of the desired sound. IMPORTANT: Use EXACTLY these values to match available files:
+    - For "transition" type: "whoosh", "swoosh", or "swish"
+    - For "emphasis" type: "drum-roll", "pop", or "hit"
+    - For "notification" type: "news-alert", "ding", or "bell"
+    - For "ambient" type: "newsroom"
   * startTime: EXACT timing - "start" (0s into scene), "end" (at scene end), "middle" (middle of scene), or a NUMBER (seconds into scene, e.g., 2.5)
   * duration: EXACT duration in seconds (e.g., 0.5, 1.0, 1.5, 2.0) - keep short (0.3-2.0s for most effects)
   * endTime: OPTIONAL explicit end time in seconds (if not provided, calculated as startTime + duration)
