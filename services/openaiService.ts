@@ -146,6 +146,30 @@ Logic:
 - Otherwise use Classic
 `.trim();
 
+  // Language detection for transition phrases
+  const isSpanish = (config.language || '').toLowerCase().includes('spanish') || 
+                    (config.language || '').toLowerCase().includes('español');
+  
+  const transitionPhrases = isSpanish ? [
+    'Siguiendo con otro tema',
+    'Cambiando de tema',
+    'Además',
+    'Por otro lado',
+    'Mientras tanto',
+    'Ahora hablemos de',
+    'Pasando a otro asunto',
+    'En otro orden de cosas'
+  ] : [
+    'Moving on to another topic',
+    'Switching gears',
+    'Additionally',
+    'On another note',
+    'Meanwhile',
+    'Let\'s talk about',
+    'Shifting to another subject',
+    'In other news'
+  ];
+
   const dialogueRules = `
 Dialogue Rules:
 - Alternate dialogue strictly (${hostA.name} then ${hostB.name})
@@ -153,6 +177,15 @@ Dialogue Rules:
 - Tone: conversational podcast banter (${config.tone})
 - 80–130 words per scene (40–80 for Hot Take scenes)
 - Reference news sources naturally in dialogue
+
+🔗 SCENE TRANSITIONS (CRITICAL):
+When a scene changes to a DIFFERENT news topic/story, the NEW scene MUST start with a transition phrase to create smooth flow:
+${isSpanish ? 
+  '- Use phrases like: "Siguiendo con otro tema", "Cambiando de tema", "Además", "Por otro lado", "Mientras tanto", "Ahora hablemos de", "Pasando a otro asunto", "En otro orden de cosas"' :
+  '- Use phrases like: "Moving on to another topic", "Switching gears", "Additionally", "On another note", "Meanwhile", "Let\'s talk about", "Shifting to another subject", "In other news"'}
+- If the scene continues the SAME topic, no transition phrase is needed
+- Transitions should feel natural and conversational, not forced
+- Example: If scene 1 talks about "Company X earnings" and scene 2 talks about "Market crash", scene 2 MUST start with a transition phrase
 
 ⚠️ PERSONALITY ENFORCEMENT:
 - ${hostA.name}'s lines MUST match their described personality/ideology
@@ -303,6 +336,10 @@ ${newsContext}
       const content = response.choices[0]?.message?.content || '{}';
       const parsed = JSON.parse(content) as ScriptWithScenes;
       validateScriptWithScenes(parsed);
+      
+      // Add scene transitions if missing
+      addSceneTransitions(parsed, config);
+      
       console.log(`[Script] ✅ Success with ${model}`);
       return parsed;
     } catch (error: any) {
@@ -314,6 +351,100 @@ ${newsContext}
 
   console.error("[Script] ❌ All models failed");
   throw lastError || new Error('Script generation failed');
+};
+
+/**
+ * Helper function to add transition phrases between scenes when topics change
+ */
+const addSceneTransitions = (script: ScriptWithScenes, config: ChannelConfig) => {
+  const isSpanish = (config.language || '').toLowerCase().includes('spanish') || 
+                    (config.language || '').toLowerCase().includes('español');
+  
+  const transitionPhrases = isSpanish ? [
+    'Siguiendo con otro tema',
+    'Cambiando de tema',
+    'Además',
+    'Por otro lado',
+    'Mientras tanto',
+    'Ahora hablemos de',
+    'Pasando a otro asunto',
+    'En otro orden de cosas'
+  ] : [
+    'Moving on to another topic',
+    'Switching gears',
+    'Additionally',
+    'On another note',
+    'Meanwhile',
+    'Let\'s talk about',
+    'Shifting to another subject',
+    'In other news'
+  ];
+  
+  // Helper to check if text already starts with a transition phrase
+  const hasTransition = (text: string): boolean => {
+    const lowerText = text.toLowerCase();
+    return transitionPhrases.some(phrase => lowerText.startsWith(phrase.toLowerCase()));
+  };
+  
+  // Helper to extract key topics/entities from text (simple heuristic)
+  const extractTopics = (text: string): string[] => {
+    // Extract capitalized words (likely company names, places, etc.)
+    const words = text.split(/\s+/);
+    const capitalized = words.filter(w => /^[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+/.test(w));
+    // Also extract quoted phrases
+    const quoted = text.match(/"([^"]+)"/g) || [];
+    return [...capitalized, ...quoted.map(q => q.replace(/"/g, ''))];
+  };
+  
+  // Helper to check if two scenes are about different topics
+  const isDifferentTopic = (prevText: string, currentText: string): boolean => {
+    const prevTopics = extractTopics(prevText);
+    const currentTopics = extractTopics(currentText);
+    
+    // If no common capitalized words, likely different topic
+    const commonTopics = prevTopics.filter(t => currentTopics.includes(t));
+    
+    // If less than 30% overlap in topics, consider it a different topic
+    // Also check for common news keywords that might indicate same story
+    const newsKeywords = isSpanish 
+      ? ['empresa', 'mercado', 'acciones', 'economía', 'noticia', 'informe']
+      : ['company', 'market', 'stock', 'economy', 'news', 'report'];
+    
+    const prevHasKeywords = newsKeywords.some(kw => prevText.toLowerCase().includes(kw));
+    const currentHasKeywords = newsKeywords.some(kw => currentText.toLowerCase().includes(kw));
+    
+    // If both have keywords but no common topics, likely different stories
+    if (prevHasKeywords && currentHasKeywords && commonTopics.length === 0) {
+      return true;
+    }
+    
+    // If there's significant overlap, likely same topic
+    if (commonTopics.length > 0 && commonTopics.length >= Math.min(prevTopics.length, currentTopics.length) * 0.3) {
+      return false;
+    }
+    
+    // Default: if no clear overlap, assume different topic
+    return commonTopics.length === 0 || commonTopics.length < 2;
+  };
+  
+  const sceneKeys = Object.keys(script.scenes).sort((a, b) => parseInt(a) - parseInt(b));
+  
+  for (let i = 1; i < sceneKeys.length; i++) {
+    const prevKey = sceneKeys[i - 1];
+    const currentKey = sceneKeys[i];
+    const prevScene = script.scenes[prevKey];
+    const currentScene = script.scenes[currentKey];
+    
+    if (!prevScene || !currentScene) continue;
+    
+    // Check if topic changed and if transition is missing
+    if (isDifferentTopic(prevScene.text, currentScene.text) && !hasTransition(currentScene.text)) {
+      // Add a transition phrase at the beginning
+      const randomTransition = transitionPhrases[Math.floor(Math.random() * transitionPhrases.length)];
+      currentScene.text = `${randomTransition}, ${currentScene.text}`;
+      console.log(`[Script] 🔗 Added transition to scene ${currentKey}: "${randomTransition}"`);
+    }
+  }
 };
 
 const VALID_NARRATIVES: NarrativeType[] = ['classic', 'double_conflict', 'hot_take', 'perspective_clash'];
@@ -406,6 +537,26 @@ export const regenerateScene = async (
     ? `IMPORTANTE: Genera el contenido COMPLETAMENTE en ESPAÑOL.`
     : `Generate content in English.`;
   
+  const transitionPhrases = isSpanish ? [
+    'Siguiendo con otro tema',
+    'Cambiando de tema',
+    'Además',
+    'Por otro lado',
+    'Mientras tanto',
+    'Ahora hablemos de',
+    'Pasando a otro asunto',
+    'En otro orden de cosas'
+  ] : [
+    'Moving on to another topic',
+    'Switching gears',
+    'Additionally',
+    'On another note',
+    'Meanwhile',
+    'Let\'s talk about',
+    'Shifting to another subject',
+    'In other news'
+  ];
+
   const systemPrompt = `You are a scriptwriter for a news podcast. You need to regenerate a single scene.
 
 ${languageInstruction}
@@ -419,6 +570,12 @@ The scene should:
 - Match the speaker's personality and ideology
 - Flow naturally from the previous scene and into the next
 - Keep the podcast banter style
+
+🔗 TRANSITION RULES:
+${prevScene ? `- If this scene changes to a DIFFERENT topic from the previous scene, START with a transition phrase: ${isSpanish ? '"Siguiendo con otro tema", "Cambiando de tema", "Además", "Por otro lado", etc.' : '"Moving on to another topic", "Switching gears", "Additionally", "On another note", etc.'}` : '- This is the first scene, no transition needed'}
+- If the scene continues the SAME topic, do NOT use a transition phrase
+- Transitions should feel natural and conversational
+
 ${instruction ? `\n\nSPECIAL INSTRUCTION: ${instruction}` : ''}
 
 Return ONLY valid JSON:
@@ -457,9 +614,30 @@ Please regenerate this scene with fresh dialogue.`;
 
     const result = JSON.parse(response.choices[0].message.content);
     
+    let regeneratedText = result.text || currentScene.text;
+    
+    // Check if transition is needed (if previous scene exists and topic changed)
+    if (prevScene && sceneNumber > 1) {
+      const hasTransition = transitionPhrases.some(phrase => 
+        regeneratedText.toLowerCase().startsWith(phrase.toLowerCase())
+      );
+      
+      // Simple heuristic: check if topics are different
+      const prevTopics = prevScene.match(/\b[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+\b/g) || [];
+      const currentTopics = regeneratedText.match(/\b[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+\b/g) || [];
+      const commonTopics = prevTopics.filter(t => currentTopics.includes(t));
+      
+      // If different topic and no transition, add one
+      if (commonTopics.length < 2 && !hasTransition) {
+        const randomTransition = transitionPhrases[Math.floor(Math.random() * transitionPhrases.length)];
+        regeneratedText = `${randomTransition}, ${regeneratedText}`;
+        console.log(`[Scene Regen] 🔗 Added transition to scene ${sceneNumber}: "${randomTransition}"`);
+      }
+    }
+    
     return {
       title: result.title || currentScene.title || `Scene ${sceneNumber}`,
-      text: result.text || currentScene.text,
+      text: regeneratedText,
       video_mode: currentScene.video_mode,
       model: 'infinite_talk',
       shot: currentScene.shot || 'medium'
@@ -1259,6 +1437,8 @@ Analyze the following script and rate it on these criteria (0-100 scale):
    - Does it invite comments/opinions?
    - Is it shareable?
 
+You should only analize script structure and not scene composition (like adding elements, sounds, etc.)
+   
 Return JSON (${isSpanish ? 'with feedback, suggestions, and strengths in SPANISH' : 'in English'}):
 {
   "hookScore": number,
