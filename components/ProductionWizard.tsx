@@ -23,6 +23,7 @@ import { uploadVideoToYouTube } from '../services/youtubeService';
 import { renderProductionToShotstack } from '../services/shotstackService';
 import { parseLocalDate } from '../utils/dateUtils';
 import { analyzeScriptForShorts, ScriptAnalysis } from '../services/geminiService';
+import { getTranslationsForChannel, Translations } from '../utils/i18n';
 
 // =============================================================================================
 // TYPES
@@ -80,8 +81,8 @@ const StepIndicator: React.FC<{
   };
 
   return (
-    <div className="overflow-x-auto scrollbar-hide -mx-4 px-4 mb-6">
-      <div className="flex items-center justify-start sm:justify-between min-w-max sm:min-w-0 px-2 sm:px-4 py-3 bg-white/[0.02] rounded-xl border border-white/5">
+    <div className="overflow-x-auto scrollbar-hide pb-2" style={{ WebkitOverflowScrolling: 'touch' }}>
+      <div className="flex items-center gap-1 min-w-max px-2 sm:px-4 py-3 bg-white/[0.02] rounded-xl border border-white/5">
         {steps.filter(s => s !== 'done').map((step, index) => {
           const status = getStepStatus(step);
           const isCurrent = step === currentStep;
@@ -580,6 +581,9 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
   
   // Close confirmation dialog (v2.8 - UX improvement)
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
+  
+  // Internationalization - get translations based on channel language
+  const t = getTranslationsForChannel(config.language);
   
   // Restore a script from history
   const handleRestoreScript = useCallback(async (historyItem: ScriptHistoryItem) => {
@@ -2634,8 +2638,8 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
           </button>
         </div>
         
-        {/* Step Indicator - with clickable navigation */}
-        <div className="p-2 sm:p-4 border-b border-[#333] bg-[#111]">
+        {/* Step Indicator - with clickable navigation and horizontal scroll */}
+        <div className="p-2 sm:p-4 border-b border-[#333] bg-[#111] overflow-x-auto">
           <StepIndicator 
             steps={allSteps} 
             currentStep={wizardState.currentStep}
@@ -2656,17 +2660,17 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[60]">
           <div className="bg-[#1a1a1a] border border-[#333] rounded-xl p-6 max-w-md w-full mx-4 shadow-2xl">
             <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
-              ⚠️ ¿Cerrar Production Wizard?
+              ⚠️ {t.wizard.closeConfirmTitle}
             </h3>
             <p className="text-gray-400 text-sm mb-4">
-              Tu progreso se ha guardado automáticamente. Podrás retomar esta producción más tarde desde el Admin Dashboard.
+              {t.wizard.closeConfirmMessage}
             </p>
             <div className="flex gap-3 justify-end">
               <button
                 onClick={() => setShowCloseConfirm(false)}
                 className="px-4 py-2 bg-white/5 hover:bg-white/10 text-white rounded-lg text-sm transition-all"
               >
-                Cancelar
+                {t.cancel}
               </button>
               <button
                 onClick={() => {
@@ -2675,7 +2679,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
                 }}
                 className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg text-sm font-medium transition-all"
               >
-                Sí, cerrar
+                {t.wizard.closeConfirmYes}
               </button>
             </div>
           </div>

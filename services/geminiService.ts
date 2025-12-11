@@ -692,12 +692,20 @@ const generateSingleAudio = async (
   let audioBase64: string;
   let audioDuration: number;
   
+  // Debug log for TTS decision
+  console.log(`🔍 [Audio Debug] ${label}: provider=${ttsProvider}, voiceId="${elevenLabsVoiceId}", voiceName="${voiceName}"`);
+  
   // Validate ElevenLabs voiceId if provider is elevenlabs
   // ElevenLabs voice IDs are typically 20-24 character alphanumeric strings
   const isValidElevenLabsVoiceId = elevenLabsVoiceId && 
     typeof elevenLabsVoiceId === 'string' && 
     elevenLabsVoiceId.trim().length >= 15 &&
     /^[a-zA-Z0-9]+$/.test(elevenLabsVoiceId.trim());
+  
+  // Log validation result
+  if (ttsProvider === 'elevenlabs') {
+    console.log(`🔍 [Audio Debug] ${label}: isValidElevenLabsVoiceId=${isValidElevenLabsVoiceId}`);
+  }
   
   // Generate audio based on TTS provider
   if (ttsProvider === 'elevenlabs' && isValidElevenLabsVoiceId) {
@@ -756,12 +764,25 @@ export const generateSegmentedAudioWithCache = async (
   }
 
   const audioPromises = script.map(async (line) => {
-    let character = config.characters.hostA;
-    if (line.speaker === config.characters.hostA.name) {
-      character = config.characters.hostA;
-    } else if (line.speaker === config.characters.hostB.name) {
+    // Normalize speaker name for comparison (case-insensitive, trimmed)
+    const speakerNormalized = line.speaker.toLowerCase().trim();
+    const hostAName = config.characters.hostA.name.toLowerCase().trim();
+    const hostBName = config.characters.hostB.name.toLowerCase().trim();
+    
+    // Determine which character is speaking
+    let character = config.characters.hostA; // default
+    let characterKey = 'hostA';
+    
+    if (speakerNormalized === hostBName || speakerNormalized.includes(hostBName)) {
       character = config.characters.hostB;
+      characterKey = 'hostB';
+    } else if (speakerNormalized === hostAName || speakerNormalized.includes(hostAName)) {
+      character = config.characters.hostA;
+      characterKey = 'hostA';
     }
+    
+    // Debug log to help troubleshoot speaker matching
+    console.log(`🎤 [Audio] Speaker "${line.speaker}" matched to ${characterKey} (${character.name}), voiceId: ${character.elevenLabsVoiceId || 'not set'}`);
 
     try {
       const result = await generateSingleAudio(
