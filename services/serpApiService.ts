@@ -28,9 +28,10 @@ const getProxyUrl = (): string => {
 
 // Fallback country config (used if Supabase table doesn't exist)
 // Note: Use es-419 for Latin American Spanish (Argentina, Mexico, etc.)
-// This matches Google News format: hl=es-419&gl=AR
+// This matches Google News format: hl=es-419&gl=AR&ceid=AR:es-419
+// IMPORTANT: gl should be uppercase (AR, not ar) for proper country filtering
 const FALLBACK_COUNTRY_CONFIG: Record<string, { gl: string; hl: string }> = {
-  'Argentina': { gl: 'ar', hl: 'es-419' }, // Spanish (Latin America) for Argentina
+  'Argentina': { gl: 'AR', hl: 'es-419' }, // Spanish (Latin America) for Argentina, gl in uppercase
   'México': { gl: 'mx', hl: 'es' },
   'Mexico': { gl: 'mx', hl: 'es' },
   'España': { gl: 'es', hl: 'es' },
