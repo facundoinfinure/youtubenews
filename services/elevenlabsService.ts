@@ -532,9 +532,53 @@ export const getSoundEffectUrl = async (
 };
 
 /**
+ * Generate missing audio files via upload-audio API endpoint
+ */
+async function generateMissingAudioFiles(
+  missingMusic: string[],
+  missingEffects: string[]
+): Promise<void> {
+  if (missingMusic.length === 0 && missingEffects.length === 0) {
+    return; // Nothing to generate
+  }
+
+  try {
+    const vercelUrl = import.meta.env.VITE_BACKEND_URL || window.location.origin;
+    const body: any = {
+      music: missingMusic.length > 0,
+      soundEffects: missingEffects.length > 0,
+    };
+
+    // If we only need specific files, we could add a "regenerate" parameter
+    // but for now, we'll generate all missing files of each type
+    
+    console.log(`[Audio] Generating missing audio files: ${missingMusic.length} music, ${missingEffects.length} effects`);
+    
+    const response = await fetch(`${vercelUrl}/api/upload-audio`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.warn(`[Audio] Failed to generate missing audio files: ${response.status} - ${errorText}`);
+      return;
+    }
+
+    const result = await response.json();
+    console.log(`[Audio] Generated audio files: ${result.summary?.generated || 0} new, ${result.summary?.fromCache || 0} from cache`);
+  } catch (error) {
+    console.warn(`[Audio] Error generating missing audio files:`, (error as Error).message);
+    // Don't throw - continue without audio if generation fails
+  }
+}
+
+/**
  * Generate background music and sound effects for a production
  * 
- * This function processes scenes and fetches appropriate audio assets from Supabase Storage
+ * This function processes scenes and fetches appropriate audio assets from Supabase Storage.
+ * If files are missing, it automatically generates them via the upload-audio API.
  * 
  * @param scenes - Array of scenes with sound effect metadata
  * @param musicStyle - Style of background music
@@ -570,8 +614,56 @@ export const generateProductionAudio = async (
     ? sceneDurations.reduce((acc, d) => acc + d, 0)
     : scenes.length * 10; // Estimate 10s per scene
   
-  // Fetch background music from Supabase Storage
-  const backgroundMusic = await getBackgroundMusicUrl(musicStyle, totalDuration, channelId);
+  // First, try to fetch background music from Supabase Storage
+  let backgroundMusic = await getBackgroundMusicUrl(musicStyle, totalDuration, channelId);
+  
+  // Collect unique sound effects needed
+  const neededEffects = new Set<string>();
+  scenes.forEach(scene => {
+    if (scene.soundEffects?.type && scene.soundEffects.type !== 'none') {
+      const safeDescription = (scene.soundEffects.description || scene.soundEffects.type)
+        .replace(/[^a-zA-Z0-9]/g, '-')
+        .toLowerCase();
+      const effectKey = `${scene.soundEffects.type}-${safeDescription}`;
+      neededEffects.add(effectKey);
+    }
+  });
+
+  // Check which files are missing
+  const missingMusic: string[] = [];
+  const missingEffects: string[] = [];
+
+  if (!backgroundMusic) {
+    missingMusic.push(musicStyle);
+  }
+
+  // Check each needed sound effect
+  for (const effectKey of neededEffects) {
+    const [type, ...descParts] = effectKey.split('-');
+    const description = descParts.join('-');
+    const effectUrl = await getSoundEffectUrl(
+      type as SoundEffectType,
+      description,
+      channelId
+    );
+    if (!effectUrl) {
+      missingEffects.push(effectKey);
+    }
+  }
+
+  // Generate missing files if any
+  if (missingMusic.length > 0 || missingEffects.length > 0) {
+    console.log(`[Audio] Missing files detected: ${missingMusic.length} music, ${missingEffects.length} effects. Generating...`);
+    await generateMissingAudioFiles(missingMusic, missingEffects);
+    
+    // Wait a bit for files to be uploaded (Supabase might need a moment)
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    // Retry fetching background music
+    if (missingMusic.length > 0) {
+      backgroundMusic = await getBackgroundMusicUrl(musicStyle, totalDuration, channelId);
+    }
+  }
   
   // Fetch sound effects for each scene
   const soundEffects: Array<{
