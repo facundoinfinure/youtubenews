@@ -1343,6 +1343,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                   >
                     <option value="">Default (US Business)</option>
                     <option value="CAAqJQgKIh9DQkFTRVFvSEwyMHZNR3BuWkJJR1pYTXROREU1S0FBUAE">🇦🇷 Argentina - Noticias Generales</option>
+                    <option value="CAAqLAgKIiZDQkFTRmdvSUwyMHZNRGx6TVdZU0JtVnpMVFF4T1JvQ1FWSW9BQVAB">🇦🇷 Argentina - Negocios</option>
                     <option value="CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx6TVdZU0FtVnVHZ0pWVXlnQVAB">🇺🇸 USA - Business</option>
                     <option value="CAAqJggKIiBDQkFTRWdvSUwyMHZNRGRqTVhZU0FtVnVHZ0pWVXlnQVAB">🇺🇸 USA - Technology</option>
                     <option value="CAAqKAgKIiJDQkFTRXdvSkwyMHZNREZ0T1hJek1CSUdaWE10TkRFNUtBQQ">🌍 World Headlines (Spanish)</option>
