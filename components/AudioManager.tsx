@@ -174,22 +174,66 @@ export const AudioManager: React.FC<AudioManagerProps> = ({ channelId, onRefresh
         throw error;
       }
       
-      // Batch 2: Generate sound effects
-      let effectsResult = null;
+      // Batch 2: Generate sound effects in smaller sub-batches
+      // Split into 2 batches: transitions/emphasis (5 files) and notifications/ambient (5 files)
+      let effectsResult1 = null;
+      let effectsResult2 = null;
+      
       try {
-        const effectsResponse = await fetch(`${vercelUrl}/api/upload-audio`, {
+        // Sub-batch 2a: Transitions and emphasis effects (5 files)
+        toast.loading('Generando archivos de audio (lote 2a/3: transiciones y énfasis)...', { id: 'audio-generation' });
+        const effects1Response = await fetch(`${vercelUrl}/api/upload-audio`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ music: false, soundEffects: true })
+          body: JSON.stringify({ 
+            music: false, 
+            soundEffects: true,
+            batch: 'transitions-emphasis' // Only generate these types
+          })
         });
 
-        if (!effectsResponse.ok) {
-          const errorText = await effectsResponse.text();
-          throw new Error(`HTTP ${effectsResponse.status}: ${errorText}`);
+        if (!effects1Response.ok) {
+          const errorText = await effects1Response.text();
+          throw new Error(`HTTP ${effects1Response.status}: ${errorText}`);
         }
 
-        effectsResult = await effectsResponse.json();
-        console.log(`[AudioManager] Sound effects generation result:`, effectsResult);
+        effectsResult1 = await effects1Response.json();
+        console.log(`[AudioManager] Sound effects batch 1 result:`, effectsResult1);
+        
+        // Sub-batch 2b: Notifications and ambient effects (5 files)
+        toast.loading('Generando archivos de audio (lote 2b/3: notificaciones y ambiente)...', { id: 'audio-generation' });
+        const effects2Response = await fetch(`${vercelUrl}/api/upload-audio`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            music: false, 
+            soundEffects: true,
+            batch: 'notifications-ambient' // Only generate these types
+          })
+        });
+
+        if (!effects2Response.ok) {
+          const errorText = await effects2Response.text();
+          throw new Error(`HTTP ${effects2Response.status}: ${errorText}`);
+        }
+
+        effectsResult2 = await effects2Response.json();
+        console.log(`[AudioManager] Sound effects batch 2 result:`, effectsResult2);
+        
+        // Combine both results
+        effectsResult = {
+          success: effectsResult1.success && effectsResult2.success,
+          results: {
+            soundEffects: { ...effectsResult1.results.soundEffects, ...effectsResult2.results.soundEffects },
+            errors: [...(effectsResult1.results.errors || []), ...(effectsResult2.results.errors || [])]
+          },
+          summary: {
+            soundEffectsUploaded: (effectsResult1.summary?.soundEffectsUploaded || 0) + (effectsResult2.summary?.soundEffectsUploaded || 0),
+            fromCache: (effectsResult1.summary?.fromCache || 0) + (effectsResult2.summary?.fromCache || 0),
+            generated: (effectsResult1.summary?.generated || 0) + (effectsResult2.summary?.generated || 0),
+            errors: (effectsResult1.summary?.errors || 0) + (effectsResult2.summary?.errors || 0)
+          }
+        };
       } catch (error: any) {
         console.error('Error generating sound effects:', error);
         toast.dismiss('audio-generation');
@@ -211,8 +255,16 @@ export const AudioManager: React.FC<AudioManagerProps> = ({ channelId, onRefresh
       }
       
       if (totalErrors > 0) {
-        console.warn('[AudioManager] Errors during generation:', [...(musicResult?.errors || []), ...(effectsResult?.errors || [])]);
-        toast.error(`${totalErrors} errores durante la generación. Revisa la consola.`);
+        const allErrors = [...(musicResult?.results?.errors || []), ...(effectsResult?.results?.errors || [])];
+        console.warn('[AudioManager] Errors during generation:', allErrors);
+        
+        // Check for specific error types
+        const has402Error = allErrors.some((e: any) => e.error?.includes('402') || e.error?.includes('Payment Required'));
+        if (has402Error) {
+          toast.error('Error 402: Tu plan de ElevenLabs no incluye Music API. Actualiza a un plan que incluya Music API y Sound Effects API.', { duration: 8000 });
+        } else {
+          toast.error(`${totalErrors} errores durante la generación. Revisa la consola.`, { duration: 5000 });
+        }
       }
       
       // Wait a bit for files to be available

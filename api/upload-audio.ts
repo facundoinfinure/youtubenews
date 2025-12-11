@@ -169,6 +169,8 @@ async function generateMusicWithElevenLabs(
       
       if (response.status === 403) {
         errorMessage += ' (Forbidden - Verifica que tu API key tenga permisos para Music API y que tu plan incluya acceso)';
+      } else if (response.status === 402) {
+        errorMessage += ' (Payment Required - Music API requiere un plan de pago. Actualiza tu plan en ElevenLabs.)';
       }
       
       throw new Error(errorMessage);
@@ -222,6 +224,8 @@ async function generateSoundEffectWithElevenLabs(
       
       if (response.status === 403) {
         errorMessage += ' (Forbidden - Verifica que tu API key tenga permisos para Sound Effects API y que tu plan incluya acceso)';
+      } else if (response.status === 402) {
+        errorMessage += ' (Payment Required - Sound Effects API requiere un plan de pago. Actualiza tu plan en ElevenLabs.)';
       }
       
       throw new Error(errorMessage);
@@ -299,9 +303,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const supabase = createClient(supabaseUrl, supabaseKey);
-    const { music = true, soundEffects = true, regenerate = [] } = req.body || {};
+    const { music = true, soundEffects = true, regenerate = [], batch } = req.body || {};
     
     // regenerate is an array of file names to force regenerate (e.g., ['podcast', 'transition-whoosh'])
+    // batch can be 'transitions-emphasis' or 'notifications-ambient' to split sound effects generation
 
     const results: Record<string, any> = {
       music: {},
@@ -363,7 +368,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Procesar efectos de sonido
     if (soundEffects) {
-      for (const [name, config] of Object.entries(SOUND_EFFECTS_CONFIG)) {
+      // Filter by batch if specified
+      const soundEffectsToProcess = batch 
+        ? Object.entries(SOUND_EFFECTS_CONFIG).filter(([name]) => {
+            if (batch === 'transitions-emphasis') {
+              return name.startsWith('transition-') || name.startsWith('emphasis-');
+            } else if (batch === 'notifications-ambient') {
+              return name.startsWith('notification-') || name.startsWith('ambient-');
+            }
+            return true;
+          })
+        : Object.entries(SOUND_EFFECTS_CONFIG);
+      
+      for (const [name, config] of soundEffectsToProcess) {
         try {
           const fileName = `${name}.mp3`;
           const storagePath = `sound-effects/${fileName}`;
