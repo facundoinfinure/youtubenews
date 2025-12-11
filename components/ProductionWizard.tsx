@@ -2295,11 +2295,14 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
                                   regenInstruction || undefined
                                 );
                                 
-                                // Update scenes - cast to Scene type
+                                // Update scenes - cast all fields to proper Scene type
                                 const updatedScenes = { ...localProduction.scenes!.scenes };
                                 updatedScenes[key] = {
-                                  ...newScene,
-                                  video_mode: newScene.video_mode as 'hostA' | 'hostB'
+                                  title: newScene.title,
+                                  text: newScene.text,
+                                  video_mode: newScene.video_mode as 'hostA' | 'hostB',
+                                  model: newScene.model as 'infinite_talk' | 'infinite_talk_multi',
+                                  shot: newScene.shot as 'medium' | 'closeup' | 'wide'
                                 };
                                 
                                 const updatedProduction: Production = {
