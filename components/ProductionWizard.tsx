@@ -170,7 +170,6 @@ const StepIndicator: React.FC<{
             </React.Fragment>
           );
         })}
-      </div>
     </div>
   );
 };
