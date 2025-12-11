@@ -654,6 +654,65 @@ export interface Production {
   script_history?: ScriptHistoryItem[]; // Array of previously generated scripts
 }
 
+// =============================================================================================
+// VIDEO ANALYTICS - YouTube Performance Tracking
+// =============================================================================================
+
+export type AnalyticsPeriod = 'today' | 'yesterday' | '7days' | '14days' | '28days' | '90days';
+
+export interface VideoAnalytics {
+  id: string;
+  production_id: string;
+  channel_id: string;
+  youtube_video_id: string;
+  
+  // Basic stats from YouTube Data API
+  view_count: number;
+  like_count: number;
+  comment_count: number;
+  
+  // Advanced metrics from YouTube Analytics API (if available)
+  estimated_minutes_watched?: number;
+  average_view_duration?: number; // in seconds
+  average_view_percentage?: number; // retention percentage
+  click_through_rate?: number; // thumbnail CTR
+  shares?: number;
+  subscribers_gained?: number;
+  
+  // Calculated metrics
+  engagement_rate?: number; // (likes + comments) / views * 100
+  
+  // Timestamps
+  video_published_at: string;
+  fetched_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChannelAnalyticsSummary {
+  channel_id: string;
+  period: AnalyticsPeriod;
+  
+  // Aggregated metrics
+  total_views: number;
+  total_likes: number;
+  total_comments: number;
+  total_videos: number;
+  
+  // Averages
+  avg_views_per_video: number;
+  avg_engagement_rate: number;
+  avg_view_duration?: number;
+  
+  // Best performers
+  top_video_id?: string;
+  top_video_views?: number;
+  
+  // Comparison to previous period
+  views_change_percent?: number;
+  engagement_change_percent?: number;
+}
+
 // Window augmentation for AI Studio key selection & Google Identity & Runtime Env
 declare global {
   interface AIStudio {

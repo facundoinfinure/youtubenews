@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
-import { ChannelConfig, CharacterProfile, StoredVideo, Channel, UserProfile, Production, RenderConfig, DEFAULT_RENDER_CONFIG, DEFAULT_ETHICAL_GUARDRAILS, ShotstackTransitionType, ShotstackEffectType, ShotstackFilterType } from '../types';
-import { fetchVideosFromDB, saveConfigToDB, getAllChannels, saveChannel, getChannelById, uploadImageToStorage, uploadChannelLogo, getIncompleteProductions, getAllProductions, getPublishedProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction, updateSegmentStatus, saveProduction, saveVideoToDB, connectYouTube, deleteNewsForChannel } from '../services/supabaseService';
-import { uploadVideoToYouTube } from '../services/youtubeService';
+import { ChannelConfig, CharacterProfile, StoredVideo, Channel, UserProfile, Production, RenderConfig, DEFAULT_RENDER_CONFIG, DEFAULT_ETHICAL_GUARDRAILS, ShotstackTransitionType, ShotstackEffectType, ShotstackFilterType, AnalyticsPeriod } from '../types';
+import { fetchVideosFromDB, saveConfigToDB, getAllChannels, saveChannel, getChannelById, uploadImageToStorage, uploadChannelLogo, getIncompleteProductions, getAllProductions, getPublishedProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction, updateSegmentStatus, saveProduction, saveVideoToDB, connectYouTube, deleteNewsForChannel, saveVideoAnalytics, getVideoAnalytics, getLastAnalyticsFetch, getProductionsWithAnalytics, VideoAnalyticsRecord } from '../services/supabaseService';
+import { uploadVideoToYouTube, fetchYouTubeVideoStats, extractYouTubeVideoId, getAnalyticsDateRange, YouTubeVideoStats } from '../services/youtubeService';
 import { generateSeedImage } from '../services/geminiService';
 import { CostTracker } from '../services/CostTracker';
 import { ContentCache } from '../services/ContentCache';
@@ -304,6 +304,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
   const [selectedVideo, setSelectedVideo] = useState<StoredVideo | null>(null);
   const [isLoadingVideos, setIsLoadingVideos] = useState(false);
   const [productions, setProductions] = useState<Production[]>([]);
+  
+  // Analytics state
+  const [analyticsPeriod, setAnalyticsPeriod] = useState<AnalyticsPeriod>('28days');
+  const [isRefreshingAnalytics, setIsRefreshingAnalytics] = useState(false);
+  const [lastAnalyticsFetch, setLastAnalyticsFetch] = useState<string | null>(null);
+  const [productionsWithAnalytics, setProductionsWithAnalytics] = useState<Array<Production & { analytics?: VideoAnalyticsRecord }>>([]);
   const [isLoadingProductions, setIsLoadingProductions] = useState(false);
   const [expandedProductions, setExpandedProductions] = useState<Set<string>>(new Set());
   const [selectedProductionForVersions, setSelectedProductionForVersions] = useState<string | null>(null);
@@ -423,6 +429,87 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
       }
     }
   }, [activeTab, activeChannel, user, productionFilter]);
+  
+  // Load productions with analytics for Insights tab
+  useEffect(() => {
+    if (activeTab === 'insights' && activeChannel) {
+      getProductionsWithAnalytics(activeChannel.id).then(setProductionsWithAnalytics);
+      getLastAnalyticsFetch(activeChannel.id).then(setLastAnalyticsFetch);
+    }
+  }, [activeTab, activeChannel]);
+  
+  // Function to refresh YouTube analytics
+  const refreshYouTubeAnalytics = async () => {
+    if (!activeChannel || !user?.accessToken) {
+      toast.error('Please connect YouTube first in Settings');
+      return;
+    }
+    
+    setIsRefreshingAnalytics(true);
+    const loadingToast = toast.loading('Fetching YouTube analytics...');
+    
+    try {
+      // Get published productions with YouTube IDs
+      const publishedProductions = await getPublishedProductions(activeChannel.id, user.email);
+      const productionsWithYT = publishedProductions.filter(p => p.youtube_id);
+      
+      if (productionsWithYT.length === 0) {
+        toast.error('No published videos found', { id: loadingToast });
+        setIsRefreshingAnalytics(false);
+        return;
+      }
+      
+      // Extract YouTube video IDs
+      const videoIds = productionsWithYT
+        .map(p => extractYouTubeVideoId(p.youtube_id || ''))
+        .filter((id): id is string => id !== null);
+      
+      if (videoIds.length === 0) {
+        toast.error('No valid YouTube video IDs found', { id: loadingToast });
+        setIsRefreshingAnalytics(false);
+        return;
+      }
+      
+      // Fetch stats from YouTube
+      const stats = await fetchYouTubeVideoStats(videoIds, user.accessToken);
+      
+      // Save to Supabase
+      let savedCount = 0;
+      for (const stat of stats) {
+        const production = productionsWithYT.find(p => 
+          extractYouTubeVideoId(p.youtube_id || '') === stat.videoId
+        );
+        
+        if (production) {
+          const analyticsRecord: VideoAnalyticsRecord = {
+            production_id: production.id,
+            channel_id: activeChannel.id,
+            youtube_video_id: stat.videoId,
+            view_count: stat.statistics.viewCount,
+            like_count: stat.statistics.likeCount,
+            comment_count: stat.statistics.commentCount,
+            video_published_at: stat.publishedAt || production.published_at || new Date().toISOString(),
+            fetched_at: new Date().toISOString()
+          };
+          
+          const saved = await saveVideoAnalytics(analyticsRecord);
+          if (saved) savedCount++;
+        }
+      }
+      
+      // Refresh data
+      const updatedProductions = await getProductionsWithAnalytics(activeChannel.id);
+      setProductionsWithAnalytics(updatedProductions);
+      setLastAnalyticsFetch(new Date().toISOString());
+      
+      toast.success(`Updated analytics for ${savedCount} videos`, { id: loadingToast });
+    } catch (error) {
+      console.error('Error refreshing analytics:', error);
+      toast.error('Failed to fetch YouTube analytics. Check your connection.', { id: loadingToast });
+    } finally {
+      setIsRefreshingAnalytics(false);
+    }
+  };
 
   // Load storage usage when cache tab is active
   useEffect(() => {
@@ -872,166 +959,269 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
 
         {/* INSIGHTS TAB */}
         {activeTab === 'insights' && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-
-            {/* Sidebar: Video List */}
-            <div className="lg:col-span-1 bg-[#1a1a1a] rounded-xl border border-[#333] overflow-hidden flex flex-col h-[600px]">
-              <div className="p-4 border-b border-[#333] bg-[#222]">
-                <h3 className="font-bold text-gray-200">Recent Productions</h3>
-              </div>
-              <div className="overflow-y-auto flex-1">
-                {isLoadingVideos ? (
-                  <VideoListSkeleton />
-                ) : videos.length === 0 ? (
-                  <EmptyState
-                    icon="🎬"
-                    title="No Published Videos"
-                    description="Only videos that have been published to YouTube are shown here. Complete a production and publish it to see analytics."
-                  />
-                ) : (
-                  videos.map(vid => (
-                    <div
-                      key={vid.id}
-                      onClick={() => setSelectedVideo(vid)}
-                      className={`p-4 border-b border-[#333] cursor-pointer transition-all duration-200 ${selectedVideo?.id === vid.id
-                        ? 'bg-[#2a2a2a] border-l-4 border-l-blue-500'
-                        : 'hover:bg-[#222]'
-                        }`}
-                    >
-                      <h4 className="font-bold text-sm line-clamp-2 mb-1">{vid.title}</h4>
-                      <div className="flex justify-between text-xs text-gray-500">
-                        <span>{new Date(vid.created_at).toLocaleDateString()}</span>
-                        <span>{vid.analytics?.views.toLocaleString()} views</span>
-                      </div>
-                    </div>
-                  ))
+          <div className="space-y-6">
+            {/* Header with Period Filter and Refresh Button */}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-[#1a1a1a] p-4 rounded-xl border border-[#333]">
+              <div className="flex items-center gap-4">
+                <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                  📊 YouTube Analytics
+                </h2>
+                {lastAnalyticsFetch && (
+                  <span className="text-xs text-gray-500">
+                    Last updated: {new Date(lastAnalyticsFetch).toLocaleString()}
+                  </span>
                 )}
               </div>
+              
+              <div className="flex items-center gap-3">
+                {/* Period Filter */}
+                <select
+                  value={analyticsPeriod}
+                  onChange={(e) => setAnalyticsPeriod(e.target.value as AnalyticsPeriod)}
+                  className="bg-[#111] border border-[#333] rounded-lg px-3 py-2 text-sm text-white"
+                >
+                  <option value="today">Today</option>
+                  <option value="yesterday">Yesterday</option>
+                  <option value="7days">Last 7 days</option>
+                  <option value="14days">Last 14 days</option>
+                  <option value="28days">Last 28 days</option>
+                  <option value="90days">Last 90 days</option>
+                </select>
+                
+                {/* Refresh Button */}
+                <button
+                  onClick={refreshYouTubeAnalytics}
+                  disabled={isRefreshingAnalytics || !user?.accessToken}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                    isRefreshingAnalytics 
+                      ? 'bg-cyan-500/20 text-cyan-400 cursor-wait' 
+                      : user?.accessToken
+                        ? 'bg-cyan-600 hover:bg-cyan-500 text-white'
+                        : 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                  }`}
+                  title={!user?.accessToken ? 'Connect YouTube in Settings first' : 'Fetch latest analytics from YouTube'}
+                >
+                  {isRefreshingAnalytics ? (
+                    <>
+                      <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                      <span>Refreshing...</span>
+                    </>
+                  ) : (
+                    <>
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      <span>Refresh Analytics</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
-
-            {/* Main: Detailed Analytics */}
-            <div className="lg:col-span-2 space-y-6">
-              {selectedVideo ? (
+            
+            {/* Summary Cards */}
+            {(() => {
+              const { startDate, endDate } = getAnalyticsDateRange(analyticsPeriod);
+              const filteredProductions = productionsWithAnalytics.filter(p => {
+                const publishedAt = p.published_at || p.analytics?.video_published_at;
+                if (!publishedAt) return false;
+                return publishedAt >= startDate && publishedAt <= endDate + 'T23:59:59.999Z';
+              });
+              
+              const totalViews = filteredProductions.reduce((sum, p) => sum + (p.analytics?.view_count || 0), 0);
+              const totalLikes = filteredProductions.reduce((sum, p) => sum + (p.analytics?.like_count || 0), 0);
+              const totalComments = filteredProductions.reduce((sum, p) => sum + (p.analytics?.comment_count || 0), 0);
+              const avgEngagement = totalViews > 0 ? ((totalLikes + totalComments) / totalViews * 100) : 0;
+              
+              return (
                 <>
-                  {/* Summary Card */}
-                  <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
-                    <h2 className="text-xl font-bold mb-4 line-clamp-1" title={selectedVideo.title}>{selectedVideo.title}</h2>
-                    <div className="grid grid-cols-4 gap-4">
-                      <div className="bg-black/30 p-4 rounded-lg">
-                        <div className="text-xs text-gray-400 uppercase">Views</div>
-                        <div className="text-2xl font-bold text-white">{selectedVideo.analytics?.views.toLocaleString()}</div>
-                      </div>
-                      <div className="bg-black/30 p-4 rounded-lg">
-                        <div className="text-xs text-gray-400 uppercase">Click-Through Rate</div>
-                        <div className="text-2xl font-bold text-green-400">{selectedVideo.analytics?.ctr}%</div>
-                      </div>
-                      <div className="bg-black/30 p-4 rounded-lg">
-                        <div className="text-xs text-gray-400 uppercase">Avg View Duration</div>
-                        <div className="text-2xl font-bold text-white">{selectedVideo.analytics?.avgViewDuration}</div>
-                      </div>
-                      <div className="bg-black/30 p-4 rounded-lg">
-                        <div className="text-xs text-gray-400 uppercase">Predicted Viral Score</div>
-                        <div className="text-2xl font-bold text-yellow-500">{selectedVideo.viral_score}</div>
-                      </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="bg-[#1a1a1a] p-4 rounded-xl border border-[#333]">
+                      <div className="text-xs text-gray-400 uppercase mb-1">Total Views</div>
+                      <div className="text-2xl font-bold text-white">{totalViews.toLocaleString()}</div>
+                    </div>
+                    <div className="bg-[#1a1a1a] p-4 rounded-xl border border-[#333]">
+                      <div className="text-xs text-gray-400 uppercase mb-1">Total Likes</div>
+                      <div className="text-2xl font-bold text-green-400">{totalLikes.toLocaleString()}</div>
+                    </div>
+                    <div className="bg-[#1a1a1a] p-4 rounded-xl border border-[#333]">
+                      <div className="text-xs text-gray-400 uppercase mb-1">Total Comments</div>
+                      <div className="text-2xl font-bold text-blue-400">{totalComments.toLocaleString()}</div>
+                    </div>
+                    <div className="bg-[#1a1a1a] p-4 rounded-xl border border-[#333]">
+                      <div className="text-xs text-gray-400 uppercase mb-1">Avg Engagement</div>
+                      <div className="text-2xl font-bold text-yellow-400">{avgEngagement.toFixed(2)}%</div>
                     </div>
                   </div>
-
-                  {/* Retention Graph */}
-                  <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333] h-80 flex flex-col">
-                    <h3 className="font-bold text-gray-200 mb-4 flex justify-between">
-                      <span>Audience Retention</span>
-                      <span className="text-xs text-gray-400 font-normal">Typical performance range: 40-60%</span>
-                    </h3>
-                    <div className="flex-1 w-full relative">
-                      <div className="absolute left-0 top-0 bottom-0 w-8 flex flex-col justify-between text-xs text-gray-600">
-                        <span>100%</span>
-                        <span>50%</span>
-                        <span>0%</span>
+                  
+                  {/* Video List with Analytics */}
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    {/* Sidebar: Video List */}
+                    <div className="lg:col-span-1 bg-[#1a1a1a] rounded-xl border border-[#333] overflow-hidden flex flex-col h-[600px]">
+                      <div className="p-4 border-b border-[#333] bg-[#222]">
+                        <h3 className="font-bold text-gray-200">Published Videos ({filteredProductions.length})</h3>
                       </div>
-                      <div className="absolute left-10 right-0 top-0 bottom-0">
-                        <RetentionChart
-                          data={selectedVideo.analytics?.retentionData || []}
-                          color={config.logoColor1 || "#FACC15"}
-                        />
-                      </div>
-                    </div>
-                    <div className="mt-2 text-center text-xs text-gray-500">Video Duration (Normalized)</div>
-                  </div>
-
-                  {/* Metadata Preview */}
-                  <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
-                    <h3 className="font-bold text-gray-200 mb-4">Metadata Analysis</h3>
-                    <div className="space-y-4">
-                      <div>
-                        <div className="text-xs text-gray-500 uppercase mb-1">Description</div>
-                        <p className="text-sm text-gray-300 font-mono bg-black/30 p-3 rounded">{selectedVideo.description}</p>
-                      </div>
-                      <div>
-                        <div className="text-xs text-gray-500 uppercase mb-1">Tags</div>
-                        <div className="flex flex-wrap gap-2">
-                          {selectedVideo.tags?.map((tag, i) => (
-                            <span key={i} className="text-xs bg-blue-900/40 text-blue-300 px-2 py-1 rounded">#{tag}</span>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Delete Button */}
-                  <div className="bg-red-900/20 p-6 rounded-xl border-2 border-red-900/60 flex justify-between items-center hover:bg-red-900/30 transition-colors duration-300 shadow-[0_0_15px_rgba(220,38,38,0.1)]">
-                    <div>
-                      <h3 className="text-sm font-bold text-red-400 mb-1 flex items-center gap-2">
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-                        Danger Zone
-                      </h3>
-                      <p className="text-xs text-red-200/70">Permanently delete this video from database and YouTube. This action cannot be undone.</p>
-                    </div>
-                    <button
-                      onClick={async () => {
-                        if (confirm('Are you sure you want to delete this video? This will also delete it from YouTube if uploaded.')) {
-                          try {
-                            console.log(`[ADMIN] Deleting video: ${selectedVideo.id}`);
-                            await onDeleteVideo(selectedVideo.id, selectedVideo.youtube_id);
-                            console.log(`[ADMIN] Delete successful`);
-
-                            // RE-FETCH videos after deletion
-                            if (activeChannel) {
-                              // Optimistic update: Remove from UI immediately
-                              setVideos(prev => prev.filter(v => v.id !== selectedVideo.id));
-                              setSelectedVideo(null); // Clear selection after deletion
-
-                              console.log(`[ADMIN] Re-fetching videos for channel: ${activeChannel.id}`);
-                              try {
-                                const refreshedVideos = await fetchVideosFromDB(activeChannel.id);
-                                console.log(`[ADMIN] Fetched ${refreshedVideos.length} videos`);
-                                setVideos(refreshedVideos);
-                              } catch (error) {
-                                console.error('[ADMIN] Error refreshing videos:', error);
-                                // Keep the optimistic update even if refresh fails
-                              }
+                      <div className="overflow-y-auto flex-1">
+                        {filteredProductions.length === 0 ? (
+                          <EmptyState
+                            icon="🎬"
+                            title="No Videos in Period"
+                            description={productionsWithAnalytics.length === 0 
+                              ? "Publish videos to YouTube to see analytics here. Click 'Refresh Analytics' after publishing."
+                              : `No videos published in the selected period. Try selecting a longer time range.`
                             }
-                          } catch (error) {
-                            console.error(`[ADMIN] Delete failed:`, error);
-                            // Error already shown by handleDeleteVideo
-                          }
-                        }
-                      }}
-                      className="bg-red-600 text-white border border-red-500 hover:bg-red-700 px-4 py-2 rounded-lg text-sm font-bold transition-all duration-200 hover:scale-105 active:scale-95 shadow-lg shadow-red-900/20"
-                    >
-                      🗑️ Delete Video
-                    </button>
+                          />
+                        ) : (
+                          filteredProductions.map(prod => (
+                            <div
+                              key={prod.id}
+                              onClick={() => {
+                                const video = videos.find(v => v.youtube_id === prod.youtube_id);
+                                if (video) setSelectedVideo(video);
+                              }}
+                              className={`p-4 border-b border-[#333] cursor-pointer transition-all duration-200 ${
+                                selectedVideo?.youtube_id === prod.youtube_id
+                                  ? 'bg-[#2a2a2a] border-l-4 border-l-cyan-500'
+                                  : 'hover:bg-[#222]'
+                              }`}
+                            >
+                              <h4 className="font-bold text-sm line-clamp-2 mb-2">{prod.metadata?.title || prod.title}</h4>
+                              <div className="flex justify-between text-xs text-gray-500 mb-2">
+                                <span>{prod.published_at ? new Date(prod.published_at).toLocaleDateString() : 'N/A'}</span>
+                                <span className="text-cyan-400 font-medium">{(prod.analytics?.view_count || 0).toLocaleString()} views</span>
+                              </div>
+                              {prod.analytics && (
+                                <div className="flex gap-3 text-xs text-gray-400">
+                                  <span>👍 {prod.analytics.like_count}</span>
+                                  <span>💬 {prod.analytics.comment_count}</span>
+                                  {prod.analytics.engagement_rate && (
+                                    <span className="text-yellow-400">{prod.analytics.engagement_rate.toFixed(1)}% eng</span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Main: Detailed Analytics */}
+                    <div className="lg:col-span-2 space-y-6">
+                      {selectedVideo ? (
+                        <>
+                          {/* Summary Card */}
+                          <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
+                            <div className="flex items-start justify-between mb-4">
+                              <h2 className="text-xl font-bold line-clamp-2" title={selectedVideo.title}>{selectedVideo.title}</h2>
+                              {selectedVideo.youtube_id && (
+                                <a
+                                  href={`https://youtu.be/${extractYouTubeVideoId(selectedVideo.youtube_id)}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="flex items-center gap-1 text-xs text-red-400 hover:text-red-300 bg-red-900/20 px-2 py-1 rounded"
+                                >
+                                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814z"/>
+                                    <path fill="white" d="M9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+                                  </svg>
+                                  View on YouTube
+                                </a>
+                              )}
+                            </div>
+                            
+                            {(() => {
+                              const prod = productionsWithAnalytics.find(p => p.youtube_id === selectedVideo.youtube_id);
+                              const analytics = prod?.analytics;
+                              
+                              return (
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                  <div className="bg-black/30 p-4 rounded-lg">
+                                    <div className="text-xs text-gray-400 uppercase">Views</div>
+                                    <div className="text-2xl font-bold text-white">{(analytics?.view_count || 0).toLocaleString()}</div>
+                                  </div>
+                                  <div className="bg-black/30 p-4 rounded-lg">
+                                    <div className="text-xs text-gray-400 uppercase">Likes</div>
+                                    <div className="text-2xl font-bold text-green-400">{(analytics?.like_count || 0).toLocaleString()}</div>
+                                  </div>
+                                  <div className="bg-black/30 p-4 rounded-lg">
+                                    <div className="text-xs text-gray-400 uppercase">Comments</div>
+                                    <div className="text-2xl font-bold text-blue-400">{(analytics?.comment_count || 0).toLocaleString()}</div>
+                                  </div>
+                                  <div className="bg-black/30 p-4 rounded-lg">
+                                    <div className="text-xs text-gray-400 uppercase">Engagement Rate</div>
+                                    <div className="text-2xl font-bold text-yellow-400">
+                                      {analytics?.engagement_rate?.toFixed(2) || '0.00'}%
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })()}
+                          </div>
+
+                          {/* Metadata Preview */}
+                          <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
+                            <h3 className="font-bold text-gray-200 mb-4">Metadata</h3>
+                            <div className="space-y-4">
+                              <div>
+                                <div className="text-xs text-gray-500 uppercase mb-1">Description</div>
+                                <p className="text-sm text-gray-300 font-mono bg-black/30 p-3 rounded line-clamp-4">{selectedVideo.description}</p>
+                              </div>
+                              <div>
+                                <div className="text-xs text-gray-500 uppercase mb-1">Tags</div>
+                                <div className="flex flex-wrap gap-2">
+                                  {selectedVideo.tags?.slice(0, 10).map((tag, i) => (
+                                    <span key={i} className="text-xs bg-blue-900/40 text-blue-300 px-2 py-1 rounded">#{tag}</span>
+                                  ))}
+                                  {(selectedVideo.tags?.length || 0) > 10 && (
+                                    <span className="text-xs text-gray-500">+{selectedVideo.tags!.length - 10} more</span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Delete Button */}
+                          <div className="bg-red-900/20 p-6 rounded-xl border-2 border-red-900/60 flex justify-between items-center hover:bg-red-900/30 transition-colors duration-300">
+                            <div>
+                              <h3 className="text-sm font-bold text-red-400 mb-1">⚠️ Danger Zone</h3>
+                              <p className="text-xs text-red-200/70">Permanently delete this video from database and YouTube.</p>
+                            </div>
+                            <button
+                              onClick={async () => {
+                                if (confirm('Delete this video from database and YouTube? This cannot be undone.')) {
+                                  try {
+                                    await onDeleteVideo(selectedVideo.id, selectedVideo.youtube_id);
+                                    setVideos(prev => prev.filter(v => v.id !== selectedVideo.id));
+                                    setProductionsWithAnalytics(prev => prev.filter(p => p.youtube_id !== selectedVideo.youtube_id));
+                                    setSelectedVideo(null);
+                                    toast.success('Video deleted');
+                                  } catch (error) {
+                                    console.error('Delete failed:', error);
+                                  }
+                                }
+                              }}
+                              className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition-all"
+                            >
+                              🗑️ Delete
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="bg-[#1a1a1a] rounded-xl border border-[#333] h-[600px] flex items-center justify-center">
+                          <EmptyState
+                            icon="📊"
+                            title="Select a Video"
+                            description="Choose a video from the list to view detailed performance analytics."
+                          />
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </>
-              ) : (
-                <div className="bg-[#1a1a1a] rounded-xl border border-[#333] h-full flex items-center justify-center">
-                  <EmptyState
-                    icon="📊"
-                    title="Select a Video"
-                    description="Choose a video from the list to view detailed performance insights, analytics, and metadata."
-                  />
-                </div>
-              )}
-            </div>
+              );
+            })()}
           </div>
         )}
 

@@ -377,6 +377,100 @@ const validateScriptWithScenes = (script: ScriptWithScenes) => {
 };
 
 /**
+ * Regenerate a single scene in the script
+ * Keeps the scene structure but generates new dialogue
+ */
+export const regenerateScene = async (
+  sceneNumber: number,
+  currentScene: { title?: string; text: string; video_mode: string; shot?: string },
+  allScenes: Record<string, { title?: string; text: string; video_mode: string }>,
+  config: ChannelConfig,
+  newsContext: string,
+  instruction?: string // Optional instruction for how to regenerate (e.g., "make it funnier", "add more data")
+): Promise<{ title: string; text: string; video_mode: string; model: string; shot: string }> => {
+  const hostA = config.characters.hostA;
+  const hostB = config.characters.hostB;
+  const speaker = currentScene.video_mode === 'hostA' ? hostA.name : hostB.name;
+  const character = currentScene.video_mode === 'hostA' ? hostA : hostB;
+  
+  // Get context from surrounding scenes
+  const prevScene = allScenes[String(sceneNumber - 1)]?.text || '';
+  const nextScene = allScenes[String(sceneNumber + 1)]?.text || '';
+  
+  // Language handling
+  const isSpanish = (config.language || '').toLowerCase().includes('spanish') || 
+                    (config.language || '').toLowerCase().includes('español');
+  
+  const languageInstruction = isSpanish
+    ? `IMPORTANTE: Genera el contenido COMPLETAMENTE en ESPAÑOL.`
+    : `Generate content in English.`;
+  
+  const systemPrompt = `You are a scriptwriter for a news podcast. You need to regenerate a single scene.
+
+${languageInstruction}
+
+SPEAKER: ${speaker}
+SPEAKER PERSONALITY: ${character.personality}
+SPEAKER IDEOLOGY: ${character.ideology || 'Neutral'}
+TONE: ${config.tone || 'Conversational'}
+
+The scene should:
+- Be 40-80 words
+- Match the speaker's personality and ideology
+- Flow naturally from the previous scene and into the next
+- Keep the podcast banter style
+${instruction ? `\n\nSPECIAL INSTRUCTION: ${instruction}` : ''}
+
+Return ONLY valid JSON:
+{
+  "title": "Short catchy scene title (3-6 words)",
+  "text": "The regenerated dialogue (40-80 words)"
+}`;
+
+  const userPrompt = `NEWS CONTEXT:
+${newsContext}
+
+PREVIOUS SCENE:
+${prevScene || '(This is the first scene)'}
+
+CURRENT SCENE TO REGENERATE:
+Title: ${currentScene.title || 'Scene ' + sceneNumber}
+Original text: ${currentScene.text}
+
+NEXT SCENE:
+${nextScene || '(This is the last scene)'}
+
+Please regenerate this scene with fresh dialogue.`;
+
+  try {
+    const response = await openaiRequest('chat/completions', {
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
+      response_format: { type: 'json_object' },
+      temperature: 0.8
+    }, { timeout: 20000 });
+
+    CostTracker.track('scene_regenerate', 'gpt-4o-mini', 0.002);
+
+    const result = JSON.parse(response.choices[0].message.content);
+    
+    return {
+      title: result.title || currentScene.title || `Scene ${sceneNumber}`,
+      text: result.text || currentScene.text,
+      video_mode: currentScene.video_mode,
+      model: 'infinite_talk',
+      shot: currentScene.shot || 'medium'
+    };
+  } catch (error) {
+    console.error(`[Scene Regen] Failed to regenerate scene ${sceneNumber}:`, error);
+    throw error;
+  }
+};
+
+/**
  * Generate viral metadata (title, description, tags) with fallback
  */
 export const createTitleVariantFallback = (primary: string): string => {
@@ -402,7 +496,27 @@ export const generateViralMetadataWithGPT = async (
   const topNews = news.slice(0, 3);
   const newsContext = topNews.map(n => `- ${n.headline} (Score: ${n.viralScore})`).join('\n');
   const dateStr = date.toLocaleDateString();
+  
+  // Determine language and power words based on channel config
+  const language = config.language || 'English';
+  const isSpanish = language.toLowerCase().includes('spanish') || 
+                    language.toLowerCase().includes('español') || 
+                    language.toLowerCase().includes('argentina');
+  
+  const powerWordsGuide = isSpanish
+    ? `- Usar PALABRAS DE PODER en español: ALERTA, URGENTE, EXCLUSIVO, REVELADO, ESCÁNDALO, BOMBA
+- El título debe estar COMPLETAMENTE en español
+- NO usar palabras en inglés como "Breaking", "Exposed", "Shocking", etc.`
+    : `- Start with POWER WORDS: BREAKING, SHOCKING, EXPOSED, URGENT, REVEALED
+- Title must be in English`;
+  
+  const languageInstruction = isSpanish
+    ? `IMPORTANTE: TODO el contenido debe estar en ESPAÑOL. No usar palabras en inglés.`
+    : `All content must be in English.`;
+  
   const prompt = `You are a VIRAL YouTube SEO expert with 10+ years optimizing for maximum CTR and discoverability.
+
+${languageInstruction}
 
 Create HIGH-PERFORMANCE metadata for this news broadcast video:
 
@@ -412,11 +526,12 @@ ${newsContext}
 TRENDING TOPICS: ${trendingTopics.slice(0, 5).join(', ')}
 DATE: ${dateStr}
 CHANNEL: ${config.tagline}
+LANGUAGE: ${language}
 
 Generate metadata following YouTube SEO best practices:
 
 TITLE (70-80 characters):
-- Start with POWER WORDS: BREAKING, SHOCKING, EXPOSED, URGENT, REVEALED
+${powerWordsGuide}
 - Include main keyword from top story
 - Add 1-2 relevant emojis for visual appeal
 - Create curiosity gap without clickbait
@@ -501,7 +616,10 @@ Return ONLY valid JSON: {"title": "...", "title_variants": ["...", "..."], "desc
   }
 
   console.error("[Metadata] ❌ All models failed, using defaults");
-  const fallbackTitle = "Breaking News";
+  // Fallback respects language
+  const isSpanish = (config.language || '').toLowerCase().includes('spanish') || 
+                    (config.language || '').toLowerCase().includes('español');
+  const fallbackTitle = isSpanish ? "Últimas Noticias" : "Breaking News";
   return { 
     title: fallbackTitle, 
     titleVariants: [fallbackTitle, createTitleVariantFallback(fallbackTitle)], 
@@ -1091,9 +1209,15 @@ export interface ScriptAnalysis {
 export const analyzeScriptForShorts = async (
   scenes: Record<string, { title?: string; text: string; video_mode: string }>,
   hostAName: string,
-  hostBName: string
+  hostBName: string,
+  language?: string // Optional language parameter
 ): Promise<ScriptAnalysis> => {
   console.log(`📊 [Script Analysis] Analyzing script for YouTube Shorts effectiveness...`);
+  
+  // Determine language for analysis response
+  const isSpanish = (language || '').toLowerCase().includes('spanish') || 
+                    (language || '').toLowerCase().includes('español') ||
+                    (language || '').toLowerCase().includes('argentina');
   
   // Prepare script text for analysis
   const sceneTexts = Object.entries(scenes).map(([key, scene]) => ({
@@ -1107,7 +1231,13 @@ export const analyzeScriptForShorts = async (
   const firstScene = sceneTexts[0]?.text || '';
   const lastScene = sceneTexts[sceneTexts.length - 1]?.text || '';
   
+  const languageInstruction = isSpanish 
+    ? `IMPORTANTE: Responde TODO el análisis en ESPAÑOL. Las sugerencias, fortalezas y feedback deben estar en español.`
+    : `Respond in English.`;
+  
   const systemPrompt = `You are a YouTube Shorts expert analyzing scripts for viral potential.
+
+${languageInstruction}
 
 Analyze the following script and rate it on these criteria (0-100 scale):
 
@@ -1131,7 +1261,7 @@ Analyze the following script and rate it on these criteria (0-100 scale):
    - Does it invite comments/opinions?
    - Is it shareable?
 
-Return JSON:
+Return JSON (${isSpanish ? 'with feedback, suggestions, and strengths in SPANISH' : 'in English'}):
 {
   "hookScore": number,
   "hookFeedback": "1 sentence explaining the hook effectiveness",

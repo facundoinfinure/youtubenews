@@ -2577,7 +2577,7 @@ const App: React.FC = () => {
             
             return news;
           }}
-          onGenerateScript={async (newsItems, improvements) => {
+          onGenerateScript={async (newsItems, improvements, narrativeOverride) => {
             // CRITICAL: Load fresh config from Supabase to ensure we have latest settings
             const freshChannel = await getChannelById(activeChannel!.id);
             const freshConfig = freshChannel?.config || config;
@@ -2586,11 +2586,14 @@ const App: React.FC = () => {
               setConfig(freshConfig);
             }
             
+            // Use narrative override from wizard if provided, otherwise use channel default
+            const narrativeToUse = narrativeOverride || freshConfig.preferredNarrative;
+            
             // Use the production's news_date, not the current selectedDate
             const result = await generateScriptWithScenes(
               newsItems.slice(0, 4),
               freshConfig,
-              freshConfig.preferredNarrative,
+              narrativeToUse,
               improvements // Pass improvements for regeneration
             );
             const dateObj = parseLocalDate(wizardProduction.news_date);

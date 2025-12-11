@@ -43,7 +43,8 @@ import {
   generateImageWithDALLE,
   checkOpenAIConfig,
   createTitleVariantFallback,
-  analyzeScriptForShorts
+  analyzeScriptForShorts,
+  regenerateScene
 } from "./openaiService";
 import type { ScriptAnalysis } from "./openaiService";
 import { 
@@ -1882,6 +1883,6 @@ export const getCompositionStatus = () => {
   };
 };
 
-// Re-export script analysis for YouTube Shorts
-export { analyzeScriptForShorts };
+// Re-export script analysis and scene regeneration for YouTube Shorts
+export { analyzeScriptForShorts, regenerateScene };
 export type { ScriptAnalysis };

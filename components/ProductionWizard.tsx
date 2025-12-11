@@ -22,7 +22,7 @@ import { saveProduction, updateSegmentStatus } from '../services/supabaseService
 import { uploadVideoToYouTube } from '../services/youtubeService';
 import { renderProductionToShotstack } from '../services/shotstackService';
 import { parseLocalDate } from '../utils/dateUtils';
-import { analyzeScriptForShorts, ScriptAnalysis } from '../services/geminiService';
+import { analyzeScriptForShorts, regenerateScene, ScriptAnalysis } from '../services/geminiService';
 import { getTranslationsForChannel, Translations } from '../utils/i18n';
 
 // =============================================================================================
@@ -38,7 +38,7 @@ interface ProductionWizardProps {
   onClose: () => void;
   // External generation functions
   onFetchNews: () => Promise<NewsItem[]>;
-  onGenerateScript: (newsItems: NewsItem[], improvements?: { implement: string[]; maintain: string[] }) => Promise<{ scenes: ScriptWithScenes; metadata: ViralMetadata }>;
+  onGenerateScript: (newsItems: NewsItem[], improvements?: { implement: string[]; maintain: string[] }, narrativeOverride?: 'classic' | 'double_conflict' | 'hot_take' | 'perspective_clash') => Promise<{ scenes: ScriptWithScenes; metadata: ViralMetadata }>;
   onGenerateAudio: (segmentIndex: number, text: string, speaker: string) => Promise<{ audioUrl: string; duration: number }>;
   onGenerateVideo: (segmentIndex: number, audioUrl: string, speaker: string) => Promise<{ videoUrl: string }>;
 }
@@ -582,6 +582,9 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
   // Close confirmation dialog (v2.8 - UX improvement)
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
   
+  // Narrative style selection for script generation
+  const [selectedNarrative, setSelectedNarrative] = useState<'auto' | 'classic' | 'double_conflict' | 'hot_take' | 'perspective_clash'>('auto');
+  
   // Internationalization - get translations based on channel language
   const t = getTranslationsForChannel(config.language);
   
@@ -921,7 +924,9 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
         progress: 30 
       });
       
-      const result = await onGenerateScript(selectedNews);
+      // Pass narrative override if user selected a specific style (not 'auto')
+      const narrativeOverride = selectedNarrative !== 'auto' ? selectedNarrative : undefined;
+      const result = await onGenerateScript(selectedNews, undefined, narrativeOverride);
       
       setProgressStatus({ 
         message: 'Procesando escenas...', 
@@ -979,6 +984,47 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
       
       setProgressStatus({ message: '¡Guión completado!', progress: 100 });
       await new Promise(r => setTimeout(r, 400));
+      
+      // AUTO-ANALYZE: Automatically analyze the script after generation
+      setProgressStatus({ message: 'Analizando guión...', detail: 'Evaluando potencial viral', progress: 95 });
+      try {
+        const analysis = await analyzeScriptForShorts(
+          scenes.scenes,
+          config.characters.hostA.name,
+          config.characters.hostB.name,
+          config.language
+        );
+        setScriptAnalysis(analysis);
+        
+        // Update the history item with analysis
+        const historyWithAnalysis = [...updatedHistory];
+        historyWithAnalysis[historyWithAnalysis.length - 1] = {
+          ...historyWithAnalysis[historyWithAnalysis.length - 1],
+          analysis: {
+            overallScore: analysis.overallScore,
+            hookScore: analysis.hookScore,
+            retentionScore: analysis.retentionScore,
+            pacingScore: analysis.pacingScore,
+            engagementScore: analysis.engagementScore,
+            suggestions: analysis.suggestions,
+            strengths: analysis.strengths
+          }
+        };
+        
+        // Save updated history with analysis
+        const productionWithAnalysis: Production = {
+          ...updatedProduction,
+          script_history: historyWithAnalysis
+        };
+        await saveProduction(productionWithAnalysis);
+        setLocalProduction(productionWithAnalysis);
+        setScriptHistory(historyWithAnalysis);
+        
+        console.log(`✅ [Wizard] Auto-analysis complete: ${analysis.overallScore}/100`);
+      } catch (analysisError) {
+        console.warn('[Wizard] Auto-analysis failed, will need manual analysis:', analysisError);
+        // Don't fail the whole flow, user can analyze manually
+      }
       
       // Advance to review
       const newState: ProductionWizardState = {
@@ -1727,6 +1773,40 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
               </ul>
             </div>
             
+            {/* Narrative Style Selector */}
+            <div className="bg-[#1a1a1a] p-4 rounded-lg border border-[#333]">
+              <h4 className="text-sm font-medium text-gray-400 mb-3">🎭 Estilo de Narrativa</h4>
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                {[
+                  { value: 'auto', label: '🎲 Auto', desc: 'Selección automática según el contenido' },
+                  { value: 'classic', label: '📰 Clásica', desc: 'Formato tradicional de noticias' },
+                  { value: 'double_conflict', label: '⚔️ Conflicto', desc: 'Dos perspectivas enfrentadas' },
+                  { value: 'hot_take', label: '🔥 Hot Take', desc: 'Opinión fuerte y provocativa' },
+                  { value: 'perspective_clash', label: '💥 Debate', desc: 'Hosts con visiones opuestas' }
+                ].map(({ value, label, desc }) => (
+                  <button
+                    key={value}
+                    onClick={() => setSelectedNarrative(value as typeof selectedNarrative)}
+                    title={desc}
+                    className={`p-3 rounded-lg text-sm font-medium transition-all ${
+                      selectedNarrative === value
+                        ? 'bg-purple-600 text-white ring-2 ring-purple-400'
+                        : 'bg-[#222] text-gray-300 hover:bg-[#333]'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-gray-500 mt-2">
+                {selectedNarrative === 'auto' && '🎲 La IA elegirá el mejor estilo según las noticias'}
+                {selectedNarrative === 'classic' && '📰 Estructura tradicional: Intro → Desarrollo → Cierre'}
+                {selectedNarrative === 'double_conflict' && '⚔️ Dos fuentes de conflicto/tensión en la historia'}
+                {selectedNarrative === 'hot_take' && '🔥 Opinión provocativa y directa al grano (más corto)'}
+                {selectedNarrative === 'perspective_clash' && '💥 Los hosts debaten desde posturas opuestas'}
+              </p>
+            </div>
+            
             {/* Progress Status Indicator */}
             {isLoading && progressStatus && (
               <div className="bg-[#1a1a1a] border border-purple-500/30 rounded-xl p-4">
@@ -1858,7 +1938,8 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
                           const analysis = await analyzeScriptForShorts(
                             scenes,
                             config.characters.hostA.name,
-                            config.characters.hostB.name
+                            config.characters.hostB.name,
+                            config.language // Pass language for localized analysis
                           );
                           setScriptAnalysis(analysis);
                           
@@ -2138,22 +2219,118 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
             )}
             
             <div className="space-y-3 max-h-[250px] overflow-y-auto pr-2">
-              {Object.entries(scenes).map(([key, scene]) => (
-                <div key={key} className="bg-[#1a1a1a] p-4 rounded-lg border border-[#333]">
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="text-xs bg-cyan-500/20 text-cyan-400 px-2 py-1 rounded">
-                      Escena {key}
-                    </span>
-                    <span className="text-xs bg-purple-500/20 text-purple-400 px-2 py-1 rounded">
-                      {scene.video_mode === 'hostA' ? config.characters.hostA.name : config.characters.hostB.name}
-                    </span>
-                    {scene.title && (
-                      <span className="text-xs text-gray-400">"{scene.title}"</span>
+              {Object.entries(scenes).map(([key, scene]) => {
+                const [isRegenerating, setIsRegenerating] = React.useState(false);
+                const [showRegenOptions, setShowRegenOptions] = React.useState(false);
+                const [regenInstruction, setRegenInstruction] = React.useState('');
+                
+                return (
+                  <div key={key} className="bg-[#1a1a1a] p-4 rounded-lg border border-[#333]">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs bg-cyan-500/20 text-cyan-400 px-2 py-1 rounded">
+                          Escena {key}
+                        </span>
+                        <span className="text-xs bg-purple-500/20 text-purple-400 px-2 py-1 rounded">
+                          {scene.video_mode === 'hostA' ? config.characters.hostA.name : config.characters.hostB.name}
+                        </span>
+                        {scene.title && (
+                          <span className="text-xs text-gray-400">"{scene.title}"</span>
+                        )}
+                      </div>
+                      
+                      {/* Regenerate Scene Button */}
+                      <button
+                        onClick={() => setShowRegenOptions(!showRegenOptions)}
+                        className="text-xs text-gray-500 hover:text-cyan-400 transition-colors"
+                        title="Regenerar esta escena"
+                      >
+                        {isRegenerating ? '⏳' : '🔄'}
+                      </button>
+                    </div>
+                    
+                    <p className="text-gray-300 text-sm">{scene.text}</p>
+                    
+                    {/* Regenerate Options */}
+                    {showRegenOptions && (
+                      <div className="mt-3 pt-3 border-t border-[#444] space-y-2">
+                        <input
+                          type="text"
+                          placeholder="Instrucción opcional (ej: 'hazlo más divertido', 'agrega datos')"
+                          value={regenInstruction}
+                          onChange={(e) => setRegenInstruction(e.target.value)}
+                          className="w-full bg-[#111] border border-[#333] rounded px-3 py-2 text-xs text-white placeholder:text-gray-500"
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            onClick={async () => {
+                              setIsRegenerating(true);
+                              try {
+                                // Get news context
+                                const newsContext = fetchedNews
+                                  .filter(n => selectedNewsIds.includes(n.id || n.headline))
+                                  .map(n => n.headline)
+                                  .join('\n');
+                                
+                                const newScene = await regenerateScene(
+                                  parseInt(key),
+                                  scene,
+                                  scenes,
+                                  config,
+                                  newsContext,
+                                  regenInstruction || undefined
+                                );
+                                
+                                // Update scenes
+                                const updatedScenes = { ...localProduction.scenes!.scenes };
+                                updatedScenes[key] = newScene;
+                                
+                                const updatedProduction: Production = {
+                                  ...localProduction,
+                                  scenes: {
+                                    ...localProduction.scenes!,
+                                    scenes: updatedScenes
+                                  },
+                                  segments: localProduction.segments?.map((seg, i) => 
+                                    i === parseInt(key) - 1 
+                                      ? { ...seg, text: newScene.text, sceneTitle: newScene.title }
+                                      : seg
+                                  )
+                                };
+                                
+                                await saveProduction(updatedProduction);
+                                setLocalProduction(updatedProduction);
+                                onUpdateProduction(updatedProduction);
+                                
+                                setShowRegenOptions(false);
+                                setRegenInstruction('');
+                                toast.success(`Escena ${key} regenerada`);
+                              } catch (error) {
+                                toast.error(`Error: ${(error as Error).message}`);
+                              } finally {
+                                setIsRegenerating(false);
+                              }
+                            }}
+                            disabled={isRegenerating}
+                            className="flex-1 bg-cyan-600/30 hover:bg-cyan-600 text-cyan-300 hover:text-white px-3 py-1.5 rounded text-xs font-medium transition-all disabled:opacity-50"
+                          >
+                            {isRegenerating ? '⏳ Regenerando...' : '✨ Regenerar'}
+                          </button>
+                          <button
+                            onClick={() => {
+                              setShowRegenOptions(false);
+                              setRegenInstruction('');
+                            }}
+                            className="px-3 py-1.5 text-xs text-gray-400 hover:text-white transition-colors"
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                      </div>
                     )}
                   </div>
-                  <p className="text-gray-300 text-sm">{scene.text}</p>
-                </div>
-              ))}
+                );
+              })}
             </div>
             
             <div className="flex justify-between">

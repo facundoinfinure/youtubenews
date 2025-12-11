@@ -2758,3 +2758,250 @@ export const setSystemDefault = async <T>(key: string, value: T, description?: s
     return false;
   }
 };
+
+// =============================================================================================
+// VIDEO ANALYTICS - YouTube Performance Tracking
+// =============================================================================================
+
+export interface VideoAnalyticsRecord {
+  id?: string;
+  production_id: string;
+  channel_id: string;
+  youtube_video_id: string;
+  view_count: number;
+  like_count: number;
+  comment_count: number;
+  estimated_minutes_watched?: number;
+  average_view_duration?: number;
+  average_view_percentage?: number;
+  click_through_rate?: number;
+  shares?: number;
+  subscribers_gained?: number;
+  engagement_rate?: number;
+  video_published_at: string;
+  fetched_at: string;
+}
+
+/**
+ * Save or update video analytics data
+ * Uses upsert based on production_id + youtube_video_id
+ */
+export const saveVideoAnalytics = async (analytics: VideoAnalyticsRecord): Promise<boolean> => {
+  if (!supabase) return false;
+
+  try {
+    // Calculate engagement rate if not provided
+    const engagementRate = analytics.engagement_rate ?? 
+      (analytics.view_count > 0 
+        ? ((analytics.like_count + analytics.comment_count) / analytics.view_count) * 100 
+        : 0);
+
+    const { error } = await supabase
+      .from('video_analytics')
+      .upsert({
+        ...analytics,
+        engagement_rate: engagementRate,
+        updated_at: new Date().toISOString()
+      }, {
+        onConflict: 'production_id,youtube_video_id'
+      });
+
+    if (error) {
+      // Table might not exist yet
+      if (error.code === '42P01') {
+        console.warn('⚠️ video_analytics table not found. Please run the migration.');
+        return false;
+      }
+      console.error('Error saving video analytics:', error);
+      return false;
+    }
+
+    return true;
+  } catch (e) {
+    console.error('Error in saveVideoAnalytics:', e);
+    return false;
+  }
+};
+
+/**
+ * Save analytics for multiple videos at once
+ */
+export const saveMultipleVideoAnalytics = async (analyticsArray: VideoAnalyticsRecord[]): Promise<number> => {
+  if (!supabase || !analyticsArray.length) return 0;
+
+  let savedCount = 0;
+  for (const analytics of analyticsArray) {
+    const success = await saveVideoAnalytics(analytics);
+    if (success) savedCount++;
+  }
+  
+  console.log(`📊 Saved analytics for ${savedCount}/${analyticsArray.length} videos`);
+  return savedCount;
+};
+
+/**
+ * Get video analytics for a channel within a date range
+ */
+export const getVideoAnalytics = async (
+  channelId: string,
+  startDate?: string,
+  endDate?: string
+): Promise<VideoAnalyticsRecord[]> => {
+  if (!supabase) return [];
+
+  try {
+    let query = supabase
+      .from('video_analytics')
+      .select('*')
+      .eq('channel_id', channelId)
+      .order('video_published_at', { ascending: false });
+
+    // Filter by date range if provided
+    if (startDate) {
+      query = query.gte('video_published_at', startDate);
+    }
+    if (endDate) {
+      query = query.lte('video_published_at', endDate + 'T23:59:59.999Z');
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      if (error.code === '42P01') {
+        console.warn('⚠️ video_analytics table not found');
+        return [];
+      }
+      console.error('Error fetching video analytics:', error);
+      return [];
+    }
+
+    return data || [];
+  } catch (e) {
+    console.error('Error in getVideoAnalytics:', e);
+    return [];
+  }
+};
+
+/**
+ * Get the latest analytics fetch timestamp for a channel
+ */
+export const getLastAnalyticsFetch = async (channelId: string): Promise<string | null> => {
+  if (!supabase) return null;
+
+  try {
+    const { data, error } = await supabase
+      .from('video_analytics')
+      .select('fetched_at')
+      .eq('channel_id', channelId)
+      .order('fetched_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      if (error.code === '42P01') return null;
+      return null;
+    }
+
+    return data?.fetched_at || null;
+  } catch (e) {
+    return null;
+  }
+};
+
+/**
+ * Get analytics summary for a channel
+ */
+export const getChannelAnalyticsSummary = async (
+  channelId: string,
+  startDate: string,
+  endDate: string
+): Promise<{
+  totalViews: number;
+  totalLikes: number;
+  totalComments: number;
+  totalVideos: number;
+  avgViewsPerVideo: number;
+  avgEngagementRate: number;
+  topVideo: VideoAnalyticsRecord | null;
+}> => {
+  const analytics = await getVideoAnalytics(channelId, startDate, endDate);
+  
+  if (!analytics.length) {
+    return {
+      totalViews: 0,
+      totalLikes: 0,
+      totalComments: 0,
+      totalVideos: 0,
+      avgViewsPerVideo: 0,
+      avgEngagementRate: 0,
+      topVideo: null
+    };
+  }
+
+  const totalViews = analytics.reduce((sum, a) => sum + a.view_count, 0);
+  const totalLikes = analytics.reduce((sum, a) => sum + a.like_count, 0);
+  const totalComments = analytics.reduce((sum, a) => sum + a.comment_count, 0);
+  const totalVideos = analytics.length;
+  const avgViewsPerVideo = totalVideos > 0 ? totalViews / totalVideos : 0;
+  const avgEngagementRate = analytics.reduce((sum, a) => sum + (a.engagement_rate || 0), 0) / totalVideos;
+  
+  // Find top video by views
+  const topVideo = analytics.reduce((top, current) => 
+    current.view_count > (top?.view_count || 0) ? current : top
+  , analytics[0]);
+
+  return {
+    totalViews,
+    totalLikes,
+    totalComments,
+    totalVideos,
+    avgViewsPerVideo,
+    avgEngagementRate,
+    topVideo
+  };
+};
+
+/**
+ * Get published productions with their analytics
+ */
+export const getProductionsWithAnalytics = async (
+  channelId: string
+): Promise<Array<Production & { analytics?: VideoAnalyticsRecord }>> => {
+  if (!supabase) return [];
+
+  try {
+    // Get published productions
+    const { data: productions, error: prodError } = await supabase
+      .from('productions')
+      .select('*')
+      .eq('channel_id', channelId)
+      .eq('status', 'published')
+      .not('youtube_id', 'is', null)
+      .order('published_at', { ascending: false });
+
+    if (prodError) {
+      console.error('Error fetching productions:', prodError);
+      return [];
+    }
+
+    if (!productions?.length) return [];
+
+    // Get analytics for these productions
+    const productionIds = productions.map(p => p.id);
+    const { data: analytics, error: analyticsError } = await supabase
+      .from('video_analytics')
+      .select('*')
+      .in('production_id', productionIds);
+
+    // Merge analytics with productions
+    const analyticsMap = new Map((analytics || []).map(a => [a.production_id, a]));
+    
+    return productions.map(prod => ({
+      ...prod,
+      analytics: analyticsMap.get(prod.id)
+    }));
+  } catch (e) {
+    console.error('Error in getProductionsWithAnalytics:', e);
+    return [];
+  }
+};
