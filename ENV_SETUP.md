@@ -29,15 +29,26 @@ WAVESPEED_API_KEY=...
 - **Get it from:** https://wavespeed.ai/
 - **Estimated cost:** ~$3-5 per 60-second video
 
-### 4. Supabase (Already configured)
+### 4. Supabase
+
+**For Frontend (React app):**
 ```
 VITE_SUPABASE_URL=...
 VITE_SUPABASE_ANON_KEY=...
-SUPABASE_SERVICE_ROLE_KEY=...  # Required for serverless functions (Storage uploads)
 ```
+
+**For Serverless Functions (Vercel API routes in `api/` folder):**
+```
+SUPABASE_URL=...                    # Same as VITE_SUPABASE_URL but WITHOUT VITE_ prefix
+SUPABASE_SERVICE_ROLE_KEY=...       # Required for Storage uploads (bypasses RLS)
+```
+
 - **Used for:** Database storage, Storage bucket operations
-- **Get it from:** Supabase Dashboard → Settings → API → `service_role` key (keep secret!)
-- **Important:** Service Role Key is required for `/api/upload-audio` endpoint to work (allows Storage uploads)
+- **Get Service Role Key from:** Supabase Dashboard → Settings → API → `service_role` key (keep secret!)
+- **Important:** 
+  - `SUPABASE_SERVICE_ROLE_KEY` is **required** for `/api/upload-audio` endpoint to work (allows Storage uploads)
+  - Serverless functions in Vercel (`api/*.ts`) use variables **WITHOUT** the `VITE_` prefix
+  - The frontend uses variables **WITH** the `VITE_` prefix
 - **Security:** Never expose Service Role Key to client-side code. Only use in serverless functions.
 
 ---

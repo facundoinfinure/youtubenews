@@ -55,7 +55,6 @@ const EXPECTED_FILES = {
     'notification-news-alert.mp3',
     'notification-ding.mp3',
     'notification-bell.mp3',
-    'ambient-newsroom.mp3',
   ]
 };
 

@@ -84,11 +84,6 @@ const SOUND_EFFECTS_CONFIG = {
     text: 'Bell notification sound, clear bell ring, alert',
     duration_seconds: 0.8,
   },
-  'ambient-newsroom': {
-    text: 'Ambient newsroom sound, background chatter, office atmosphere, subtle',
-    duration_seconds: 30.0,
-    loop: true,
-  },
 };
 
 /**
@@ -295,14 +290,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Obtener variables de entorno de Supabase
     // Use Service Role Key for serverless functions (bypasses RLS)
     // For Storage operations, we need full permissions
-    const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || '';
+    // Note: In Vercel serverless functions, env vars don't use VITE_ prefix
+    const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || '';
 
     if (!supabaseUrl || !supabaseKey) {
+      console.error('[Upload Audio] Missing Supabase credentials:', {
+        hasUrl: !!supabaseUrl,
+        hasServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+        hasAnonKey: !!process.env.SUPABASE_ANON_KEY,
+        envKeys: Object.keys(process.env).filter(k => k.includes('SUPABASE'))
+      });
       return res.status(500).json({ 
-        error: 'Supabase credentials not configured in Vercel environment variables. Need SUPABASE_SERVICE_ROLE_KEY for Storage uploads.' 
+        error: 'Supabase credentials not configured in Vercel environment variables. Need SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY) for Storage uploads.' 
       });
     }
+
+    // Log which key is being used (without exposing the actual key)
+    const usingServiceKey = !!process.env.SUPABASE_SERVICE_ROLE_KEY;
+    console.log('[Upload Audio] Using Supabase key type:', usingServiceKey ? 'SERVICE_ROLE (✅ recommended)' : 'ANON (⚠️ may have RLS issues)');
 
     // Use service role key if available (for server-side operations)
     const supabase = createClient(supabaseUrl, supabaseKey, {

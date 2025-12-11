@@ -139,7 +139,7 @@ export const AudioManager: React.FC<AudioManagerProps> = ({ channelId, onRefresh
   };
 
   const handleGenerateInitial = async () => {
-    if (!confirm('¿Generar archivos de audio iniciales (música y efectos básicos)? Esto puede tardar varios minutos. Se procesarán en lotes para evitar timeouts.')) {
+    if (!confirm('¿Subir archivos de audio iniciales desde fuentes gratuitas? Esto descargará archivos de audio gratuitos y los subirá a Supabase Storage.')) {
       return;
     }
 
@@ -147,184 +147,66 @@ export const AudioManager: React.FC<AudioManagerProps> = ({ channelId, onRefresh
     try {
       const vercelUrl = import.meta.env.VITE_BACKEND_URL || window.location.origin;
       
-      console.log(`[AudioManager] Generating initial audio files in batches via ${vercelUrl}/api/upload-audio`);
-      toast.loading('Generando archivos de audio (lote 1/4: música primera mitad)...', { id: 'audio-generation' });
-      
-      // Batch 1: Generate first half of music files
-      let musicResult1 = null;
-      try {
-        const music1Response = await fetch(`${vercelUrl}/api/upload-audio`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ music: true, soundEffects: false, musicBatch: 'first-half' })
-        });
+      console.log(`[AudioManager] Uploading initial audio files via ${vercelUrl}/api/upload-audio-simple`);
+      toast.loading('Subiendo archivos de audio iniciales...', { id: 'audio-generation' });
 
-        if (!music1Response.ok) {
-          const errorText = await music1Response.text();
-          throw new Error(`HTTP ${music1Response.status}: ${errorText}`);
-        }
+      // URLs de archivos de audio gratuitos (puedes reemplazar estas con tus propias URLs)
+      // Estos son ejemplos - reemplázalos con URLs reales de archivos gratuitos
+      const freeAudioFiles = [
+        // Música de fondo (usa tus propias URLs de Mixkit, Pixabay, etc.)
+        { name: 'podcast.mp3', url: 'https://assets.mixkit.co/music/download/mixkit-forest-temple-942.mp3', type: 'music' },
+        { name: 'energetic.mp3', url: 'https://assets.mixkit.co/music/download/mixkit-tech-house-vibes-130.mp3', type: 'music' },
+        { name: 'calm.mp3', url: 'https://assets.mixkit.co/music/download/mixkit-reflections-118.mp3', type: 'music' },
+        { name: 'dramatic.mp3', url: 'https://assets.mixkit.co/music/download/mixkit-epic-adventure-12.mp3', type: 'music' },
+        { name: 'news.mp3', url: 'https://assets.mixkit.co/music/download/mixkit-corporate-style-120.mp3', type: 'music' },
+        { name: 'corporate.mp3', url: 'https://assets.mixkit.co/music/download/mixkit-professional-15.mp3', type: 'music' },
+        // Efectos de sonido
+        { name: 'transition-whoosh.mp3', url: 'https://assets.mixkit.co/sfx/download/mixkit-whoosh-1123.mp3', type: 'sound-effect' },
+        { name: 'transition-swoosh.mp3', url: 'https://assets.mixkit.co/sfx/download/mixkit-quick-jump-arcade-game-239.mp3', type: 'sound-effect' },
+        { name: 'transition-swish.mp3', url: 'https://assets.mixkit.co/sfx/download/mixkit-magic-sweep-game-trophy-257.mp3', type: 'sound-effect' },
+        { name: 'emphasis-drum-roll.mp3', url: 'https://assets.mixkit.co/sfx/download/mixkit-drum-roll-build-up-2339.mp3', type: 'sound-effect' },
+        { name: 'emphasis-pop.mp3', url: 'https://assets.mixkit.co/sfx/download/mixkit-pop-cork-1035.mp3', type: 'sound-effect' },
+        { name: 'emphasis-hit.mp3', url: 'https://assets.mixkit.co/sfx/download/mixkit-punch-impact-2804.mp3', type: 'sound-effect' },
+        { name: 'notification-news-alert.mp3', url: 'https://assets.mixkit.co/sfx/download/mixkit-news-alert-988.mp3', type: 'sound-effect' },
+        { name: 'notification-ding.mp3', url: 'https://assets.mixkit.co/sfx/download/mixkit-notification-alert-991.mp3', type: 'sound-effect' },
+        { name: 'notification-bell.mp3', url: 'https://assets.mixkit.co/sfx/download/mixkit-bell-notification-933.mp3', type: 'sound-effect' },
+      ];
 
-        musicResult1 = await music1Response.json();
-        console.log(`[AudioManager] Music batch 1 result:`, musicResult1);
-        toast.loading('Generando archivos de audio (lote 2/4: música segunda mitad)...', { id: 'audio-generation' });
-      } catch (error: any) {
-        console.error('Error generating music batch 1:', error);
-        toast.dismiss('audio-generation');
-        toast.error(`Error al generar música (lote 1): ${error.message}`);
-        throw error;
+      const response = await fetch(`${vercelUrl}/api/upload-audio-simple`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files: freeAudioFiles })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
-      
-      // Batch 2: Generate second half of music files
-      let musicResult2 = null;
-      try {
-        const music2Response = await fetch(`${vercelUrl}/api/upload-audio`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ music: true, soundEffects: false, musicBatch: 'second-half' })
-        });
 
-        if (!music2Response.ok) {
-          const errorText = await music2Response.text();
-          throw new Error(`HTTP ${music2Response.status}: ${errorText}`);
-        }
-
-        musicResult2 = await music2Response.json();
-        console.log(`[AudioManager] Music batch 2 result:`, musicResult2);
-        toast.loading('Generando archivos de audio (lote 3/4: transiciones y énfasis)...', { id: 'audio-generation' });
-      } catch (error: any) {
-        console.error('Error generating music batch 2:', error);
-        toast.dismiss('audio-generation');
-        toast.error(`Error al generar música (lote 2): ${error.message}`);
-        throw error;
-      }
-      
-      // Batch 3 & 4: Generate sound effects in smaller sub-batches
-      // Split into 2 batches: transitions/emphasis (5 files) and notifications/ambient (5 files)
-      let effectsResult1 = null;
-      let effectsResult2 = null;
-      
-      try {
-        // Sub-batch 3: Transitions and emphasis effects (5 files)
-        const effects1Response = await fetch(`${vercelUrl}/api/upload-audio`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            music: false, 
-            soundEffects: true,
-            batch: 'transitions-emphasis' // Only generate these types
-          })
-        });
-
-        if (!effects1Response.ok) {
-          const errorText = await effects1Response.text();
-          throw new Error(`HTTP ${effects1Response.status}: ${errorText}`);
-        }
-
-        effectsResult1 = await effects1Response.json();
-        console.log(`[AudioManager] Sound effects batch 1 result:`, effectsResult1);
-        
-        // Sub-batch 4: Notifications and ambient effects (5 files)
-        toast.loading('Generando archivos de audio (lote 4/4: notificaciones y ambiente)...', { id: 'audio-generation' });
-        const effects2Response = await fetch(`${vercelUrl}/api/upload-audio`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            music: false, 
-            soundEffects: true,
-            batch: 'notifications-ambient' // Only generate these types
-          })
-        });
-
-        if (!effects2Response.ok) {
-          const errorText = await effects2Response.text();
-          throw new Error(`HTTP ${effects2Response.status}: ${errorText}`);
-        }
-
-        effectsResult2 = await effects2Response.json();
-        console.log(`[AudioManager] Sound effects batch 2 result:`, effectsResult2);
-      } catch (error: any) {
-        console.error('Error generating sound effects:', error);
-        toast.dismiss('audio-generation');
-        toast.error(`Error al generar efectos: ${error.message}`);
-        throw error;
-      }
-      
-      // Combine both music results
-      const musicResult = {
-        success: musicResult1?.success && musicResult2?.success,
-        results: {
-          music: { 
-            ...(musicResult1?.results?.music || {}), 
-            ...(musicResult2?.results?.music || {}) 
-          },
-          errors: [
-            ...(musicResult1?.results?.errors || []), 
-            ...(musicResult2?.results?.errors || [])
-          ]
-        },
-        summary: {
-          musicUploaded: (musicResult1?.summary?.musicUploaded || 0) + (musicResult2?.summary?.musicUploaded || 0),
-          fromCache: (musicResult1?.summary?.fromCache || 0) + (musicResult2?.summary?.fromCache || 0),
-          generated: (musicResult1?.summary?.generated || 0) + (musicResult2?.summary?.generated || 0),
-          errors: (musicResult1?.summary?.errors || 0) + (musicResult2?.summary?.errors || 0)
-        }
-      };
-      
-      // Combine both sound effects results
-      const effectsResult = {
-        success: effectsResult1?.success && effectsResult2?.success,
-        results: {
-          soundEffects: { 
-            ...(effectsResult1?.results?.soundEffects || {}), 
-            ...(effectsResult2?.results?.soundEffects || {}) 
-          },
-          errors: [
-            ...(effectsResult1?.results?.errors || []), 
-            ...(effectsResult2?.results?.errors || [])
-          ]
-        },
-        summary: {
-          soundEffectsUploaded: (effectsResult1?.summary?.soundEffectsUploaded || 0) + (effectsResult2?.summary?.soundEffectsUploaded || 0),
-          fromCache: (effectsResult1?.summary?.fromCache || 0) + (effectsResult2?.summary?.fromCache || 0),
-          generated: (effectsResult1?.summary?.generated || 0) + (effectsResult2?.summary?.generated || 0),
-          errors: (effectsResult1?.summary?.errors || 0) + (effectsResult2?.summary?.errors || 0)
-        }
-      };
-      
+      const result = await response.json();
+      console.log(`[AudioManager] Upload result:`, result);
       toast.dismiss('audio-generation');
-      
-      // Combine results
-      const totalGenerated = (musicResult.summary?.generated || 0) + (effectsResult.summary?.generated || 0);
-      const totalFromCache = (musicResult.summary?.fromCache || 0) + (effectsResult.summary?.fromCache || 0);
-      const totalErrors = (musicResult.results?.errors?.length || 0) + (effectsResult.results?.errors?.length || 0);
-      
-      if (totalGenerated > 0 || totalFromCache > 0) {
-        toast.success(`${totalGenerated + totalFromCache} archivos procesados (${totalGenerated} nuevos, ${totalFromCache} desde cache)`);
+
+      if (result.summary) {
+        const totalSuccess = result.summary.musicUploaded + result.summary.soundEffectsUploaded;
+        if (totalSuccess > 0) {
+          toast.success(`${totalSuccess} archivos subidos exitosamente`);
+        }
+        if (result.summary.errors > 0) {
+          toast.error(`${result.summary.errors} archivos fallaron. Algunos URLs pueden no estar disponibles.`);
+        }
       } else {
         toast.success('Archivos procesados');
       }
-      
-      if (totalErrors > 0) {
-        const allErrors = [...(musicResult.results?.errors || []), ...(effectsResult.results?.errors || [])];
-        console.warn('[AudioManager] Errors during generation:', allErrors);
-        
-        // Check for specific error types
-        const has402Error = allErrors.some((e: any) => e.error?.includes('402') || e.error?.includes('Payment Required'));
-        if (has402Error) {
-          toast.error('Error 402: Tu plan de ElevenLabs no incluye Music API. Actualiza a un plan que incluya Music API y Sound Effects API.', { duration: 8000 });
-        } else {
-          toast.error(`${totalErrors} errores durante la generación. Revisa la consola.`, { duration: 5000 });
-        }
-      }
-      
+
       // Wait a bit for files to be available
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      await new Promise(resolve => setTimeout(resolve, 2000));
       await loadAudioFiles();
       onRefresh?.();
     } catch (error: any) {
-      console.error('Error generating initial audios:', error);
+      console.error('Error uploading initial audios:', error);
       toast.dismiss('audio-generation');
-      toast.error(`Error al generar: ${error.message}`);
+      toast.error(`Error al subir: ${error.message}`);
     } finally {
       setRegenerating(null);
     }
