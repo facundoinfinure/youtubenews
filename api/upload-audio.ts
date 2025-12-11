@@ -117,7 +117,7 @@ async function checkFileExistsInSupabase(
     }
     
     // Verificar si el archivo existe
-    if (files && files.some(f => f.name === fileName)) {
+    if (files && files.some((f: { name: string }) => f.name === fileName)) {
       // Obtener URL pública
       const { data: urlData } = supabase.storage
         .from('channel-assets')
