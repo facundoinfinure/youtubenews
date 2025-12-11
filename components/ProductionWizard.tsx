@@ -2233,124 +2233,22 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
             )}
             
             <div className="space-y-3 max-h-[250px] overflow-y-auto pr-2">
-              {Object.entries(scenes).map(([key, scene]) => {
-                const [isRegenerating, setIsRegenerating] = React.useState(false);
-                const [showRegenOptions, setShowRegenOptions] = React.useState(false);
-                const [regenInstruction, setRegenInstruction] = React.useState('');
-                
-                return (
-                  <div key={key} className="bg-[#1a1a1a] p-4 rounded-lg border border-[#333]">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs bg-cyan-500/20 text-cyan-400 px-2 py-1 rounded">
-                          Escena {key}
-                        </span>
-                        <span className="text-xs bg-purple-500/20 text-purple-400 px-2 py-1 rounded">
-                          {scene.video_mode === 'hostA' ? config.characters.hostA.name : config.characters.hostB.name}
-                        </span>
-                        {scene.title && (
-                          <span className="text-xs text-gray-400">"{scene.title}"</span>
-                        )}
-                      </div>
-                      
-                      {/* Regenerate Scene Button */}
-                      <button
-                        onClick={() => setShowRegenOptions(!showRegenOptions)}
-                        className="text-xs text-gray-500 hover:text-cyan-400 transition-colors"
-                        title="Regenerar esta escena"
-                      >
-                        {isRegenerating ? '⏳' : '🔄'}
-                      </button>
-                    </div>
-                    
-                    <p className="text-gray-300 text-sm">{scene.text}</p>
-                    
-                    {/* Regenerate Options */}
-                    {showRegenOptions && (
-                      <div className="mt-3 pt-3 border-t border-[#444] space-y-2">
-                        <input
-                          type="text"
-                          placeholder="Instrucción opcional (ej: 'hazlo más divertido', 'agrega datos')"
-                          value={regenInstruction}
-                          onChange={(e) => setRegenInstruction(e.target.value)}
-                          className="w-full bg-[#111] border border-[#333] rounded px-3 py-2 text-xs text-white placeholder:text-gray-500"
-                        />
-                        <div className="flex gap-2">
-                          <button
-                            onClick={async () => {
-                              setIsRegenerating(true);
-                              try {
-                                // Get news context
-                                const newsContext = fetchedNews
-                                  .filter(n => selectedNewsIds.includes(n.id || n.headline))
-                                  .map(n => n.headline)
-                                  .join('\n');
-                                
-                                const newScene = await regenerateScene(
-                                  parseInt(key),
-                                  scene,
-                                  scenes,
-                                  config,
-                                  newsContext,
-                                  regenInstruction || undefined
-                                );
-                                
-                                // Update scenes - cast all fields to proper Scene type
-                                const updatedScenes = { ...localProduction.scenes!.scenes };
-                                updatedScenes[key] = {
-                                  title: newScene.title,
-                                  text: newScene.text,
-                                  video_mode: newScene.video_mode as 'hostA' | 'hostB',
-                                  model: newScene.model as 'infinite_talk' | 'infinite_talk_multi',
-                                  shot: newScene.shot as 'medium' | 'closeup' | 'wide'
-                                };
-                                
-                                const updatedProduction: Production = {
-                                  ...localProduction,
-                                  scenes: {
-                                    ...localProduction.scenes!,
-                                    scenes: updatedScenes
-                                  },
-                                  segments: localProduction.segments?.map((seg, i) => 
-                                    i === parseInt(key) - 1 
-                                      ? { ...seg, text: newScene.text, sceneTitle: newScene.title }
-                                      : seg
-                                  )
-                                };
-                                
-                                await saveProduction(updatedProduction);
-                                setLocalProduction(updatedProduction);
-                                onUpdateProduction(updatedProduction);
-                                
-                                setShowRegenOptions(false);
-                                setRegenInstruction('');
-                                toast.success(`Escena ${key} regenerada`);
-                              } catch (error) {
-                                toast.error(`Error: ${(error as Error).message}`);
-                              } finally {
-                                setIsRegenerating(false);
-                              }
-                            }}
-                            disabled={isRegenerating}
-                            className="flex-1 bg-cyan-600/30 hover:bg-cyan-600 text-cyan-300 hover:text-white px-3 py-1.5 rounded text-xs font-medium transition-all disabled:opacity-50"
-                          >
-                            {isRegenerating ? '⏳ Regenerando...' : '✨ Regenerar'}
-                          </button>
-                          <button
-                            onClick={() => {
-                              setShowRegenOptions(false);
-                              setRegenInstruction('');
-                            }}
-                            className="px-3 py-1.5 text-xs text-gray-400 hover:text-white transition-colors"
-                          >
-                            Cancelar
-                          </button>
-                        </div>
-                      </div>
+              {Object.entries(scenes).map(([key, scene]) => (
+                <div key={key} className="bg-[#1a1a1a] p-4 rounded-lg border border-[#333]">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-xs bg-cyan-500/20 text-cyan-400 px-2 py-1 rounded">
+                      Escena {key}
+                    </span>
+                    <span className="text-xs bg-purple-500/20 text-purple-400 px-2 py-1 rounded">
+                      {scene.video_mode === 'hostA' ? config.characters.hostA.name : config.characters.hostB.name}
+                    </span>
+                    {scene.title && (
+                      <span className="text-xs text-gray-400">"{scene.title}"</span>
                     )}
                   </div>
-                );
-              })}
+                  <p className="text-gray-300 text-sm">{scene.text}</p>
+                </div>
+              ))}
             </div>
             
             <div className="flex justify-between">
