@@ -293,16 +293,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.log('[Upload Audio] ELEVENLABS_API_KEY configured:', !!ELEVENLABS_API_KEY);
 
     // Obtener variables de entorno de Supabase
-    const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
-    const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY || '';
+    // Use Service Role Key for serverless functions (bypasses RLS)
+    // For Storage operations, we need full permissions
+    const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || '';
 
     if (!supabaseUrl || !supabaseKey) {
       return res.status(500).json({ 
-        error: 'Supabase credentials not configured in Vercel environment variables' 
+        error: 'Supabase credentials not configured in Vercel environment variables. Need SUPABASE_SERVICE_ROLE_KEY for Storage uploads.' 
       });
     }
 
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    // Use service role key if available (for server-side operations)
+    const supabase = createClient(supabaseUrl, supabaseKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false
+      }
+    });
     const { music = true, soundEffects = true, regenerate = [], batch, musicBatch } = req.body || {};
     
     // regenerate is an array of file names to force regenerate (e.g., ['podcast', 'transition-whoosh'])

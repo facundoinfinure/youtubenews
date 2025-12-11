@@ -33,7 +33,12 @@ WAVESPEED_API_KEY=...
 ```
 VITE_SUPABASE_URL=...
 VITE_SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...  # Required for serverless functions (Storage uploads)
 ```
+- **Used for:** Database storage, Storage bucket operations
+- **Get it from:** Supabase Dashboard → Settings → API → `service_role` key (keep secret!)
+- **Important:** Service Role Key is required for `/api/upload-audio` endpoint to work (allows Storage uploads)
+- **Security:** Never expose Service Role Key to client-side code. Only use in serverless functions.
 
 ---
 
