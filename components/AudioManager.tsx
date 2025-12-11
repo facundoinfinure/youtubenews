@@ -139,47 +139,80 @@ export const AudioManager: React.FC<AudioManagerProps> = ({ channelId, onRefresh
   };
 
   const handleGenerateInitial = async () => {
-    if (!confirm('¿Generar archivos de audio iniciales (música y efectos básicos)? Esto puede tardar varios minutos.')) {
+    if (!confirm('¿Generar archivos de audio iniciales (música y efectos básicos)? Esto puede tardar varios minutos. Se procesarán en lotes para evitar timeouts.')) {
       return;
     }
 
     setRegenerating('all');
     try {
       const vercelUrl = import.meta.env.VITE_BACKEND_URL || window.location.origin;
-      const body = { 
-        music: true, 
-        soundEffects: true 
-      };
-
-      console.log(`[AudioManager] Generating initial audio files via ${vercelUrl}/api/upload-audio`);
-      toast.loading('Generando archivos de audio...', { id: 'audio-generation' });
       
-      const response = await fetch(`${vercelUrl}/api/upload-audio`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
+      console.log(`[AudioManager] Generating initial audio files in batches via ${vercelUrl}/api/upload-audio`);
+      toast.loading('Generando archivos de audio (lote 1/2: música)...', { id: 'audio-generation' });
+      
+      // Batch 1: Generate music files first
+      let musicResult = null;
+      try {
+        const musicResponse = await fetch(`${vercelUrl}/api/upload-audio`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ music: true, soundEffects: false })
+        });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
+        if (!musicResponse.ok) {
+          const errorText = await musicResponse.text();
+          throw new Error(`HTTP ${musicResponse.status}: ${errorText}`);
+        }
+
+        musicResult = await musicResponse.json();
+        console.log(`[AudioManager] Music generation result:`, musicResult);
+        toast.loading('Generando archivos de audio (lote 2/2: efectos)...', { id: 'audio-generation' });
+      } catch (error: any) {
+        console.error('Error generating music:', error);
+        toast.dismiss('audio-generation');
+        toast.error(`Error al generar música: ${error.message}`);
+        throw error;
       }
+      
+      // Batch 2: Generate sound effects
+      let effectsResult = null;
+      try {
+        const effectsResponse = await fetch(`${vercelUrl}/api/upload-audio`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ music: false, soundEffects: true })
+        });
 
-      const result = await response.json();
-      console.log(`[AudioManager] Generation result:`, result);
+        if (!effectsResponse.ok) {
+          const errorText = await effectsResponse.text();
+          throw new Error(`HTTP ${effectsResponse.status}: ${errorText}`);
+        }
+
+        effectsResult = await effectsResponse.json();
+        console.log(`[AudioManager] Sound effects generation result:`, effectsResult);
+      } catch (error: any) {
+        console.error('Error generating sound effects:', error);
+        toast.dismiss('audio-generation');
+        toast.error(`Error al generar efectos: ${error.message}`);
+        throw error;
+      }
       
       toast.dismiss('audio-generation');
       
-      if (result.summary) {
-        const total = (result.summary.generated || 0) + (result.summary.fromCache || 0);
-        toast.success(`${total} archivos procesados (${result.summary.generated || 0} nuevos, ${result.summary.fromCache || 0} desde cache)`);
+      // Combine results
+      const totalGenerated = (musicResult?.summary?.generated || 0) + (effectsResult?.summary?.generated || 0);
+      const totalFromCache = (musicResult?.summary?.fromCache || 0) + (effectsResult?.summary?.fromCache || 0);
+      const totalErrors = (musicResult?.errors?.length || 0) + (effectsResult?.errors?.length || 0);
+      
+      if (totalGenerated > 0 || totalFromCache > 0) {
+        toast.success(`${totalGenerated + totalFromCache} archivos procesados (${totalGenerated} nuevos, ${totalFromCache} desde cache)`);
       } else {
         toast.success('Archivos procesados');
       }
       
-      if (result.errors && result.errors.length > 0) {
-        console.warn('[AudioManager] Errors during generation:', result.errors);
-        toast.error(`${result.errors.length} errores durante la generación. Revisa la consola.`);
+      if (totalErrors > 0) {
+        console.warn('[AudioManager] Errors during generation:', [...(musicResult?.errors || []), ...(effectsResult?.errors || [])]);
+        toast.error(`${totalErrors} errores durante la generación. Revisa la consola.`);
       }
       
       // Wait a bit for files to be available
