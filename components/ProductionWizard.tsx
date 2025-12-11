@@ -1158,7 +1158,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
       updateSegmentStatus(currentProd.id, i, { audio: 'generating' })
     ));
     
-    toast.success(`🎙️ Generando ${indicesToProcess.length} audios en paralelo...`);
+    toast.success(`🎙️ Generando ${indicesToProcess.length} audios...`);
     
     // Shared state objects for real-time updates
     const liveStatus: Record<number, any> = { ...(currentProd.segment_status || {}) };
@@ -1166,67 +1166,81 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
     let successCount = 0;
     let failCount = 0;
     
-    // Generate all audios in PARALLEL with real-time UI updates
-    await Promise.allSettled(
-      indicesToProcess.map(async (i) => {
-        const segment = segments[i];
+    // Helper function to process a single audio
+    const processAudio = async (i: number) => {
+      const segment = segments[i];
+      
+      try {
+        const result = await onGenerateAudio(i, segment.text, segment.speaker);
         
-        try {
-          const result = await onGenerateAudio(i, segment.text, segment.speaker);
-          
-          // Update shared state and UI immediately when this audio completes
-          liveStatus[i] = { ...liveStatus[i], audio: 'done', audioUrl: result.audioUrl };
-          liveSegments[i] = { ...liveSegments[i], audioDuration: result.duration, audioUrl: result.audioUrl };
-          successCount++;
-          
-          // Update UI in real-time
-          const updated = { 
-            ...productionRef.current, 
-            segments: [...liveSegments],
-            segment_status: { ...liveStatus } as any 
-          };
-          setLocalProduction(updated);
-          onUpdateProduction(updated);
-          
-          // Update DB
-          await updateSegmentStatus(currentProd.id, i, {
-            audio: 'done',
-            audioUrl: result.audioUrl
-          });
-          
-          toast.success(`Audio ${i + 1} ✓`);
-          return { index: i, success: true };
-        } catch (error) {
-          // Update shared state and UI immediately on failure
-          liveStatus[i] = { ...liveStatus[i], audio: 'failed', error: (error as Error).message };
-          failCount++;
-          
-          // Update UI in real-time
-          const updated = { 
-            ...productionRef.current, 
-            segment_status: { ...liveStatus } as any 
-          };
-          setLocalProduction(updated);
-          onUpdateProduction(updated);
-          
-          // Update DB
-          await updateSegmentStatus(currentProd.id, i, {
-            audio: 'failed',
-            error: (error as Error).message
-          });
-          
-          // Show more helpful error message
-          const errorMsg = (error as Error).message;
-          const friendlyError = errorMsg.includes('timeout') 
-            ? `Audio ${i + 1}: Tiempo de espera agotado. Reintenta.`
-            : errorMsg.includes('rate') || errorMsg.includes('limit')
-            ? `Audio ${i + 1}: Límite de API alcanzado. Espera unos minutos.`
-            : `Audio ${i + 1} falló: ${errorMsg.substring(0, 50)}`;
-          toast.error(friendlyError);
-          return { index: i, success: false };
-        }
-      })
-    );
+        // Update shared state and UI immediately when this audio completes
+        liveStatus[i] = { ...liveStatus[i], audio: 'done', audioUrl: result.audioUrl };
+        liveSegments[i] = { ...liveSegments[i], audioDuration: result.duration, audioUrl: result.audioUrl };
+        successCount++;
+        
+        // Update UI in real-time
+        const updated = { 
+          ...productionRef.current, 
+          segments: [...liveSegments],
+          segment_status: { ...liveStatus } as any 
+        };
+        setLocalProduction(updated);
+        onUpdateProduction(updated);
+        
+        // Update DB
+        await updateSegmentStatus(currentProd.id, i, {
+          audio: 'done',
+          audioUrl: result.audioUrl
+        });
+        
+        toast.success(`Audio ${i + 1} ✓`);
+        return { index: i, success: true };
+      } catch (error) {
+        // Update shared state and UI immediately on failure
+        liveStatus[i] = { ...liveStatus[i], audio: 'failed', error: (error as Error).message };
+        failCount++;
+        
+        // Update UI in real-time
+        const updated = { 
+          ...productionRef.current, 
+          segment_status: { ...liveStatus } as any 
+        };
+        setLocalProduction(updated);
+        onUpdateProduction(updated);
+        
+        // Update DB
+        await updateSegmentStatus(currentProd.id, i, {
+          audio: 'failed',
+          error: (error as Error).message
+        });
+        
+        // Show more helpful error message
+        const errorMsg = (error as Error).message;
+        const friendlyError = errorMsg.includes('timeout') 
+          ? `Audio ${i + 1}: Tiempo de espera agotado. Reintenta.`
+          : errorMsg.includes('rate') || errorMsg.includes('limit') || errorMsg.includes('429')
+          ? `Audio ${i + 1}: Límite de API alcanzado. Espera unos minutos.`
+          : `Audio ${i + 1} falló: ${errorMsg.substring(0, 50)}`;
+        toast.error(friendlyError);
+        return { index: i, success: false };
+      }
+    };
+    
+    // Process audios with CONCURRENCY LIMIT of 2 (ElevenLabs limit)
+    // This prevents 429 "Too Many Concurrent Requests" errors
+    const CONCURRENCY_LIMIT = 2;
+    
+    for (let batchStart = 0; batchStart < indicesToProcess.length; batchStart += CONCURRENCY_LIMIT) {
+      const batch = indicesToProcess.slice(batchStart, batchStart + CONCURRENCY_LIMIT);
+      
+      // Process batch in parallel (max 2 at a time)
+      await Promise.allSettled(batch.map(i => processAudio(i)));
+      
+      // Small delay between batches to be safe with rate limits
+      if (batchStart + CONCURRENCY_LIMIT < indicesToProcess.length) {
+        await new Promise(r => setTimeout(r, 500));
+      }
+    }
     
     // Final save to DB with all updates
     const finalProduction = { 
