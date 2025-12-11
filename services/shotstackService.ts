@@ -2300,23 +2300,58 @@ export const renderProductionToShotstack = async (
       );
       
       // Update scenes with sound effect URLs from Supabase Storage
+      // Match sound effects by type and description to ensure correct assignment
       if (audioAssets.soundEffects.length > 0) {
-        let effectIndex = 0;
-        scenes.forEach((scene, index) => {
-          if (scene.soundEffects && scene.soundEffects.type !== 'none') {
-            const effect = audioAssets.soundEffects[effectIndex];
-            if (effect) {
-              scene.soundEffects.url = effect.url;
+        scenes.forEach((scene, sceneIndex) => {
+          if (scene.soundEffects && scene.soundEffects.type && scene.soundEffects.type !== 'none') {
+            // Find matching sound effect by type and description
+            const safeDescription = (scene.soundEffects.description || scene.soundEffects.type)
+              .replace(/[^a-zA-Z0-9]/g, '-')
+              .toLowerCase();
+            
+            // Try to find exact match first
+            let matchedEffect = audioAssets.soundEffects.find(effect => 
+              effect.type === scene.soundEffects!.type &&
+              effect.url.includes(safeDescription)
+            );
+            
+            // If no exact match, find by type and start time (assuming order matches)
+            if (!matchedEffect) {
+              // Count how many effects of this type we've seen so far
+              let effectIndex = 0;
+              for (let i = 0; i < sceneIndex; i++) {
+                if (scenes[i].soundEffects?.type === scene.soundEffects.type && 
+                    scenes[i].soundEffects?.type !== 'none') {
+                  effectIndex++;
+                }
+              }
+              
+              // Find the nth effect of this type
+              const effectsOfType = audioAssets.soundEffects.filter(e => e.type === scene.soundEffects!.type);
+              matchedEffect = effectsOfType[effectIndex];
+            }
+            
+            if (matchedEffect) {
+              scene.soundEffects.url = matchedEffect.url;
               // Preserve original duration and timing from script
-              // The renderer will use these precise values
               if (!scene.soundEffects.duration) {
-                scene.soundEffects.duration = effect.duration;
+                scene.soundEffects.duration = matchedEffect.duration;
               }
               if (!scene.soundEffects.volume) {
-                scene.soundEffects.volume = effect.volume;
+                scene.soundEffects.volume = matchedEffect.volume;
               }
-              effectIndex++;
+              console.log(`🔊 [Shotstack] Assigned sound effect URL to scene ${sceneIndex + 1}: ${matchedEffect.url}`);
+            } else {
+              console.warn(`[Shotstack] ⚠️ Could not find matching sound effect URL for scene ${sceneIndex + 1} (type: ${scene.soundEffects.type}, description: ${scene.soundEffects.description})`);
             }
+          }
+        });
+      } else {
+        // If no sound effects were found, remove sound effects metadata from scenes
+        scenes.forEach((scene) => {
+          if (scene.soundEffects && scene.soundEffects.type !== 'none') {
+            console.warn(`[Shotstack] ⚠️ Sound effect not found in storage, removing from scene (type: ${scene.soundEffects.type})`);
+            scene.soundEffects.type = 'none';
           }
         });
       }

@@ -464,6 +464,59 @@ export const getBackgroundMusicUrl = async (
 };
 
 /**
+ * List available sound effects from Supabase Storage
+ * Returns array of available sound effect descriptions
+ */
+export const listAvailableSoundEffects = async (
+  channelId?: string
+): Promise<Array<{ type: SoundEffectType; description: string }>> => {
+  const { supabase } = await import('./supabaseService');
+  
+  if (!supabase) {
+    console.warn(`[ElevenLabs] ⚠️ Supabase not initialized, cannot list sound effects`);
+    return [];
+  }
+  
+  try {
+    const folderPath = channelId
+      ? `channels/${channelId}/sound-effects`
+      : `sound-effects`;
+    
+    const { data: files, error } = await supabase.storage
+      .from('channel-assets')
+      .list(folderPath);
+    
+    if (error) {
+      console.warn(`[ElevenLabs] ⚠️ Error listing sound effects:`, error);
+      return [];
+    }
+    
+    const soundEffects: Array<{ type: SoundEffectType; description: string }> = [];
+    
+    if (files && files.length > 0) {
+      for (const file of files) {
+        // Parse filename: {type}-{description}.mp3
+        const name = file.name.replace(/\.mp3$/i, '');
+        const parts = name.split('-');
+        if (parts.length >= 2) {
+          const type = parts[0] as SoundEffectType;
+          const description = parts.slice(1).join('-');
+          if (['transition', 'emphasis', 'notification', 'ambient'].includes(type)) {
+            soundEffects.push({ type, description });
+          }
+        }
+      }
+    }
+    
+    console.log(`[ElevenLabs] 📋 Found ${soundEffects.length} available sound effects`);
+    return soundEffects;
+  } catch (error) {
+    console.warn(`[ElevenLabs] ⚠️ Error listing sound effects:`, (error as Error).message);
+    return [];
+  }
+};
+
+/**
  * Generate or get URL for sound effect from Supabase Storage
  * 
  * This function looks for existing sound effect files in Supabase Storage.
@@ -793,6 +846,7 @@ export const ElevenLabsService = {
   checkConfig: checkElevenLabsConfig,
   getBackgroundMusicUrl,
   getSoundEffectUrl,
+  listAvailableSoundEffects,
   generateProductionAudio,
   VOICES: ELEVENLABS_VOICES,
   MODELS: ELEVENLABS_MODELS,

@@ -107,6 +107,11 @@ export const generateScriptWithGPT = async (
 
   const hostA = config.characters.hostA;
   const hostB = config.characters.hostB;
+  
+  // Get available sound effects from storage
+  const { listAvailableSoundEffects } = await import('./elevenlabsService');
+  type SoundEffectType = 'transition' | 'emphasis' | 'notification' | 'ambient' | 'none';
+  const availableSoundEffects = await listAvailableSoundEffects();
 
   const hostProfilePrompt = `
 === HOST PROFILES (CRITICAL: Each host MUST speak according to their personality) ===
@@ -205,11 +210,21 @@ For EACH scene provide:
 - shot: default "medium", "closeup" for Hook/Conflict, "wide" for Payoff
 - soundEffects (OPTIONAL): Suggest appropriate sound effects for this scene with PRECISE timing:
   * type: "transition" (for scene changes), "emphasis" (for key points), "notification" (for breaking news), "ambient" (for background atmosphere), or "none"
-  * description: Brief description of the desired sound. IMPORTANT: Use EXACTLY these values to match available files:
-    - For "transition" type: "whoosh", "swoosh", or "swish"
-    - For "emphasis" type: "drum-roll", "pop", or "hit"
-    - For "notification" type: "news-alert", "ding", or "bell"
-    - For "ambient" type: "newsroom"
+  * description: Brief description of the desired sound. **CRITICAL**: Only use sound effects that are AVAILABLE in storage:
+${availableSoundEffects.length > 0 
+  ? availableSoundEffects.reduce((acc: Array<{ type: string; descriptions: string[] }>, effect: { type: SoundEffectType; description: string }) => {
+      const existing = acc.find((e: { type: string; descriptions: string[] }) => e.type === effect.type);
+      if (existing) {
+        existing.descriptions.push(effect.description);
+      } else {
+        acc.push({ type: effect.type, descriptions: [effect.description] });
+      }
+      return acc;
+    }, [] as Array<{ type: string; descriptions: string[] }>).map((effect: { type: string; descriptions: string[] }) => 
+      `    - For "${effect.type}" type: ${effect.descriptions.map((d: string) => `"${d}"`).join(', ')}`
+    ).join('\n')
+  : '    - No sound effects available. Use "none" for all scenes.'}
+  * **IMPORTANT**: If a sound effect is not listed above, use "none" instead. Do not invent sound effect descriptions.
   * startTime: EXACT timing - "start" (0s into scene), "end" (at scene end), "middle" (middle of scene), or a NUMBER (seconds into scene, e.g., 2.5)
   * duration: EXACT duration in seconds (e.g., 0.5, 1.0, 1.5, 2.0) - keep short (0.3-2.0s for most effects)
   * endTime: OPTIONAL explicit end time in seconds (if not provided, calculated as startTime + duration)
