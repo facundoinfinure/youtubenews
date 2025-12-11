@@ -178,14 +178,15 @@ Dialogue Rules:
 - 80–130 words per scene (40–80 for Hot Take scenes)
 - Reference news sources naturally in dialogue
 
-🔗 SCENE TRANSITIONS (CRITICAL):
-When a scene changes to a DIFFERENT news topic/story, the NEW scene MUST start with a transition phrase to create smooth flow:
-${isSpanish ? 
-  '- Use phrases like: "Siguiendo con otro tema", "Cambiando de tema", "Además", "Por otro lado", "Mientras tanto", "Ahora hablemos de", "Pasando a otro asunto", "En otro orden de cosas"' :
-  '- Use phrases like: "Moving on to another topic", "Switching gears", "Additionally", "On another note", "Meanwhile", "Let\'s talk about", "Shifting to another subject", "In other news"'}
-- If the scene continues the SAME topic, no transition phrase is needed
-- Transitions should feel natural and conversational, not forced
-- Example: If scene 1 talks about "Company X earnings" and scene 2 talks about "Market crash", scene 2 MUST start with a transition phrase
+🔗 SCENE TRANSITIONS (CRITICAL - READ CAREFULLY):
+- **ONLY** add transition phrases when the scene changes to a COMPLETELY DIFFERENT news topic/story
+- If the scene continues the SAME topic or a RELATED topic, DO NOT use any transition phrase
+- Examples of DIFFERENT topics (need transition): "Apple earnings" → "Tesla stock crash" (different companies/stories)
+- Examples of SAME/RELATED topics (NO transition): "Apple earnings" → "Apple stock reaction" (same company), "Market rally" → "Market analysis" (same topic)
+- When you DO need a transition, use phrases like: ${isSpanish ? 
+  '"Siguiendo con otro tema", "Cambiando de tema", "Por otro lado", "Ahora hablemos de", "Pasando a otro asunto"' :
+  '"Moving on to another topic", "Switching gears", "On another note", "Let\'s talk about", "Shifting to another subject"'}
+- **IMPORTANT**: Most consecutive scenes will be about the same or related topics - only use transitions for major topic shifts
 
 ⚠️ PERSONALITY ENFORCEMENT:
 - ${hostA.name}'s lines MUST match their described personality/ideology
@@ -436,36 +437,79 @@ const addSceneTransitions = (script: ScriptWithScenes, config: ChannelConfig) =>
   };
   
   // Helper to check if two scenes are about different topics
+  // IMPORTANT: Only returns true for MAJOR topic changes, not related topics
   const isDifferentTopic = (prevText: string, currentText: string): boolean => {
     const prevTopics = extractTopics(prevText);
     const currentTopics = extractTopics(currentText);
     
-    // If no common capitalized words, likely different topic
-    const commonTopics = prevTopics.filter(t => currentTopics.includes(t));
+    // Normalize text for better comparison (remove transition phrases that might already exist)
+    const normalizeText = (text: string) => {
+      let normalized = text.toLowerCase();
+      // Remove common transition phrases
+      transitionPhrases.forEach(phrase => {
+        normalized = normalized.replace(new RegExp(`^${phrase.toLowerCase()}[,\\s]*`, 'i'), '');
+      });
+      return normalized;
+    };
     
-    // If less than 30% overlap in topics, consider it a different topic
-    // Also check for common news keywords that might indicate same story
-    const newsKeywords = isSpanish 
-      ? ['empresa', 'mercado', 'acciones', 'economía', 'noticia', 'informe']
-      : ['company', 'market', 'stock', 'economy', 'news', 'report'];
+    const prevNormalized = normalizeText(prevText);
+    const currentNormalized = normalizeText(currentText);
     
-    const prevHasKeywords = newsKeywords.some(kw => prevText.toLowerCase().includes(kw));
-    const currentHasKeywords = newsKeywords.some(kw => currentText.toLowerCase().includes(kw));
+    // Extract key entities (company names, proper nouns) - these are more reliable indicators
+    const extractKeyEntities = (text: string): string[] => {
+      const entities: string[] = [];
+      // Extract capitalized words (potential company names, places, people)
+      const words = text.split(/\s+/);
+      words.forEach(w => {
+        // Match capitalized words that look like proper nouns (not at start of sentence)
+        if (/^[A-ZÁÉÍÓÚÑ][a-záéíóúñ]{2,}/.test(w)) {
+          entities.push(w.toLowerCase());
+        }
+      });
+      return entities;
+    };
     
-    // If both have keywords but no common topics, likely different stories
-    if (prevHasKeywords && currentHasKeywords && commonTopics.length === 0) {
-      return true;
+    const prevEntities = extractKeyEntities(prevNormalized);
+    const currentEntities = extractKeyEntities(currentNormalized);
+    
+    // Check for common entities - if there are common entities, likely same/related topic
+    const commonEntities = prevEntities.filter(e => currentEntities.includes(e));
+    
+    // Also check for semantic similarity using keywords
+    const extractKeywords = (text: string): string[] => {
+      const keywords = isSpanish
+        ? ['empresa', 'empresas', 'mercado', 'mercados', 'acciones', 'acciones', 'economía', 'banco', 'bancos', 'inflación', 'desempleo']
+        : ['company', 'companies', 'market', 'markets', 'stock', 'stocks', 'economy', 'bank', 'banks', 'inflation', 'unemployment'];
+      return keywords.filter(kw => text.includes(kw));
+    };
+    
+    const prevKeywords = extractKeywords(prevNormalized);
+    const currentKeywords = extractKeywords(currentNormalized);
+    const commonKeywords = prevKeywords.filter(kw => currentKeywords.includes(kw));
+    
+    // Decision logic:
+    // 1. If there are common entities (same companies/people), it's likely the same topic → NO transition
+    if (commonEntities.length >= 2) {
+      return false; // Same or related topic
     }
     
-    // If there's significant overlap, likely same topic
-    if (commonTopics.length > 0 && commonTopics.length >= Math.min(prevTopics.length, currentTopics.length) * 0.3) {
-      return false;
+    // 2. If there are common keywords AND at least one common entity, same topic → NO transition
+    if (commonKeywords.length > 0 && commonEntities.length >= 1) {
+      return false; // Related topic
     }
     
-    // Default: if no clear overlap, assume different topic
-    return commonTopics.length === 0 || commonTopics.length < 2;
+    // 3. If both talk about completely different entities with different keywords → Different topic → NEED transition
+    if (commonEntities.length === 0 && commonKeywords.length === 0 && 
+        prevEntities.length > 0 && currentEntities.length > 0) {
+      return true; // Different topic
+    }
+    
+    // 4. Default: Be conservative - if unsure, assume same/related topic (NO transition)
+    // This prevents over-adding transitions
+    return false;
   };
   
+  // First pass: Remove transitions that were incorrectly added (same topic)
   const sceneKeys = Object.keys(script.scenes).sort((a, b) => parseInt(a) - parseInt(b));
   
   for (let i = 1; i < sceneKeys.length; i++) {
@@ -476,12 +520,36 @@ const addSceneTransitions = (script: ScriptWithScenes, config: ChannelConfig) =>
     
     if (!prevScene || !currentScene) continue;
     
-    // Check if topic changed and if transition is missing
+    // If there's a transition but topics are the same, remove it
+    if (hasTransition(currentScene.text) && !isDifferentTopic(prevScene.text, currentScene.text)) {
+      // Remove the transition phrase
+      let cleanedText = currentScene.text;
+      for (const phrase of transitionPhrases) {
+        const regex = new RegExp(`^${phrase}[,\\s]+`, 'i');
+        if (regex.test(cleanedText)) {
+          cleanedText = cleanedText.replace(regex, '').trim();
+          currentScene.text = cleanedText;
+          console.log(`[Script] 🧹 Removed unnecessary transition from scene ${currentKey}: "${phrase}" (same topic)`);
+          break;
+        }
+      }
+    }
+  }
+  
+  // Second pass: Add transitions only when topic actually changed
+  for (let i = 1; i < sceneKeys.length; i++) {
+    const prevKey = sceneKeys[i - 1];
+    const currentKey = sceneKeys[i];
+    const prevScene = script.scenes[prevKey];
+    const currentScene = script.scenes[currentKey];
+    
+    if (!prevScene || !currentScene) continue;
+    
+    // Only add transition if topic changed AND no transition exists
     if (isDifferentTopic(prevScene.text, currentScene.text) && !hasTransition(currentScene.text)) {
-      // Add a transition phrase at the beginning
       const randomTransition = transitionPhrases[Math.floor(Math.random() * transitionPhrases.length)];
       currentScene.text = `${randomTransition}, ${currentScene.text}`;
-      console.log(`[Script] 🔗 Added transition to scene ${currentKey}: "${randomTransition}"`);
+      console.log(`[Script] 🔗 Added transition to scene ${currentKey}: "${randomTransition}" (topic changed)`);
     }
   }
 };
@@ -611,9 +679,12 @@ The scene should:
 - Keep the podcast banter style
 
 🔗 TRANSITION RULES:
-${prevScene ? `- If this scene changes to a DIFFERENT topic from the previous scene, START with a transition phrase: ${isSpanish ? '"Siguiendo con otro tema", "Cambiando de tema", "Además", "Por otro lado", etc.' : '"Moving on to another topic", "Switching gears", "Additionally", "On another note", etc.'}` : '- This is the first scene, no transition needed'}
-- If the scene continues the SAME topic, do NOT use a transition phrase
-- Transitions should feel natural and conversational
+${prevScene ? `- **ONLY** add a transition phrase if this scene changes to a COMPLETELY DIFFERENT topic from the previous scene
+- If the scene continues the SAME topic or is RELATED to the previous scene, DO NOT use any transition phrase
+- Examples that need transition: "Apple earnings" → "Tesla stock crash" (different companies)
+- Examples that DON'T need transition: "Apple earnings" → "Apple stock reaction" (same company), "Market rally" → "Market analysis" (same topic)
+- When you DO need a transition, use: ${isSpanish ? '"Siguiendo con otro tema", "Cambiando de tema", "Por otro lado", "Ahora hablemos de"' : '"Moving on to another topic", "Switching gears", "On another note", "Let\'s talk about"'}
+- **IMPORTANT**: Most scenes will be related - only use transitions for major topic shifts` : '- This is the first scene, no transition needed'}
 
 ${instruction ? `\n\nSPECIAL INSTRUCTION: ${instruction}` : ''}
 
@@ -656,21 +727,38 @@ Please regenerate this scene with fresh dialogue.`;
     let regeneratedText = result.text || currentScene.text;
     
     // Check if transition is needed (if previous scene exists and topic changed)
+    // Use more conservative logic - only add if clearly different topic
     if (prevScene && sceneNumber > 1) {
-      const hasTransition = transitionPhrases.some(phrase => 
+      const hasTransition = transitionPhrases.some(phrase =>
         regeneratedText.toLowerCase().startsWith(phrase.toLowerCase())
       );
-      
-      // Simple heuristic: check if topics are different
-      const prevTopics = prevScene.match(/\b[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+\b/g) || [];
-      const currentTopics = regeneratedText.match(/\b[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+\b/g) || [];
-      const commonTopics = prevTopics.filter(t => currentTopics.includes(t));
-      
-      // If different topic and no transition, add one
-      if (commonTopics.length < 2 && !hasTransition) {
+
+      // Remove transition if present but topic is the same
+      if (hasTransition) {
+        let cleanedText = regeneratedText;
+        for (const phrase of transitionPhrases) {
+          const regex = new RegExp(`^${phrase}[,\\s]+`, 'i');
+          if (regex.test(cleanedText)) {
+            cleanedText = cleanedText.replace(regex, '').trim();
+            break;
+          }
+        }
+        regeneratedText = cleanedText;
+      }
+
+      // Extract entities for better comparison
+      const prevEntities = (prevScene.match(/\b[A-ZÁÉÍÓÚÑ][a-záéíóúñ]{2,}\b/g) || []).map(e => e.toLowerCase());
+      const currentEntities = (regeneratedText.match(/\b[A-ZÁÉÍÓÚÑ][a-záéíóúñ]{2,}\b/g) || []).map(e => e.toLowerCase());
+      const commonEntities = prevEntities.filter(e => currentEntities.includes(e));
+
+      // Only add transition if NO common entities (completely different topic)
+      // Be conservative - if there's any overlap, assume same/related topic
+      if (commonEntities.length === 0 && prevEntities.length > 0 && currentEntities.length > 0 && !hasTransition) {
         const randomTransition = transitionPhrases[Math.floor(Math.random() * transitionPhrases.length)];
         regeneratedText = `${randomTransition}, ${regeneratedText}`;
-        console.log(`[Scene Regen] 🔗 Added transition to scene ${sceneNumber}: "${randomTransition}"`);
+        console.log(`[Scene Regen] 🔗 Added transition to scene ${sceneNumber}: "${randomTransition}" (different topic)`);
+      } else if (commonEntities.length > 0) {
+        console.log(`[Scene Regen] ✓ Scene ${sceneNumber}: Same/related topic (${commonEntities.length} common entities), no transition needed`);
       }
     }
     
