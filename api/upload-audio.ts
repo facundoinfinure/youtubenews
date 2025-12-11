@@ -303,10 +303,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const supabase = createClient(supabaseUrl, supabaseKey);
-    const { music = true, soundEffects = true, regenerate = [], batch } = req.body || {};
+    const { music = true, soundEffects = true, regenerate = [], batch, musicBatch } = req.body || {};
     
     // regenerate is an array of file names to force regenerate (e.g., ['podcast', 'transition-whoosh'])
     // batch can be 'transitions-emphasis' or 'notifications-ambient' to split sound effects generation
+    // musicBatch can be 'first-half' or 'second-half' to split music generation
 
     const results: Record<string, any> = {
       music: {},
@@ -320,7 +321,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Procesar música de fondo
     if (music) {
-      for (const [style, config] of Object.entries(MUSIC_CONFIG)) {
+      // Filter by musicBatch if specified
+      const musicToProcess = musicBatch 
+        ? Object.entries(MUSIC_CONFIG).filter(([style], index) => {
+            const allStyles = Object.keys(MUSIC_CONFIG);
+            if (musicBatch === 'first-half') {
+              return index < Math.ceil(allStyles.length / 2);
+            } else if (musicBatch === 'second-half') {
+              return index >= Math.ceil(allStyles.length / 2);
+            }
+            return true;
+          })
+        : Object.entries(MUSIC_CONFIG);
+      
+      for (const [style, config] of musicToProcess) {
         try {
           const fileName = `${style}.mp3`;
           const storagePath = `music/${fileName}`;

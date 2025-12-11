@@ -13,7 +13,7 @@
       "memory": 256
     },
     "api/upload-audio.ts": {
-      "maxDuration": 60,
+      "maxDuration": 300,
       "memory": 512
     }
   },
