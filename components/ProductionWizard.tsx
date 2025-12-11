@@ -25,7 +25,7 @@ import { renderProductionToShotstack } from '../services/shotstackService';
 import { parseLocalDate } from '../utils/dateUtils';
 import { analyzeScriptForShorts, regenerateScene, ScriptAnalysis } from '../services/geminiService';
 import { getTranslationsForChannel, Translations } from '../utils/i18n';
-import { AudioManager } from './AudioManager';
+// import { AudioManager } from './AudioManager'; // Ocultado - gestión de audio disponible en Admin Dashboard
 
 // =============================================================================================
 // TYPES
@@ -2672,7 +2672,8 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
               </p>
             </div>
             
-            {/* Audio Manager Section */}
+            {/* Audio Manager Section - Ocultado: Gestión de audio disponible en Admin Dashboard */}
+            {/* 
             <div className="bg-[#1a1a1a] border border-[#333] rounded-lg p-4 sm:p-6">
               <h4 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
                 🎵 Gestión de Audio
@@ -2684,6 +2685,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
                 }}
               />
             </div>
+            */}
             
             {production.final_video_url ? (
               <div className="bg-green-900/20 border border-green-500/30 p-4 rounded-lg">
