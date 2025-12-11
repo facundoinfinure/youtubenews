@@ -709,9 +709,9 @@ export const buildPodcastStyleEdit = (
       // Wider banner with gradient-ready structure
       banner: { width: 1080, height: 180, y: -0.42 },
       // Sleek category badge with rounded feel
-      badge: { width: 320, height: 52, x: 0, y: -0.32, fontSize: 24 },
+      badge: { width: 320, height: 52, x: 0, y: -0.32, fontSize: 32 },
       // Clean headline area
-      headline: { width: 960, height: 90, x: 0, y: -0.42, fontSize: 32 }
+      headline: { width: 960, height: 90, x: 0, y: -0.42, fontSize: 48 }
     },
     // Modern date badge - top right corner
     date: { x: 0.35, y: 0.42, fontSize: 20, width: 180, height: 44 },
@@ -766,7 +766,7 @@ export const buildPodcastStyleEdit = (
             type: 'text',
             text: '',
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: '#000000', family: 'Roboto', size: 10, lineHeight: 1 },
+            font: { color: '#000000', family: 'Roboto', size: 20, lineHeight: 1 },
             width: presets.lowerThird.banner.width,
             height: presets.lowerThird.banner.height,
             background: { color: secondaryColor }
@@ -1368,8 +1368,8 @@ export const buildPodcastStyleEdit = (
     }[subtitlePosition];
     
     const subtitlePresets = isVertical 
-      ? { fontSize: 22, width: 900, height: 120, maxChars: 50 }
-      : { fontSize: 28, width: 1400, height: 100, maxChars: 70 };
+      ? { fontSize: 40, width: 900, height: 120, maxChars: 50 }
+      : { fontSize: 50, width: 1400, height: 100, maxChars: 70 };
     
     // Style configurations
     const styleConfig = {
@@ -1487,6 +1487,28 @@ export const buildPodcastStyleEdit = (
   };
   const size = resolutionMap[aspectRatio]?.[options.resolution || config.output.resolution || '1080'] || resolutionMap['16:9']['1080'];
 
+  // Helper function to validate audio URLs
+  const isValidAudioUrl = (url: string): boolean => {
+    if (!url || !url.trim()) return false;
+    
+    // Reject Pixabay URLs (they return 403)
+    if (url.includes('cdn.pixabay.com') || url.includes('pixabay.com')) {
+      console.warn(`[Shotstack] ⚠️ Rejecting Pixabay URL (not publicly accessible): ${url}`);
+      return false;
+    }
+    
+    // Must be a valid HTTP/HTTPS URL
+    try {
+      const urlObj = new URL(url);
+      if (!['http:', 'https:'].includes(urlObj.protocol)) {
+        return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   // === SOUND EFFECTS TRACK ===
   // Add transition sound effects for dynamic pacing
   if (config.soundEffects?.enabled && scenesWithTiming.length > 1) {
@@ -1497,29 +1519,35 @@ export const buildPodcastStyleEdit = (
       scenesWithTiming.forEach((scene, index) => {
         if (index > 0) {
           // Add whoosh/transition sound at each scene change
-          if (config.soundEffects?.transitionSound && config.soundEffects.transitionSound.trim()) {
+          const transitionSound = config.soundEffects?.transitionSound?.trim();
+          if (transitionSound && isValidAudioUrl(transitionSound)) {
             soundEffectClips.push({
               asset: {
                 type: 'audio',
-                src: config.soundEffects.transitionSound,
-                volume: config.soundEffects.transitionVolume || 0.4
+                src: transitionSound,
+                volume: config.soundEffects?.transitionVolume || 0.4
               },
               start: Math.max(0, scene.start - 0.3), // Start slightly before transition
               length: 1.5 // Short sound effect
             });
+          } else if (transitionSound && !isValidAudioUrl(transitionSound)) {
+            console.warn(`[Shotstack] ⚠️ Skipping invalid transition sound URL: ${transitionSound}`);
           }
           
           // Add scene change notification sound (optional)
-          if (config.soundEffects?.sceneChangeSound && config.soundEffects.sceneChangeSound.trim() && index % 3 === 0) {
+          const sceneChangeSound = config.soundEffects?.sceneChangeSound?.trim();
+          if (sceneChangeSound && isValidAudioUrl(sceneChangeSound) && index % 3 === 0) {
             soundEffectClips.push({
               asset: {
                 type: 'audio',
-                src: config.soundEffects.sceneChangeSound,
-                volume: config.soundEffects.sceneChangeVolume || 0.3
+                src: sceneChangeSound,
+                volume: config.soundEffects?.sceneChangeVolume || 0.3
               },
               start: scene.start + 0.5,
               length: 1
             });
+          } else if (sceneChangeSound && !isValidAudioUrl(sceneChangeSound)) {
+            console.warn(`[Shotstack] ⚠️ Skipping invalid scene change sound URL: ${sceneChangeSound}`);
           }
         }
       });
