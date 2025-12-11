@@ -104,6 +104,8 @@ export const AudioManager: React.FC<AudioManagerProps> = ({ channelId, onRefresh
         ? { music: true, soundEffects: false }
         : { music: false, soundEffects: true };
 
+      console.log(`[AudioManager] Generating ${type} files via ${vercelUrl}/api/upload-audio`);
+      
       const response = await fetch(`${vercelUrl}/api/upload-audio`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -111,16 +113,83 @@ export const AudioManager: React.FC<AudioManagerProps> = ({ channelId, onRefresh
       });
 
       if (!response.ok) {
-        throw new Error('Error al regenerar audios');
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
 
       const result = await response.json();
-      toast.success(`${result.summary.generated} archivos regenerados`);
+      console.log(`[AudioManager] Generation result:`, result);
+      
+      if (result.summary) {
+        toast.success(`${result.summary.generated || 0} archivos generados, ${result.summary.fromCache || 0} desde cache`);
+      } else {
+        toast.success('Archivos procesados');
+      }
+      
+      // Wait a bit for files to be available
+      await new Promise(resolve => setTimeout(resolve, 2000));
       await loadAudioFiles();
       onRefresh?.();
     } catch (error: any) {
       console.error('Error regenerating audios:', error);
       toast.error(`Error al regenerar: ${error.message}`);
+    } finally {
+      setRegenerating(null);
+    }
+  };
+
+  const handleGenerateInitial = async () => {
+    if (!confirm('¿Generar archivos de audio iniciales (música y efectos básicos)? Esto puede tardar varios minutos.')) {
+      return;
+    }
+
+    setRegenerating('all');
+    try {
+      const vercelUrl = import.meta.env.VITE_BACKEND_URL || window.location.origin;
+      const body = { 
+        music: true, 
+        soundEffects: true 
+      };
+
+      console.log(`[AudioManager] Generating initial audio files via ${vercelUrl}/api/upload-audio`);
+      toast.loading('Generando archivos de audio...', { id: 'audio-generation' });
+      
+      const response = await fetch(`${vercelUrl}/api/upload-audio`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+
+      const result = await response.json();
+      console.log(`[AudioManager] Generation result:`, result);
+      
+      toast.dismiss('audio-generation');
+      
+      if (result.summary) {
+        const total = (result.summary.generated || 0) + (result.summary.fromCache || 0);
+        toast.success(`${total} archivos procesados (${result.summary.generated || 0} nuevos, ${result.summary.fromCache || 0} desde cache)`);
+      } else {
+        toast.success('Archivos procesados');
+      }
+      
+      if (result.errors && result.errors.length > 0) {
+        console.warn('[AudioManager] Errors during generation:', result.errors);
+        toast.error(`${result.errors.length} errores durante la generación. Revisa la consola.`);
+      }
+      
+      // Wait a bit for files to be available
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      await loadAudioFiles();
+      onRefresh?.();
+    } catch (error: any) {
+      console.error('Error generating initial audios:', error);
+      toast.dismiss('audio-generation');
+      toast.error(`Error al generar: ${error.message}`);
     } finally {
       setRegenerating(null);
     }
@@ -181,14 +250,26 @@ export const AudioManager: React.FC<AudioManagerProps> = ({ channelId, onRefresh
       </div>
 
       {/* Actions */}
-      <div className="flex justify-between items-center">
+      <div className="flex justify-between items-center gap-2 flex-wrap">
         <button
           onClick={loadAudioFiles}
           className="text-sm text-gray-400 hover:text-gray-300 px-3 py-1.5 rounded hover:bg-gray-800"
         >
           🔄 Actualizar
         </button>
-        {activeTab === 'music' && (
+        
+        {/* Generate Initial Files Button - Show when no files exist */}
+        {(musicFiles.length === 0 && soundEffectFiles.length === 0) && (
+          <button
+            onClick={handleGenerateInitial}
+            disabled={regenerating === 'all'}
+            className="text-sm bg-green-600/20 hover:bg-green-600/30 text-green-400 px-4 py-2 rounded disabled:opacity-50 font-medium"
+          >
+            {regenerating === 'all' ? '⏳ Generando...' : '✨ Generar Archivos Iniciales'}
+          </button>
+        )}
+        
+        {activeTab === 'music' && musicFiles.length > 0 && (
           <button
             onClick={() => handleRegenerateAll('music')}
             disabled={regenerating === 'all'}
@@ -197,7 +278,7 @@ export const AudioManager: React.FC<AudioManagerProps> = ({ channelId, onRefresh
             {regenerating === 'all' ? '⏳ Regenerando...' : '🔄 Regenerar Todo'}
           </button>
         )}
-        {activeTab === 'effects' && (
+        {activeTab === 'effects' && soundEffectFiles.length > 0 && (
           <button
             onClick={() => handleRegenerateAll('effects')}
             disabled={regenerating === 'all'}
@@ -214,7 +295,7 @@ export const AudioManager: React.FC<AudioManagerProps> = ({ channelId, onRefresh
           {musicFiles.length === 0 ? (
             <div className="text-center py-8 text-gray-500">
               <p>No hay archivos de música disponibles</p>
-              <p className="text-sm mt-2">Ejecuta el script de upload-audio para generarlos</p>
+              <p className="text-sm mt-2">Haz clic en "Generar Archivos Iniciales" para crearlos</p>
             </div>
           ) : (
             musicFiles.map((file) => (
@@ -263,7 +344,7 @@ export const AudioManager: React.FC<AudioManagerProps> = ({ channelId, onRefresh
           {soundEffectFiles.length === 0 ? (
             <div className="text-center py-8 text-gray-500">
               <p>No hay efectos de sonido disponibles</p>
-              <p className="text-sm mt-2">Ejecuta el script de upload-audio para generarlos</p>
+              <p className="text-sm mt-2">Haz clic en "Generar Archivos Iniciales" para crearlos</p>
             </div>
           ) : (
             soundEffectFiles.map((file) => (
