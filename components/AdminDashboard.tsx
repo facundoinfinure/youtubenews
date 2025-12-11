@@ -345,6 +345,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
   // Publishing state
   const [publishingProduction, setPublishingProduction] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
+  // Logo upload state (for Render tab)
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
 
   // Helper to refresh productions list
   const refreshProductions = async () => {
@@ -3110,7 +3112,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
 
             {(() => {
               const renderConfig: RenderConfig = tempConfig.renderConfig || DEFAULT_RENDER_CONFIG;
-              const [isUploadingLogo, setIsUploadingLogo] = React.useState(false);
               
               const updateRenderConfig = (updates: Partial<RenderConfig>) => {
                 setTempConfig({
