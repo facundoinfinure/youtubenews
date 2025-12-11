@@ -460,7 +460,7 @@ const addSceneTransitions = (script: ScriptWithScenes, config: ChannelConfig) =>
       const entities: string[] = [];
       // Extract capitalized words (potential company names, places, people)
       const words = text.split(/\s+/);
-      words.forEach(w => {
+      words.forEach((w: string) => {
         // Match capitalized words that look like proper nouns (not at start of sentence)
         if (/^[A-ZÁÉÍÓÚÑ][a-záéíóúñ]{2,}/.test(w)) {
           entities.push(w.toLowerCase());
@@ -473,7 +473,7 @@ const addSceneTransitions = (script: ScriptWithScenes, config: ChannelConfig) =>
     const currentEntities = extractKeyEntities(currentNormalized);
     
     // Check for common entities - if there are common entities, likely same/related topic
-    const commonEntities = prevEntities.filter(e => currentEntities.includes(e));
+    const commonEntities = prevEntities.filter((e: string) => currentEntities.includes(e));
     
     // Also check for semantic similarity using keywords
     const extractKeywords = (text: string): string[] => {
@@ -747,9 +747,9 @@ Please regenerate this scene with fresh dialogue.`;
       }
 
       // Extract entities for better comparison
-      const prevEntities = (prevScene.match(/\b[A-ZÁÉÍÓÚÑ][a-záéíóúñ]{2,}\b/g) || []).map(e => e.toLowerCase());
-      const currentEntities = (regeneratedText.match(/\b[A-ZÁÉÍÓÚÑ][a-záéíóúñ]{2,}\b/g) || []).map(e => e.toLowerCase());
-      const commonEntities = prevEntities.filter(e => currentEntities.includes(e));
+      const prevEntities = (prevScene.match(/\b[A-ZÁÉÍÓÚÑ][a-záéíóúñ]{2,}\b/g) || []).map((e: string) => e.toLowerCase());
+      const currentEntities = (regeneratedText.match(/\b[A-ZÁÉÍÓÚÑ][a-záéíóúñ]{2,}\b/g) || []).map((e: string) => e.toLowerCase());
+      const commonEntities = prevEntities.filter((e: string) => currentEntities.includes(e));
 
       // Only add transition if NO common entities (completely different topic)
       // Be conservative - if there's any overlap, assume same/related topic
