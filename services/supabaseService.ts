@@ -1044,8 +1044,24 @@ export const saveProduction = async (
     if (production.script !== undefined) updateData.script = production.script;
     if (production.viral_hook !== undefined) updateData.viral_hook = production.viral_hook;
     if (production.viral_metadata !== undefined) updateData.viral_metadata = production.viral_metadata;
-    if (production.segments !== undefined) updateData.segments = segmentsForStorage;
-    if (production.video_assets !== undefined) updateData.video_assets = production.video_assets;
+    if (production.segments !== undefined) {
+      // CRITICAL: When segments are updated, ensure we're replacing, not merging
+      // If segments is explicitly set to undefined/null, clear it
+      if (production.segments === null || production.segments === undefined) {
+        updateData.segments = null;
+      } else {
+        updateData.segments = segmentsForStorage;
+      }
+    }
+    if (production.video_assets !== undefined) {
+      // CRITICAL: When video_assets are updated, ensure we're replacing, not merging
+      // If explicitly set to null/undefined, clear old assets
+      if (production.video_assets === null || production.video_assets === undefined) {
+        updateData.video_assets = null;
+      } else {
+        updateData.video_assets = production.video_assets;
+      }
+    }
     if (production.thumbnail_urls !== undefined) updateData.thumbnail_urls = production.thumbnail_urls;
     if (userId !== undefined) updateData.user_id = userId;
     if (production.version !== undefined) updateData.version = production.version;
@@ -1057,12 +1073,34 @@ export const saveProduction = async (
     if (production.actual_cost !== undefined) updateData.actual_cost = production.actual_cost;
     if (production.cost_breakdown !== undefined) updateData.cost_breakdown = production.cost_breakdown;
     if (production.narrative_used !== undefined) updateData.narrative_used = production.narrative_used;
-    if (production.scenes !== undefined) updateData.scenes = production.scenes;
-    if (production.segment_status !== undefined) updateData.segment_status = production.segment_status;
+    if (production.scenes !== undefined) {
+      // CRITICAL: When scenes are updated, ensure we're replacing, not merging
+      // If explicitly set to null/undefined, clear it
+      if (production.scenes === null) {
+        updateData.scenes = null;
+      } else {
+        updateData.scenes = production.scenes;
+      }
+    }
+    if (production.segment_status !== undefined) {
+      // CRITICAL: When segment_status is updated, ensure we're replacing, not merging
+      // If explicitly set to null/undefined, clear it
+      if (production.segment_status === null) {
+        updateData.segment_status = null;
+      } else {
+        updateData.segment_status = production.segment_status;
+      }
+    }
     if (production.completed_at !== undefined) updateData.completed_at = production.completed_at;
     // v2.2 Final video and publishing fields
-    if (production.final_video_url !== undefined) updateData.final_video_url = production.final_video_url;
-    if (production.final_video_poster !== undefined) updateData.final_video_poster = production.final_video_poster;
+    if (production.final_video_url !== undefined) {
+      // CRITICAL: Allow clearing final video URL (set to null)
+      updateData.final_video_url = production.final_video_url;
+    }
+    if (production.final_video_poster !== undefined) {
+      // CRITICAL: Allow clearing final video poster (set to null)
+      updateData.final_video_poster = production.final_video_poster;
+    }
     if (production.youtube_id !== undefined) updateData.youtube_id = production.youtube_id;
     if (production.published_at !== undefined) updateData.published_at = production.published_at;
     // v2.4 Wizard state for step-by-step flow

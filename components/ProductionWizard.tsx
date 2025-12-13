@@ -19,6 +19,12 @@ import {
   ScriptHistoryItem
 } from '../types';
 import { saveProduction, updateSegmentStatus, deleteAudioFromStorage, getProductionById } from '../services/supabaseService';
+import { 
+  cleanupSegmentAssets, 
+  cleanupProductionAssetsOnRegenerate,
+  updateAudioCacheOnRegenerate,
+  updateVideoCacheOnRegenerate
+} from '../services/productionAssetManager';
 import { uploadVideoToYouTube } from '../services/youtubeService';
 import { SceneList } from './SceneCard';
 import { ScriptTimelineEditor } from './ScriptTimelineEditor';
@@ -782,22 +788,28 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
       try {
         const fresh = await getProductionById(production.id);
         if (fresh) {
-          // Check if there are meaningful changes
+          // CRITICAL: Check if there are meaningful changes - compare ALL critical fields
           const currentDataHash = JSON.stringify({
             wizard_state: localProduction.wizard_state,
             scenes: localProduction.scenes,
             segments: localProduction.segments,
-            viral_metadata: localProduction.viral_metadata
+            segment_status: localProduction.segment_status, // CRITICAL: Include segment_status
+            viral_metadata: localProduction.viral_metadata,
+            video_assets: localProduction.video_assets,
+            final_video_url: localProduction.final_video_url
           });
           const freshDataHash = JSON.stringify({
             wizard_state: fresh.wizard_state,
             scenes: fresh.scenes,
             segments: fresh.segments,
-            viral_metadata: fresh.viral_metadata
+            segment_status: fresh.segment_status, // CRITICAL: Include segment_status
+            viral_metadata: fresh.viral_metadata,
+            video_assets: fresh.video_assets,
+            final_video_url: fresh.final_video_url
           });
           
           if (currentDataHash !== freshDataHash) {
-            logger.info('wizard', 'External changes detected, syncing...', {
+            logger.info('wizard', 'External changes detected, syncing... Using NEW version from DB', {
               productionId: production.id
             });
             
@@ -806,7 +818,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
               setWizardState(fresh.wizard_state);
             }
             
-            // Update local production
+            // CRITICAL: Always use fresh production from DB (new version)
             setLocalProduction(fresh);
             onUpdateProduction(fresh);
             
@@ -1115,7 +1127,41 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
   };
 
   // Step 3: Generate script
-  const handleGenerateScript = async () => {
+  const handleGenerateScript = async (isRegeneration: boolean = false) => {
+    // NEW: If regenerating, clean up old assets first
+    if (isRegeneration && production.id) {
+      console.log('🧹 [Script Regenerate] Cleaning up old production assets...');
+      await cleanupProductionAssetsOnRegenerate(production.id, []); // Clean all segments
+      
+      // Reset segment status
+      const resetStatus: Record<number, { audio: string; video: string }> = {};
+      const segments = production.segments || [];
+      segments.forEach((_, i) => {
+        resetStatus[i] = { audio: 'pending', video: 'pending' };
+      });
+      
+      // CRITICAL: Clear all old segments and status, save to DB
+      const clearedProduction: Production = {
+        ...production,
+        segment_status: resetStatus as any,
+        segments: undefined, // Clear old segments
+        video_assets: undefined, // Clear old video assets
+        final_video_url: undefined, // Clear final video if exists
+        final_video_poster: undefined
+      };
+      
+      await saveProduction(clearedProduction);
+      
+      // CRITICAL: Reload from DB to ensure clean state
+      const freshClearedProduction = await getProductionById(production.id);
+      if (freshClearedProduction) {
+        setLocalProduction(freshClearedProduction);
+        onUpdateProduction(freshClearedProduction);
+      } else {
+        setLocalProduction(clearedProduction);
+        onUpdateProduction(clearedProduction);
+      }
+    }
     setIsLoading(true);
     setProgressStatus({ message: 'Preparando generación del guión...', progress: 5 });
     await updateStepStatus('scriptGenerate', 'in_progress');
@@ -1176,17 +1222,33 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
       const updatedHistory = [...existingHistory, newHistoryItem];
       setScriptHistory(updatedHistory);
       
+      // CRITICAL: Create NEW production state (don't merge with old)
       const updatedProduction: Production = {
-        ...production,
-        scenes: scenes,
-        viral_metadata: result.metadata,
-        segments: segments,
-        narrative_used: scenes.narrative_used,
-        script_history: updatedHistory
+        ...localProduction, // Use localProduction as base (more up-to-date than production prop)
+        scenes: scenes, // NEW scenes
+        viral_metadata: result.metadata, // NEW metadata
+        segments: segments, // NEW segments (no old audioUrl/videoUrl)
+        narrative_used: scenes.narrative_used, // NEW narrative
+        script_history: updatedHistory, // Updated history
+        // CRITICAL: Clear old assets since script is new
+        segment_status: undefined, // Will be initialized when script is approved
+        video_assets: undefined, // Clear old video assets
+        final_video_url: undefined, // Clear final video
+        final_video_poster: undefined
       };
       
+      // CRITICAL: Save to DB first
       await saveProduction(updatedProduction);
-      setLocalProduction(updatedProduction); // Update local state immediately
+      
+      // CRITICAL: Reload from DB to ensure we have the NEW version
+      const freshProduction = await getProductionById(production.id);
+      if (freshProduction) {
+        setLocalProduction(freshProduction);
+        onUpdateProduction(freshProduction);
+      } else {
+        setLocalProduction(updatedProduction);
+        onUpdateProduction(updatedProduction);
+      }
       onUpdateProduction(updatedProduction);
       
       // CRITICAL FIX: Update wizard state AND ensure data is saved together
@@ -1194,6 +1256,19 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
         narrativeType: scenes.narrative_used,
         generatedAt: new Date().toISOString()
       });
+      
+      // CRITICAL: Save to DB first, then reload to ensure we have latest state
+      await saveProduction(updatedProduction);
+      
+      // CRITICAL: Reload production from DB to get fresh state
+      const freshProduction = await getProductionById(production.id);
+      if (freshProduction) {
+        setLocalProduction(freshProduction);
+        onUpdateProduction(freshProduction);
+      } else {
+        setLocalProduction(updatedProduction);
+        onUpdateProduction(updatedProduction);
+      }
       
       // Also save wizard state with the generated data to ensure sync
       const currentWizardState = wizardState;
@@ -1211,12 +1286,13 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
         currentStep: 'script_review' // Advance to next step
       };
       
+      const productionForWizard = freshProduction || updatedProduction;
       await saveWizardState(newWizardState, {
-        scenes: updatedProduction.scenes,
-        viral_metadata: updatedProduction.viral_metadata,
-        segments: updatedProduction.segments,
-        narrative_used: updatedProduction.narrative_used,
-        script_history: updatedProduction.script_history
+        scenes: productionForWizard.scenes,
+        viral_metadata: productionForWizard.viral_metadata,
+        segments: productionForWizard.segments,
+        narrative_used: productionForWizard.narrative_used,
+        script_history: productionForWizard.script_history
       });
       
       setProgressStatus({ message: '¡Guión completado!', progress: 100 });
@@ -1272,9 +1348,21 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
           ...updatedProduction,
           script_history: historyWithAnalysis
         };
+        
+        // CRITICAL: Save to DB first, then reload
         await saveProduction(productionWithAnalysis);
-        setLocalProduction(productionWithAnalysis);
-        setScriptHistory(historyWithAnalysis);
+        
+        // CRITICAL: Reload from DB to get fresh state
+        const freshProductionWithAnalysis = await getProductionById(production.id);
+        if (freshProductionWithAnalysis) {
+          setLocalProduction(freshProductionWithAnalysis);
+          onUpdateProduction(freshProductionWithAnalysis);
+          setScriptHistory(freshProductionWithAnalysis.script_history || historyWithAnalysis);
+        } else {
+          setLocalProduction(productionWithAnalysis);
+          onUpdateProduction(productionWithAnalysis);
+          setScriptHistory(historyWithAnalysis);
+        }
         
         console.log(`✅ [Wizard] Auto-analysis complete: ${analysis.overallScore}/100`);
       } catch (analysisError) {
@@ -1434,7 +1522,21 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
         liveSegments[i] = { ...liveSegments[i], audioDuration: result.duration, audioUrl: result.audioUrl };
         successCount++;
         
-        // Update UI in real-time
+        // CRITICAL: Update DB FIRST to ensure new URL is saved
+        await updateSegmentStatus(currentProd.id, i, {
+          audio: 'done',
+          audioUrl: result.audioUrl
+        });
+        
+        // CRITICAL: Also update segments array in DB
+        const updatedSegmentsForDB = [...liveSegments];
+        await saveProduction({
+          ...productionRef.current,
+          segments: updatedSegmentsForDB,
+          segment_status: { ...liveStatus } as any
+        });
+        
+        // Update UI in real-time AFTER DB update
         const updated = { 
           ...productionRef.current, 
           segments: [...liveSegments],
@@ -1442,12 +1544,6 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
         };
         setLocalProduction(updated);
         onUpdateProduction(updated);
-        
-        // Update DB
-        await updateSegmentStatus(currentProd.id, i, {
-          audio: 'done',
-          audioUrl: result.audioUrl
-        });
         
         toast.success(`Audio ${i + 1} ✓`);
         return { index: i, success: true };
@@ -1547,20 +1643,83 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
   
   // Regenerate a single audio
   const handleRegenerateAudio = async (index: number) => {
-    // Delete old audio from storage first (cleanup)
-    await deleteAudioFromStorage(production.id, index);
-    
-    // Mark as pending first
-    const pendingStatus = {
-      ...(production.segment_status || {}),
-      [index]: { ...(production.segment_status?.[index] || {}), audio: 'pending', audioUrl: undefined }
-    };
-    const updatedProduction = { ...production, segment_status: pendingStatus as any };
-    onUpdateProduction(updatedProduction);
-    await updateSegmentStatus(production.id, index, { audio: 'pending', audioUrl: undefined });
-    
-    // Now generate just this one
-    await handleGenerateAudios(index);
+    setIsLoading(true);
+    try {
+      // CRITICAL: Reload production from DB to get latest state
+      const freshProduction = await getProductionById(production.id);
+      if (!freshProduction) {
+        toast.error('No se pudo cargar la producción');
+        return;
+      }
+      
+      const segment = freshProduction.segments?.[index];
+      const oldText = segment?.text || '';
+      const oldAudioUrl = freshProduction.segment_status?.[index]?.audioUrl;
+      
+      // NEW: Clean up old assets properly
+      await cleanupSegmentAssets(production.id, index, true, false); // Clean audio, not video
+      
+      // CRITICAL: Clear old URL from segment_status and segments
+      const pendingStatus = {
+        ...(freshProduction.segment_status || {}),
+        [index]: { ...(freshProduction.segment_status?.[index] || {}), audio: 'pending', audioUrl: undefined }
+      };
+      
+      // Also clear from segments array
+      const updatedSegments = [...(freshProduction.segments || [])];
+      if (updatedSegments[index]) {
+        updatedSegments[index] = {
+          ...updatedSegments[index],
+          audioUrl: undefined
+        };
+      }
+      
+      const updatedProduction = { 
+        ...freshProduction, 
+        segment_status: pendingStatus as any,
+        segments: updatedSegments
+      };
+      
+      // CRITICAL: Update local state and DB immediately
+      setLocalProduction(updatedProduction);
+      onUpdateProduction(updatedProduction);
+      await saveProduction(updatedProduction);
+      await updateSegmentStatus(production.id, index, { audio: 'pending', audioUrl: undefined });
+      
+      // Now generate just this one
+      await handleGenerateAudios(index);
+      
+      // CRITICAL: Reload production again after generation to get new URL
+      const finalProduction = await getProductionById(production.id);
+      if (finalProduction) {
+        setLocalProduction(finalProduction);
+        onUpdateProduction(finalProduction);
+        
+        // Update audio_cache if text changed
+        const newSegment = finalProduction.segments?.[index];
+        const newAudioUrl = finalProduction.segment_status?.[index]?.audioUrl;
+        if (newSegment && newAudioUrl && newSegment.text !== oldText) {
+          const voiceName = segment?.speaker === config.characters.hostA.name 
+            ? config.characters.hostA.voiceName 
+            : config.characters.hostB.voiceName;
+          
+          await updateAudioCacheOnRegenerate(
+            channel.id,
+            oldText,
+            newSegment.text,
+            voiceName,
+            newAudioUrl,
+            undefined, // duration will be set by generation
+            production.id
+          );
+        }
+      }
+    } catch (error) {
+      console.error('Error regenerating audio:', error);
+      toast.error(`Error: ${(error as Error).message}`);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   // Update scene text (editable scenes in script_review)
@@ -1681,17 +1840,63 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
         segments: updatedSegments
       };
       
-      setLocalProduction(updated);
+      // CRITICAL: Save to DB first
       await saveProduction(updated);
-      onUpdateProduction(updated);
       
-      // Mark audio as needing regeneration if it was already done
+      // NEW: Clean up old assets when scene is regenerated
       const status = localProduction.segment_status?.[segmentIdx];
-      if (status?.audio === 'done') {
+      if (status?.audio === 'done' || status?.video === 'done') {
+        // Clean up both audio and video since text changed
+        await cleanupSegmentAssets(production.id, segmentIdx, true, true);
+        
+        // CRITICAL: Clear old URLs from both segment_status and segments
+        const clearedStatus = {
+          ...(localProduction.segment_status || {}),
+          [segmentIdx]: { 
+            ...(localProduction.segment_status?.[segmentIdx] || {}), 
+            audio: 'pending',
+            video: 'pending',
+            audioUrl: undefined,
+            videoUrl: undefined
+          }
+        };
+        
+        const clearedSegments = [...updatedSegments];
+        if (clearedSegments[segmentIdx]) {
+          clearedSegments[segmentIdx] = {
+            ...clearedSegments[segmentIdx],
+            audioUrl: undefined,
+            videoUrl: undefined
+          };
+        }
+        
+        const clearedProduction: Production = {
+          ...updated,
+          segment_status: clearedStatus as any,
+          segments: clearedSegments
+        };
+        
+        await saveProduction(clearedProduction);
         await updateSegmentStatus(production.id, segmentIdx, { 
-          audio: 'pending', // Mark as pending to indicate needs regeneration
-          audioUrl: undefined // Clear old URL
+          audio: 'pending',
+          video: 'pending',
+          audioUrl: undefined,
+          videoUrl: undefined
         });
+        
+        // CRITICAL: Reload from DB to get fresh state
+        const freshProduction = await getProductionById(production.id);
+        if (freshProduction) {
+          setLocalProduction(freshProduction);
+          onUpdateProduction(freshProduction);
+        } else {
+          setLocalProduction(clearedProduction);
+          onUpdateProduction(clearedProduction);
+        }
+      } else {
+        // No cleanup needed, just update state
+        setLocalProduction(updated);
+        onUpdateProduction(updated);
       }
       
       toast.success(`✅ Escena ${parseInt(sceneIndex) + 1} regenerada`, { id: 'regen-scene' });
@@ -1796,16 +2001,36 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
           liveStatus[i] = { ...liveStatus[i], video: 'done', videoUrl: result.videoUrl };
           successCount++;
           
-          // Update UI in real-time
-          const updated = { ...productionRef.current, segment_status: { ...liveStatus } as any };
-          setLocalProduction(updated);
-          onUpdateProduction(updated);
-          
-          // Update DB
+          // CRITICAL: Update DB FIRST to ensure new URL is saved
           await updateSegmentStatus(currentProd.id, i, {
             video: 'done',
             videoUrl: result.videoUrl
           });
+          
+          // CRITICAL: Also update segments array in DB
+          const currentSegments = productionRef.current.segments || [];
+          const updatedSegments = [...currentSegments];
+          if (updatedSegments[i]) {
+            updatedSegments[i] = {
+              ...updatedSegments[i],
+              videoUrl: result.videoUrl
+            };
+          }
+          
+          await saveProduction({
+            ...productionRef.current,
+            segments: updatedSegments,
+            segment_status: { ...liveStatus } as any
+          });
+          
+          // Update UI in real-time AFTER DB update
+          const updated = { 
+            ...productionRef.current, 
+            segments: updatedSegments,
+            segment_status: { ...liveStatus } as any 
+          };
+          setLocalProduction(updated);
+          onUpdateProduction(updated);
           
           toast.success(`Video ${i + 1} ✓`);
           return { index: i, success: true };
@@ -1831,10 +2056,35 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
       })
     );
     
-    // Final save to DB with all updates
-    const finalProduction = { ...productionRef.current, segment_status: liveStatus as any };
-    setLocalProduction(finalProduction);
+    // CRITICAL: Final save to DB with all updates - ensure segments array is also updated
+    const currentSegments = productionRef.current.segments || [];
+    const finalSegments = currentSegments.map((seg, idx) => {
+      const status = liveStatus[idx];
+      return {
+        ...seg,
+        audioUrl: status?.audioUrl || seg.audioUrl,
+        videoUrl: status?.videoUrl || seg.videoUrl
+      };
+    });
+    
+    const finalProduction = { 
+      ...productionRef.current, 
+      segments: finalSegments,
+      segment_status: liveStatus as any 
+    };
+    
+    // CRITICAL: Save to DB first
     await saveProduction(finalProduction);
+    
+    // CRITICAL: Reload from DB to ensure we have the latest state
+    const freshProduction = await getProductionById(productionRef.current.id);
+    if (freshProduction) {
+      setLocalProduction(freshProduction);
+      onUpdateProduction(freshProduction);
+    } else {
+      setLocalProduction(finalProduction);
+      onUpdateProduction(finalProduction);
+    }
     
     setIsLoading(false);
     
@@ -1866,17 +2116,78 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
   
   // Regenerate a single video
   const handleRegenerateVideo = async (index: number) => {
-    // Mark as pending first
-    const pendingStatus = {
-      ...(production.segment_status || {}),
-      [index]: { ...(production.segment_status?.[index] || {}), video: 'pending', videoUrl: undefined }
-    };
-    const updatedProduction = { ...production, segment_status: pendingStatus as any };
-    onUpdateProduction(updatedProduction);
-    await updateSegmentStatus(production.id, index, { video: 'pending', videoUrl: undefined });
-    
-    // Now generate just this one
-    await handleGenerateVideos(index);
+    setIsLoading(true);
+    try {
+      // CRITICAL: Reload production from DB to get latest state
+      const freshProduction = await getProductionById(production.id);
+      if (!freshProduction) {
+        toast.error('No se pudo cargar la producción');
+        return;
+      }
+      
+      const segment = freshProduction.segments?.[index];
+      const oldVideoUrl = freshProduction.segment_status?.[index]?.videoUrl;
+      const dialogueText = segment?.text || '';
+      
+      // NEW: Clean up old video assets
+      await cleanupSegmentAssets(production.id, index, false, true); // Clean video, not audio
+      
+      // CRITICAL: Clear old URL from segment_status and segments
+      const pendingStatus = {
+        ...(freshProduction.segment_status || {}),
+        [index]: { ...(freshProduction.segment_status?.[index] || {}), video: 'pending', videoUrl: undefined }
+      };
+      
+      // Also clear from segments array
+      const updatedSegments = [...(freshProduction.segments || [])];
+      if (updatedSegments[index]) {
+        updatedSegments[index] = {
+          ...updatedSegments[index],
+          videoUrl: undefined
+        };
+      }
+      
+      const updatedProduction = { 
+        ...freshProduction, 
+        segment_status: pendingStatus as any,
+        segments: updatedSegments
+      };
+      
+      // CRITICAL: Update local state and DB immediately
+      setLocalProduction(updatedProduction);
+      onUpdateProduction(updatedProduction);
+      await saveProduction(updatedProduction);
+      await updateSegmentStatus(production.id, index, { video: 'pending', videoUrl: undefined });
+      
+      // Now generate just this one
+      await handleGenerateVideos(index);
+      
+      // CRITICAL: Reload production again after generation to get new URL
+      const finalProduction = await getProductionById(production.id);
+      if (finalProduction) {
+        setLocalProduction(finalProduction);
+        onUpdateProduction(finalProduction);
+        
+        // Update generated_videos table
+        const newVideoUrl = finalProduction.segment_status?.[index]?.videoUrl;
+        if (oldVideoUrl && newVideoUrl) {
+          await updateVideoCacheOnRegenerate(
+            channel.id,
+            production.id,
+            index,
+            oldVideoUrl,
+            newVideoUrl,
+            dialogueText,
+            'segment'
+          );
+        }
+      }
+    } catch (error) {
+      console.error('Error regenerating video:', error);
+      toast.error(`Error: ${(error as Error).message}`);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   // Step 7: Render final video
@@ -2587,9 +2898,18 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
                               script_history: updatedHistory
                             };
                             
+                            // CRITICAL: Save to DB first, then reload to ensure we use new version
                             await saveProduction(updatedProduction);
-                            setLocalProduction(updatedProduction);
-                            onUpdateProduction(updatedProduction);
+                            
+                            // CRITICAL: Reload from DB to get fresh state with new script
+                            const freshProduction = await getProductionById(production.id);
+                            if (freshProduction) {
+                              setLocalProduction(freshProduction);
+                              onUpdateProduction(freshProduction);
+                            } else {
+                              setLocalProduction(updatedProduction);
+                              onUpdateProduction(updatedProduction);
+                            }
                             
                             // Clear selections and analysis for fresh re-analysis
                             setScriptAnalysis(null);
@@ -2717,11 +3037,19 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
             <div className="flex justify-between">
               <button
                 onClick={async () => {
+                  // NEW: Clean up assets before regenerating
+                  if (production.id) {
+                    await cleanupProductionAssetsOnRegenerate(production.id, []);
+                  }
+                  
                   const newState: ProductionWizardState = {
                     ...wizardState,
                     currentStep: 'script_generate'
                   };
                   await saveWizardState(newState);
+                  
+                  // Call handleGenerateScript with regeneration flag
+                  await handleGenerateScript(true);
                 }}
                 className="bg-gray-700 hover:bg-gray-600 text-white px-6 py-3 rounded-lg"
               >
