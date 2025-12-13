@@ -4,7 +4,8 @@
  * NEW: Enhanced analytics with pattern detection, predictions, and optimization suggestions
  */
 
-import { Production, VideoAnalyticsRecord } from '../types';
+import { Production, VideoAnalytics } from '../types';
+import { VideoAnalyticsRecord } from './supabaseService';
 import { supabase } from './supabaseService';
 
 export interface VideoPerformance {

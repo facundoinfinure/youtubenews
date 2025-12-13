@@ -101,21 +101,24 @@ export class CompetitionAnalyzer {
       }
 
       // Analyze successful videos
-      const successfulVideos = productions
+      const successfulVideos: CompetitorVideo[] = productions
         .filter((p: any) => {
           const analytics = p.video_analytics?.[0];
           return analytics && (analytics.view_count > 100 || analytics.engagement_rate > 3);
         })
-        .map((p: any) => {
+        .map((p: any): CompetitorVideo => {
           const analytics = p.video_analytics?.[0];
           return {
             title: p.viral_metadata?.title || '',
+            thumbnailUrl: p.viral_metadata?.thumbnailUrl,
             description: p.viral_metadata?.description || '',
             tags: p.viral_metadata?.tags || [],
             views: analytics?.view_count || 0,
             likes: analytics?.like_count || 0,
             engagementRate: analytics?.engagement_rate || 0,
-            publishedAt: p.published_at || ''
+            duration: 60, // Default duration (could be calculated from segments)
+            publishedAt: p.published_at || '',
+            channelName: 'Current Channel' // Default channel name
           };
         });
 

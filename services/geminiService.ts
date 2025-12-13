@@ -1753,6 +1753,117 @@ export const generateThumbnailVariantsAdvanced = async (
   variants: Array<{ url: string; analysis: ThumbnailAnalysis }>;
   best: { url: string; analysis: ThumbnailAnalysis } | null;
 }> => {
+  /**
+   * Analyze thumbnail for CTR prediction
+   * MOVED UP: Must be defined before use
+   */
+  const analyzeThumbnail = (url: string | null, styleName: string): ThumbnailAnalysis => {
+    if (!url) {
+      return {
+        thumbnailUrl: '',
+        style: styleName,
+        predictedCTR: 0,
+        elements: {
+          hasFace: false,
+          hasText: false,
+          hasNumber: false,
+          hasEmoji: false,
+          colorContrast: 'low',
+          textReadability: 'low'
+        },
+        strengths: [],
+        weaknesses: ['No thumbnail generated']
+      };
+    }
+    
+    // Basic analysis based on style (can be enhanced with image analysis API)
+    const styleAnalysis: Record<string, Partial<ThumbnailAnalysis>> = {
+      'Shocked Face + Bold Text': {
+        elements: { hasFace: true, hasText: true, hasNumber: false, hasEmoji: false, colorContrast: 'high', textReadability: 'high' },
+        predictedCTR: 75,
+        strengths: ['Emotional impact', 'High contrast', 'Readable text'],
+        weaknesses: []
+      },
+      'Split Screen Comparison': {
+        elements: { hasFace: false, hasText: true, hasNumber: true, hasEmoji: false, colorContrast: 'high', textReadability: 'high' },
+        predictedCTR: 70,
+        strengths: ['Visual comparison', 'Numbers/statistics', 'Clear contrast'],
+        weaknesses: []
+      },
+      'Symbolic + Urgency': {
+        elements: { hasFace: false, hasText: true, hasNumber: false, hasEmoji: true, colorContrast: 'high', textReadability: 'medium' },
+        predictedCTR: 68,
+        strengths: ['Urgency', 'Symbolic meaning', 'Color impact'],
+        weaknesses: []
+      },
+      'Number Focus': {
+        elements: { hasFace: false, hasText: true, hasNumber: true, hasEmoji: false, colorContrast: 'high', textReadability: 'high' },
+        predictedCTR: 72,
+        strengths: ['Clear statistic', 'High readability', 'Professional'],
+        weaknesses: []
+      },
+      'Question Hook': {
+        elements: { hasFace: false, hasText: true, hasNumber: false, hasEmoji: false, colorContrast: 'medium', textReadability: 'high' },
+        predictedCTR: 65,
+        strengths: ['Creates curiosity', 'Engaging question'],
+        weaknesses: ['May need stronger visual']
+      },
+      'Breaking News Banner': {
+        elements: { hasFace: false, hasText: true, hasNumber: false, hasEmoji: false, colorContrast: 'high', textReadability: 'high' },
+        predictedCTR: 73,
+        strengths: ['Urgency', 'Professional style', 'High contrast'],
+        weaknesses: []
+      },
+      'Before/After Timeline': {
+        elements: { hasFace: false, hasText: true, hasNumber: true, hasEmoji: false, colorContrast: 'high', textReadability: 'medium' },
+        predictedCTR: 67,
+        strengths: ['Visual progression', 'Data visualization'],
+        weaknesses: ['May be complex for small size']
+      },
+      'Emotional Close-up': {
+        elements: { hasFace: true, hasText: true, hasNumber: false, hasEmoji: false, colorContrast: 'high', textReadability: 'high' },
+        predictedCTR: 76,
+        strengths: ['Strong emotional impact', 'Human connection', 'High contrast'],
+        weaknesses: []
+      },
+      'Data Visualization': {
+        elements: { hasFace: false, hasText: true, hasNumber: true, hasEmoji: false, colorContrast: 'medium', textReadability: 'medium' },
+        predictedCTR: 64,
+        strengths: ['Data-driven', 'Professional'],
+        weaknesses: ['May be less emotional']
+      },
+      'Contrast Split': {
+        elements: { hasFace: false, hasText: true, hasNumber: false, hasEmoji: false, colorContrast: 'high', textReadability: 'high' },
+        predictedCTR: 69,
+        strengths: ['Visual metaphor', 'High contrast', 'Clear concept'],
+        weaknesses: []
+      }
+    };
+    
+    const analysis = styleAnalysis[styleName] || {
+      elements: { hasFace: false, hasText: true, hasNumber: false, hasEmoji: false, colorContrast: 'medium', textReadability: 'medium' },
+      predictedCTR: 60,
+      strengths: [],
+      weaknesses: []
+    };
+    
+    return {
+      thumbnailUrl: url,
+      style: styleName,
+      predictedCTR: analysis.predictedCTR || 60,
+      elements: analysis.elements || {
+        hasFace: false,
+        hasText: true,
+        hasNumber: false,
+        hasEmoji: false,
+        colorContrast: 'medium',
+        textReadability: 'medium'
+      },
+      strengths: analysis.strengths || [],
+      weaknesses: analysis.weaknesses || []
+    };
+  };
+
   // ⭐ Check cache first - avoid regenerating for same context
   if (channelId) {
     const cached = await findCachedThumbnail(channelId, newsContext, viralMeta.title);
@@ -1902,115 +2013,6 @@ Make it MAXIMUM CLICK-THROUGH RATE - this thumbnail needs to stand out in YouTub
     }
   };
 
-  /**
-   * Analyze thumbnail for CTR prediction
-   */
-  const analyzeThumbnail = (url: string | null, styleName: string): ThumbnailAnalysis => {
-    if (!url) {
-      return {
-        thumbnailUrl: '',
-        style: styleName,
-        predictedCTR: 0,
-        elements: {
-          hasFace: false,
-          hasText: false,
-          hasNumber: false,
-          hasEmoji: false,
-          colorContrast: 'low',
-          textReadability: 'low'
-        },
-        strengths: [],
-        weaknesses: ['No thumbnail generated']
-      };
-    }
-    
-    // Basic analysis based on style (can be enhanced with image analysis API)
-    const styleAnalysis: Record<string, Partial<ThumbnailAnalysis>> = {
-      'Shocked Face + Bold Text': {
-        elements: { hasFace: true, hasText: true, hasNumber: false, hasEmoji: false, colorContrast: 'high', textReadability: 'high' },
-        predictedCTR: 75,
-        strengths: ['Emotional impact', 'High contrast', 'Readable text'],
-        weaknesses: []
-      },
-      'Split Screen Comparison': {
-        elements: { hasFace: false, hasText: true, hasNumber: true, hasEmoji: false, colorContrast: 'high', textReadability: 'high' },
-        predictedCTR: 70,
-        strengths: ['Visual comparison', 'Numbers/statistics', 'Clear contrast'],
-        weaknesses: []
-      },
-      'Symbolic + Urgency': {
-        elements: { hasFace: false, hasText: true, hasNumber: false, hasEmoji: true, colorContrast: 'high', textReadability: 'medium' },
-        predictedCTR: 68,
-        strengths: ['Urgency', 'Symbolic meaning', 'Color impact'],
-        weaknesses: []
-      },
-      'Number Focus': {
-        elements: { hasFace: false, hasText: true, hasNumber: true, hasEmoji: false, colorContrast: 'high', textReadability: 'high' },
-        predictedCTR: 72,
-        strengths: ['Clear statistic', 'High readability', 'Professional'],
-        weaknesses: []
-      },
-      'Question Hook': {
-        elements: { hasFace: false, hasText: true, hasNumber: false, hasEmoji: false, colorContrast: 'medium', textReadability: 'high' },
-        predictedCTR: 65,
-        strengths: ['Creates curiosity', 'Engaging question'],
-        weaknesses: ['May need stronger visual']
-      },
-      'Breaking News Banner': {
-        elements: { hasFace: false, hasText: true, hasNumber: false, hasEmoji: false, colorContrast: 'high', textReadability: 'high' },
-        predictedCTR: 73,
-        strengths: ['Urgency', 'Professional style', 'High contrast'],
-        weaknesses: []
-      },
-      'Before/After Timeline': {
-        elements: { hasFace: false, hasText: true, hasNumber: true, hasEmoji: false, colorContrast: 'high', textReadability: 'medium' },
-        predictedCTR: 67,
-        strengths: ['Visual progression', 'Data visualization'],
-        weaknesses: ['May be complex for small size']
-      },
-      'Emotional Close-up': {
-        elements: { hasFace: true, hasText: true, hasNumber: false, hasEmoji: false, colorContrast: 'high', textReadability: 'high' },
-        predictedCTR: 76,
-        strengths: ['Strong emotional impact', 'Human connection', 'High contrast'],
-        weaknesses: []
-      },
-      'Data Visualization': {
-        elements: { hasFace: false, hasText: true, hasNumber: true, hasEmoji: false, colorContrast: 'medium', textReadability: 'medium' },
-        predictedCTR: 64,
-        strengths: ['Data-driven', 'Professional'],
-        weaknesses: ['May be less emotional']
-      },
-      'Contrast Split': {
-        elements: { hasFace: false, hasText: true, hasNumber: false, hasEmoji: false, colorContrast: 'high', textReadability: 'high' },
-        predictedCTR: 69,
-        strengths: ['Visual metaphor', 'High contrast', 'Clear concept'],
-        weaknesses: []
-      }
-    };
-    
-    const analysis = styleAnalysis[styleName] || {
-      elements: { hasFace: false, hasText: true, hasNumber: false, hasEmoji: false, colorContrast: 'medium', textReadability: 'medium' },
-      predictedCTR: 60,
-      strengths: [],
-      weaknesses: []
-    };
-    
-    return {
-      thumbnailUrl: url,
-      style: styleName,
-      predictedCTR: analysis.predictedCTR || 60,
-      elements: analysis.elements || {
-        hasFace: false,
-        hasText: true,
-        hasNumber: false,
-        hasEmoji: false,
-        colorContrast: 'medium',
-        textReadability: 'medium'
-      },
-      strengths: analysis.strengths || [],
-      weaknesses: analysis.weaknesses || []
-    };
-  };
 
   console.log(`🎨 [Thumbnails] Generating ${variantCount} thumbnail variants for A/B testing...`);
 

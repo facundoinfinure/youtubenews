@@ -1261,10 +1261,10 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
       await saveProduction(updatedProduction);
       
       // CRITICAL: Reload production from DB to get fresh state
-      const freshProduction = await getProductionById(production.id);
-      if (freshProduction) {
-        setLocalProduction(freshProduction);
-        onUpdateProduction(freshProduction);
+      const freshProductionReload = await getProductionById(production.id);
+      if (freshProductionReload) {
+        setLocalProduction(freshProductionReload);
+        onUpdateProduction(freshProductionReload);
       } else {
         setLocalProduction(updatedProduction);
         onUpdateProduction(updatedProduction);
@@ -2570,7 +2570,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
               
               <div className="flex gap-3">
                 <button
-                  onClick={handleGenerateScript}
+                  onClick={() => handleGenerateScript(false)}
                   disabled={isLoading}
                   className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-50 text-white px-8 py-3 rounded-lg font-bold"
                 >
@@ -2978,7 +2978,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
             {/* Scene List with Edit/Regenerate capabilities */}
             <div className="max-h-[350px] overflow-y-auto pr-2">
               {/* NEW: Live Preview Section */}
-              {wizardState.currentStep === 'audio_generation' || wizardState.currentStep === 'video_generation' ? (
+              {(['audio_generate', 'video_generate'].includes(wizardState.currentStep)) ? (
                 <div className="mb-6 bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
                   <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
                     <span className="animate-pulse">🔴</span>

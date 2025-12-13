@@ -39,10 +39,16 @@ export const CharacterBehaviorEditor: React.FC<CharacterBehaviorEditorProps> = (
     nestedKey: NK,
     value: CharacterBehavior[K][NK]
   ) => {
-    setBehavior(prev => ({
-      ...prev,
-      [key]: { ...prev[key], [nestedKey]: value }
-    }));
+    setBehavior(prev => {
+      const currentValue = prev[key];
+      if (currentValue && typeof currentValue === 'object' && !Array.isArray(currentValue)) {
+        return {
+          ...prev,
+          [key]: { ...(currentValue as Record<string, any>), [nestedKey]: value } as CharacterBehavior[K]
+        };
+      }
+      return prev;
+    });
   };
 
   return (

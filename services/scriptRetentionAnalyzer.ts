@@ -5,7 +5,7 @@
  * Target: 80%+ retention rate (currently 14-19%)
  */
 
-import { ScriptWithScenes } from '../types';
+import { ScriptWithScenes, Scene } from '../types';
 import { logger } from './logger';
 
 export interface RetentionAnalysis {
@@ -217,10 +217,10 @@ const calculateRetentionScore = (
   // Pacing (5% weight) - check for short sentences
   let shortSentences = 0;
   let totalSentences = 0;
-  scenes.forEach(scene => {
-    const sentences = scene.text.split(/[.!?]+/).filter(s => s.trim().length > 0);
+  scenes.forEach((scene: Scene) => {
+    const sentences = scene.text.split(/[.!?]+/).filter((s: string) => s.trim().length > 0);
     totalSentences += sentences.length;
-    sentences.forEach(sentence => {
+    sentences.forEach((sentence: string) => {
       const words = sentence.trim().split(/\s+/).length;
       if (words <= 10) shortSentences++;
     });

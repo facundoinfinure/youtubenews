@@ -304,21 +304,35 @@ export class CostTracker {
         try {
             const { data, error } = await supabase
                 .from('api_costs')
-                .select('task, model, cost, cached')
+                .select('task, model, cost, cached, created_at, channel_id, user_email')
                 .eq('channel_id', currentChannelId)
                 .order('created_at', { ascending: false })
                 .limit(100);
 
             if (error) return null;
 
-            const breakdown = this.groupBy(data || [], 'task');
-            return Object.entries(breakdown).map(([task, entries]) => ({
-                task,
-                totalCost: entries.reduce((sum: number, e: any) => sum + (parseFloat(e.cost) || 0), 0),
-                count: entries.length,
-                cached: entries.filter((e: any) => e.cached).length,
-                averageCost: entries.reduce((sum: number, e: any) => sum + (parseFloat(e.cost) || 0), 0) / entries.length
+            // Convert DB format to CostEntry format first
+            const costEntries: CostEntry[] = (data || []).map((row: any) => ({
+                timestamp: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
+                task: row.task,
+                model: row.model,
+                cost: parseFloat(row.cost) || 0,
+                cached: row.cached || false,
+                channel_id: row.channel_id,
+                user_email: row.user_email
             }));
+
+            const breakdown = this.groupBy(costEntries, 'task');
+            return Object.entries(breakdown).map(([task, entries]) => {
+                const typedEntries = entries as CostEntry[];
+                return {
+                    task,
+                    totalCost: typedEntries.reduce((sum, e) => sum + e.cost, 0),
+                    count: typedEntries.length,
+                    cached: typedEntries.filter(e => e.cached).length,
+                    averageCost: typedEntries.length > 0 ? typedEntries.reduce((sum, e) => sum + e.cost, 0) / typedEntries.length : 0
+                };
+            });
         } catch (e) {
             console.warn('Cost breakdown failed:', e);
             return null;

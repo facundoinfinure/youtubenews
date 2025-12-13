@@ -463,9 +463,9 @@ export async function applyProfessionalAudioMixing(
     targetLUFS = TARGET_LOUDNESS_LUFS,
     applyEQ = true,
     applyCompression = true,
-    applyReverb = false, // Disabled by default
+    shouldApplyReverb = false, // Disabled by default (renamed to avoid conflict)
     voiceType = 'male'
-  } = options;
+  } = { ...options, shouldApplyReverb: options.applyReverb };
   
   let processed = audioBuffer;
   
@@ -507,7 +507,8 @@ export async function applyProfessionalAudioMixing(
   }
   
   // 5. Reverb (subtle, if enabled)
-  if (applyReverb) {
+  // Note: applyReverb function is defined above in this file
+  if (shouldApplyReverb === true) {
     processed = await applyReverb(processed, {
       roomSize: 0.3,
       damping: 0.5,

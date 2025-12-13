@@ -186,13 +186,22 @@ export class AssetReuseService {
 
     try {
       // Update use count and last used date
-      await supabase
+      // Get current use_count first, then increment
+      const { data: current } = await supabase
         .from('generated_videos')
-        .update({
-          use_count: supabase.raw('use_count + 1'),
-          last_used_at: new Date().toISOString()
-        })
-        .eq('id', assetId);
+        .select('use_count')
+        .eq('id', assetId)
+        .single();
+      
+      if (current) {
+        await supabase
+          .from('generated_videos')
+          .update({
+            use_count: (current.use_count || 0) + 1,
+            last_used_at: new Date().toISOString()
+          })
+          .eq('id', assetId);
+      }
     } catch (e) {
       console.warn('Failed to record asset reuse:', e);
     }

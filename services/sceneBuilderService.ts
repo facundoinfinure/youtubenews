@@ -506,9 +506,9 @@ export const generateScenePrompts = (
       
       // CRITICAL FIX: Generate camera movement for dynamic shots
       // Estimate scene duration from text (words / 2.5 words per second)
-      const wordCount = scene.text.split(/\s+/).length;
-      const estimatedDuration = Math.max(3, wordCount / 2.5);
-      const cameraMovement = generateCameraMovement(index, totalScenes, sceneTypeInfo, estimatedDuration);
+      const sceneWordCount = scene.text.split(/\s+/).length;
+      const sceneEstimatedDuration = Math.max(3, sceneWordCount / 2.5);
+      const sceneCameraMovement = generateCameraMovement(index, totalScenes, sceneTypeInfo, sceneEstimatedDuration);
       
       // NEW: Select seed image variant based on scene type
       const selectedSeedImage = scene.video_mode === 'hostA'
@@ -529,14 +529,8 @@ export const generateScenePrompts = (
         studioSetup,
         sceneTypeInfo,
         expressionHint,
-        cameraMovement
+        sceneCameraMovement
       );
-      
-      // CRITICAL FIX: Generate camera movement for dynamic shots
-      // Estimate scene duration from text (words / 2.5 words per second)
-      const wordCount = scene.text.split(/\s+/).length;
-      const estimatedDuration = Math.max(3, wordCount / 2.5);
-      const cameraMovement = generateCameraMovement(index, totalScenes, sceneTypeInfo, estimatedDuration);
 
       return {
         sceneNumber,
@@ -546,7 +540,7 @@ export const generateScenePrompts = (
         visualPrompt,
         lightingMood: sceneTypeInfo.lightingMood,
         expressionHint,
-        cameraMovement // NEW: Include camera movement
+        cameraMovement: sceneCameraMovement // NEW: Include camera movement
       };
     });
 };
