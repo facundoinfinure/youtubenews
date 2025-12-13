@@ -1,5 +1,12 @@
 import { ChannelConfig, Scene, ScriptWithScenes, ShotType, VideoMode, NarrativeType } from "../types";
 
+export interface CameraMovement {
+  type: 'push_in' | 'pull_out' | 'pan_left' | 'pan_right' | 'zoom' | 'static';
+  intensity: 'subtle' | 'moderate' | 'pronounced';
+  duration: number;
+  startTime: number;
+}
+
 export interface ScenePrompt {
   sceneNumber: string;
   sceneIndex: number;
@@ -8,6 +15,7 @@ export interface ScenePrompt {
   visualPrompt: string; // Optimized prompt for InfiniteTalk
   lightingMood: 'neutral' | 'dramatic' | 'warm' | 'cool';
   expressionHint: string;
+  cameraMovement?: CameraMovement; // NEW: Camera movement for dynamic shots
 }
 
 // Fallback studio seed images (used only if channel config doesn't have them)
@@ -18,6 +26,64 @@ const FALLBACK_SEED_IMAGES = {
   twoShot: "Ultra-detailed 3D render of hostA and hostB at a sleek podcast desk. hostA in dark hoodie, hostB in teal blazer. Warm tungsten key light, purple/blue LEDs, Shure SM7B mics. Medium two-shot, eye-level."
 };
 
+/**
+ * NEW: Seed Image Variants System
+ * Generates and rotates seed images based on scene type and emotion
+ */
+interface SeedImageVariants {
+  hostA: {
+    neutral: string[];
+    dramatic: string[];
+    comedic: string[];
+    serious: string[];
+  };
+  hostB: {
+    energetic: string[];
+    analytical: string[];
+    empathetic: string[];
+    playful: string[];
+  };
+}
+
+/**
+ * Select appropriate seed image variant based on scene type and mood
+ * NEW: Intelligent seed image selection for visual variety
+ */
+const selectSeedImageVariant = (
+  character: 'hostA' | 'hostB',
+  sceneType: SceneTypeInfo,
+  config: ChannelConfig,
+  sceneIndex: number
+): string => {
+  const seedImages = config.seedImages || {};
+  const baseImage = character === 'hostA' 
+    ? (config.format === '9:16' ? seedImages.hostASoloUrl_9_16 : seedImages.hostASoloUrl)
+    : (config.format === '9:16' ? seedImages.hostBSoloUrl_9_16 : seedImages.hostBSoloUrl);
+  
+  // If no variants configured, use base image
+  if (!baseImage) {
+    return character === 'hostA' ? FALLBACK_SEED_IMAGES.hostASolo : FALLBACK_SEED_IMAGES.hostBSolo;
+  }
+  
+  // NEW: Rotate seed images based on scene type for variety
+  // For now, use base image but in future can implement variant rotation
+  // TODO: Implement variant system when multiple seed images are stored
+  
+  // For hook scenes: Use more dramatic variant
+  if (sceneType.type === 'hook' || sceneType.type === 'conflict') {
+    // Could use a more intense expression variant here
+    return baseImage;
+  }
+  
+  // For payoff: Use warmer variant
+  if (sceneType.type === 'payoff') {
+    return baseImage; // Could use warmer lighting variant
+  }
+  
+  // Default: Use base image
+  return baseImage;
+};
+
 const FALLBACK_STUDIO = "modern podcast room, warm tungsten key light, purple/blue LED accents, acoustic foam panels, Shure SM7B microphones, camera: eye-level, shallow depth of field";
 
 // Scene type detection based on narrative structure and position
@@ -26,6 +92,7 @@ interface SceneTypeInfo {
   recommendedShot: ShotType;
   lightingMood: 'neutral' | 'dramatic' | 'warm' | 'cool';
   emotionalTone: string;
+  cameraAngle?: 'eye_level' | 'high_angle' | 'low_angle' | 'bird_eye' | 'worm_eye'; // NEW: Camera angles
 }
 
 /**
@@ -39,102 +106,244 @@ const getSceneTypeInfo = (
   const scenePosition = sceneIndex + 1;
   
   // Classic Arc (6 scenes): Hook, Rising, Conflict, Comeback, Rising2, Payoff
+  // NEW: Enhanced with advanced shot types and camera angles
   if (narrativeType === 'classic') {
     const mapping: Record<number, SceneTypeInfo> = {
-      1: { type: 'hook', recommendedShot: 'closeup', lightingMood: 'dramatic', emotionalTone: 'attention-grabbing, intriguing' },
-      2: { type: 'rising', recommendedShot: 'medium', lightingMood: 'neutral', emotionalTone: 'building interest, informative' },
-      3: { type: 'conflict', recommendedShot: 'closeup', lightingMood: 'dramatic', emotionalTone: 'tension, concern, disbelief' },
-      4: { type: 'comeback', recommendedShot: 'medium', lightingMood: 'warm', emotionalTone: 'hopeful, analytical' },
-      5: { type: 'rising', recommendedShot: 'medium', lightingMood: 'neutral', emotionalTone: 'elaborating, connecting dots' },
-      6: { type: 'payoff', recommendedShot: 'wide', lightingMood: 'warm', emotionalTone: 'conclusive, satisfied, insightful' }
+      1: { 
+        type: 'hook', 
+        recommendedShot: 'extreme_closeup', // NEW: Extreme closeup for maximum impact
+        lightingMood: 'dramatic', 
+        emotionalTone: 'attention-grabbing, intriguing',
+        cameraAngle: 'low_angle' // NEW: Low angle for power
+      },
+      2: { 
+        type: 'rising', 
+        recommendedShot: 'medium_closeup', // NEW: Medium closeup for intimacy
+        lightingMood: 'neutral', 
+        emotionalTone: 'building interest, informative',
+        cameraAngle: 'eye_level'
+      },
+      3: { 
+        type: 'conflict', 
+        recommendedShot: 'dutch_angle', // NEW: Dutch angle for tension
+        lightingMood: 'dramatic', 
+        emotionalTone: 'tension, concern, disbelief',
+        cameraAngle: 'low_angle'
+      },
+      4: { 
+        type: 'comeback', 
+        recommendedShot: 'medium', 
+        lightingMood: 'warm', 
+        emotionalTone: 'hopeful, analytical',
+        cameraAngle: 'eye_level'
+      },
+      5: { 
+        type: 'rising', 
+        recommendedShot: 'medium_wide', // NEW: Medium wide for context
+        lightingMood: 'neutral', 
+        emotionalTone: 'elaborating, connecting dots',
+        cameraAngle: 'eye_level'
+      },
+      6: { 
+        type: 'payoff', 
+        recommendedShot: 'wide', 
+        lightingMood: 'warm', 
+        emotionalTone: 'conclusive, satisfied, insightful',
+        cameraAngle: 'high_angle' // NEW: High angle for conclusion
+      }
     };
     return mapping[scenePosition] || mapping[6];
   }
   
-  // Double Conflict Arc (7 scenes)
+  // Double Conflict Arc (7 scenes) - NEW: Enhanced with advanced shots
   if (narrativeType === 'double_conflict') {
     const mapping: Record<number, SceneTypeInfo> = {
-      1: { type: 'hook', recommendedShot: 'closeup', lightingMood: 'dramatic', emotionalTone: 'urgent, breaking news energy' },
-      2: { type: 'rising', recommendedShot: 'medium', lightingMood: 'neutral', emotionalTone: 'setting up the context' },
-      3: { type: 'conflict', recommendedShot: 'closeup', lightingMood: 'dramatic', emotionalTone: 'first major concern, skeptical' },
-      4: { type: 'comeback', recommendedShot: 'medium', lightingMood: 'warm', emotionalTone: 'temporary relief, but...' },
-      5: { type: 'conflict', recommendedShot: 'closeup', lightingMood: 'cool', emotionalTone: 'second blow, compounding issues' },
-      6: { type: 'comeback', recommendedShot: 'medium', lightingMood: 'warm', emotionalTone: 'resolution path, optimistic' },
-      7: { type: 'payoff', recommendedShot: 'wide', lightingMood: 'warm', emotionalTone: 'final takeaway, call to action' }
+      1: { type: 'hook', recommendedShot: 'extreme_closeup', lightingMood: 'dramatic', emotionalTone: 'urgent, breaking news energy', cameraAngle: 'low_angle' },
+      2: { type: 'rising', recommendedShot: 'medium_closeup', lightingMood: 'neutral', emotionalTone: 'setting up the context', cameraAngle: 'eye_level' },
+      3: { type: 'conflict', recommendedShot: 'dutch_angle', lightingMood: 'dramatic', emotionalTone: 'first major concern, skeptical', cameraAngle: 'low_angle' },
+      4: { type: 'comeback', recommendedShot: 'medium', lightingMood: 'warm', emotionalTone: 'temporary relief, but...', cameraAngle: 'eye_level' },
+      5: { type: 'conflict', recommendedShot: 'dutch_angle', lightingMood: 'cool', emotionalTone: 'second blow, compounding issues', cameraAngle: 'low_angle' },
+      6: { type: 'comeback', recommendedShot: 'medium_wide', lightingMood: 'warm', emotionalTone: 'resolution path, optimistic', cameraAngle: 'eye_level' },
+      7: { type: 'payoff', recommendedShot: 'wide', lightingMood: 'warm', emotionalTone: 'final takeaway, call to action', cameraAngle: 'high_angle' }
     };
     return mapping[scenePosition] || mapping[7];
   }
   
-  // Hot Take Compressed (4 scenes)
+  // Hot Take Compressed (4 scenes) - NEW: Enhanced with advanced shots
   if (narrativeType === 'hot_take') {
     const mapping: Record<number, SceneTypeInfo> = {
-      1: { type: 'hook', recommendedShot: 'closeup', lightingMood: 'dramatic', emotionalTone: 'punchy, immediate impact' },
-      2: { type: 'conflict', recommendedShot: 'closeup', lightingMood: 'dramatic', emotionalTone: 'the problem, the drama' },
-      3: { type: 'comeback', recommendedShot: 'medium', lightingMood: 'neutral', emotionalTone: 'quick analysis, hot take' },
-      4: { type: 'payoff', recommendedShot: 'wide', lightingMood: 'warm', emotionalTone: 'mic drop moment, conclusion' }
+      1: { type: 'hook', recommendedShot: 'extreme_closeup', lightingMood: 'dramatic', emotionalTone: 'punchy, immediate impact', cameraAngle: 'low_angle' },
+      2: { type: 'conflict', recommendedShot: 'dutch_angle', lightingMood: 'dramatic', emotionalTone: 'the problem, the drama', cameraAngle: 'low_angle' },
+      3: { type: 'comeback', recommendedShot: 'medium_closeup', lightingMood: 'neutral', emotionalTone: 'quick analysis, hot take', cameraAngle: 'eye_level' },
+      4: { type: 'payoff', recommendedShot: 'wide', lightingMood: 'warm', emotionalTone: 'mic drop moment, conclusion', cameraAngle: 'high_angle' }
     };
     return mapping[scenePosition] || mapping[4];
   }
   
-  // Perspective Clash (6 scenes)
-  if (narrativeType === 'perspective_clash') {
-    const mapping: Record<number, SceneTypeInfo> = {
-      1: { type: 'hook', recommendedShot: 'closeup', lightingMood: 'dramatic', emotionalTone: 'presenting the debate topic' },
-      2: { type: 'perspective', recommendedShot: 'medium', lightingMood: 'cool', emotionalTone: 'hostA POV - skeptical, analytical' },
-      3: { type: 'perspective', recommendedShot: 'medium', lightingMood: 'warm', emotionalTone: 'hostB POV - optimistic, contrarian' },
-      4: { type: 'clash', recommendedShot: 'closeup', lightingMood: 'dramatic', emotionalTone: 'debate peak, tension, back-and-forth' },
-      5: { type: 'synthesis', recommendedShot: 'medium', lightingMood: 'neutral', emotionalTone: 'finding middle ground' },
-      6: { type: 'payoff', recommendedShot: 'wide', lightingMood: 'warm', emotionalTone: 'unified conclusion, audience takeaway' }
-    };
-    return mapping[scenePosition] || mapping[6];
-  }
+    // Perspective Clash (6 scenes) - NEW: Enhanced with over-shoulder shots
+    if (narrativeType === 'perspective_clash') {
+      const mapping: Record<number, SceneTypeInfo> = {
+        1: { type: 'hook', recommendedShot: 'extreme_closeup', lightingMood: 'dramatic', emotionalTone: 'presenting the debate topic', cameraAngle: 'low_angle' },
+        2: { type: 'perspective', recommendedShot: 'over_shoulder', lightingMood: 'cool', emotionalTone: 'hostA POV - skeptical, analytical', cameraAngle: 'eye_level' },
+        3: { type: 'perspective', recommendedShot: 'over_shoulder', lightingMood: 'warm', emotionalTone: 'hostB POV - optimistic, contrarian', cameraAngle: 'eye_level' },
+        4: { type: 'clash', recommendedShot: 'dutch_angle', lightingMood: 'dramatic', emotionalTone: 'debate peak, tension, back-and-forth', cameraAngle: 'low_angle' },
+        5: { type: 'synthesis', recommendedShot: 'medium_wide', lightingMood: 'neutral', emotionalTone: 'finding middle ground', cameraAngle: 'eye_level' },
+        6: { type: 'payoff', recommendedShot: 'wide', lightingMood: 'warm', emotionalTone: 'unified conclusion, audience takeaway', cameraAngle: 'high_angle' }
+      };
+      return mapping[scenePosition] || mapping[6];
+    }
+    
+    // NEW: Inverted Pyramid (5 scenes) - News → Details → Context → Analysis → Takeaway
+    if (narrativeType === 'inverted_pyramid') {
+      const mapping: Record<number, SceneTypeInfo> = {
+        1: { type: 'hook', recommendedShot: 'extreme_closeup', lightingMood: 'dramatic', emotionalTone: 'breaking news headline, immediate impact', cameraAngle: 'low_angle' },
+        2: { type: 'rising', recommendedShot: 'medium_closeup', lightingMood: 'neutral', emotionalTone: 'key details and facts, who/what/when/where', cameraAngle: 'eye_level' },
+        3: { type: 'rising', recommendedShot: 'medium', lightingMood: 'neutral', emotionalTone: 'broader context and background, why it matters', cameraAngle: 'eye_level' },
+        4: { type: 'rising', recommendedShot: 'medium_wide', lightingMood: 'warm', emotionalTone: 'deeper analysis and implications', cameraAngle: 'eye_level' },
+        5: { type: 'payoff', recommendedShot: 'wide', lightingMood: 'warm', emotionalTone: 'key takeaway and what to watch for', cameraAngle: 'high_angle' }
+      };
+      return mapping[scenePosition] || mapping[5];
+    }
+    
+    // NEW: Question-Driven (6 scenes) - Question → Answer 1 → Answer 2 → Debate → Synthesis → Conclusion
+    if (narrativeType === 'question_driven') {
+      const mapping: Record<number, SceneTypeInfo> = {
+        1: { type: 'hook', recommendedShot: 'extreme_closeup', lightingMood: 'dramatic', emotionalTone: 'provocative question that creates curiosity', cameraAngle: 'low_angle' },
+        2: { type: 'rising', recommendedShot: 'medium_closeup', lightingMood: 'neutral', emotionalTone: 'first answer or perspective', cameraAngle: 'eye_level' },
+        3: { type: 'rising', recommendedShot: 'medium_closeup', lightingMood: 'neutral', emotionalTone: 'second answer or alternative perspective', cameraAngle: 'eye_level' },
+        4: { type: 'conflict', recommendedShot: 'dutch_angle', lightingMood: 'dramatic', emotionalTone: 'debate between perspectives, tension', cameraAngle: 'low_angle' },
+        5: { type: 'synthesis', recommendedShot: 'medium_wide', lightingMood: 'warm', emotionalTone: 'synthesis of both perspectives, finding balance', cameraAngle: 'eye_level' },
+        6: { type: 'payoff', recommendedShot: 'wide', lightingMood: 'warm', emotionalTone: 'conclusion and final answer to the question', cameraAngle: 'high_angle' }
+      };
+      return mapping[scenePosition] || mapping[6];
+    }
+    
+    // NEW: Timeline Arc (7 scenes) - Present → Past → Context → Development → Current → Future → Implications
+    if (narrativeType === 'timeline_arc') {
+      const mapping: Record<number, SceneTypeInfo> = {
+        1: { type: 'hook', recommendedShot: 'extreme_closeup', lightingMood: 'dramatic', emotionalTone: 'current situation, what\'s happening now', cameraAngle: 'low_angle' },
+        2: { type: 'rising', recommendedShot: 'medium', lightingMood: 'cool', emotionalTone: 'historical context, how we got here', cameraAngle: 'eye_level' },
+        3: { type: 'rising', recommendedShot: 'medium_wide', lightingMood: 'neutral', emotionalTone: 'broader context and background', cameraAngle: 'eye_level' },
+        4: { type: 'rising', recommendedShot: 'medium', lightingMood: 'neutral', emotionalTone: 'key developments that led to current state', cameraAngle: 'eye_level' },
+        5: { type: 'rising', recommendedShot: 'medium_closeup', lightingMood: 'warm', emotionalTone: 'current state and immediate situation', cameraAngle: 'eye_level' },
+        6: { type: 'rising', recommendedShot: 'medium_wide', lightingMood: 'warm', emotionalTone: 'future implications and what\'s next', cameraAngle: 'eye_level' },
+        7: { type: 'payoff', recommendedShot: 'wide', lightingMood: 'warm', emotionalTone: 'overall implications and takeaway', cameraAngle: 'high_angle' }
+      };
+      return mapping[scenePosition] || mapping[7];
+    }
+    
+    // NEW: Contrast Arc (5 scenes) - Situation A → Situation B → Comparison → Analysis → Verdict
+    if (narrativeType === 'contrast_arc') {
+      const mapping: Record<number, SceneTypeInfo> = {
+        1: { type: 'hook', recommendedShot: 'extreme_closeup', lightingMood: 'dramatic', emotionalTone: 'introducing the contrast or comparison', cameraAngle: 'low_angle' },
+        2: { type: 'rising', recommendedShot: 'medium', lightingMood: 'cool', emotionalTone: 'situation A - first scenario or perspective', cameraAngle: 'eye_level' },
+        3: { type: 'rising', recommendedShot: 'medium', lightingMood: 'warm', emotionalTone: 'situation B - second scenario or perspective', cameraAngle: 'eye_level' },
+        4: { type: 'conflict', recommendedShot: 'dutch_angle', lightingMood: 'dramatic', emotionalTone: 'direct comparison and analysis of differences', cameraAngle: 'low_angle' },
+        5: { type: 'payoff', recommendedShot: 'wide', lightingMood: 'warm', emotionalTone: 'verdict and conclusion on which is better/why', cameraAngle: 'high_angle' }
+      };
+      return mapping[scenePosition] || mapping[5];
+    }
   
   // Default fallback
   return { type: 'rising', recommendedShot: 'medium', lightingMood: 'neutral', emotionalTone: 'informative' };
 };
 
 /**
- * Generate expression hints based on emotional tone
+ * Generate camera movements for dynamic shots
+ * CRITICAL FIX: Adds camera movement to prevent static, boring shots
+ */
+const generateCameraMovement = (
+  sceneIndex: number,
+  totalScenes: number,
+  sceneType: SceneTypeInfo,
+  sceneDuration: number
+): CameraMovement | undefined => {
+  // Push in for hooks and conflicts (dramatic moments)
+  if (sceneType.type === 'hook' || sceneType.type === 'conflict') {
+    return {
+      type: 'push_in',
+      intensity: sceneType.type === 'hook' ? 'moderate' : 'subtle',
+      duration: Math.min(sceneDuration, 2), // First 2 seconds
+      startTime: 0
+    };
+  }
+  
+  // Pull out for payoffs (revealing conclusion)
+  if (sceneType.type === 'payoff') {
+    return {
+      type: 'pull_out',
+      intensity: 'moderate',
+      duration: Math.min(sceneDuration, 2), // Last 2 seconds
+      startTime: Math.max(0, sceneDuration - 2)
+    };
+  }
+  
+  // Subtle pan for variety in middle scenes
+  if (sceneIndex % 2 === 0 && sceneType.type === 'rising') {
+    return {
+      type: 'pan_right',
+      intensity: 'subtle',
+      duration: sceneDuration,
+      startTime: 0
+    };
+  }
+  
+  // Default: static (no movement)
+  return undefined;
+};
+
+/**
+ * Generate detailed expression and gesture hints based on emotional tone
+ * NEW: Expresiones y Gestos Dinámicos - More detailed and dynamic expressions
  */
 const getExpressionHint = (
   videoMode: VideoMode | 'both', // Accept legacy 'both' for backwards compat
   emotionalTone: string,
   hostAPersonality: string,
-  hostBPersonality: string
+  hostBPersonality: string,
+  sceneType?: SceneTypeInfo
 ): string => {
   const toneKeywords = emotionalTone.toLowerCase();
   
   // Convert legacy "both" to hostA
   const effectiveMode = (videoMode as string) === 'both' ? 'hostA' : videoMode;
   
+  // NEW: Enhanced expression hints with gestures and dynamic movements
   if (effectiveMode === 'hostA') {
     if (toneKeywords.includes('skeptical') || toneKeywords.includes('concern')) {
-      return 'raised eyebrow, slight smirk, leaning back skeptically';
+      return 'raised eyebrow, slight smirk, leaning back skeptically, hand gesture pointing upward (questioning), subtle head shake, crossed arms posture';
     }
     if (toneKeywords.includes('dramatic') || toneKeywords.includes('breaking')) {
-      return 'serious expression, direct eye contact, leaning forward';
+      return 'serious expression, direct eye contact, leaning forward intensely, hand gesture emphasizing point (pointing or open palm), intense facial expression, engaged body language';
     }
     if (toneKeywords.includes('conclusion') || toneKeywords.includes('satisfied')) {
-      return 'subtle nod, knowing smile, relaxed posture';
+      return 'subtle nod, knowing smile, relaxed posture, open hand gesture (welcoming), confident expression, slight lean back';
     }
-    return 'sarcastic half-smile, casual posture, dry humor expression';
+    if (sceneType?.type === 'hook') {
+      return 'intense expression, direct eye contact, forward lean, hand gesture creating emphasis, animated facial expression, high energy';
+    }
+    return 'sarcastic half-smile, casual posture, dry humor expression, subtle hand gestures, relaxed but engaged';
   }
   
-  // hostB
+  // hostB - Enhanced expressions
   if (toneKeywords.includes('optimistic') || toneKeywords.includes('hopeful')) {
-    return 'bright eyes, animated hand gestures, leaning in enthusiastically';
+    return 'bright eyes, animated hand gestures (open palms, pointing), leaning in enthusiastically, wide smile, nodding, energetic body movements';
   }
   if (toneKeywords.includes('dramatic') || toneKeywords.includes('tension')) {
-    return 'wide eyes, expressive reactions, engaged posture';
+    return 'wide eyes, expressive reactions, engaged posture, hand gestures emphasizing emotion (hands to chest, open gestures), animated facial expressions, forward lean';
   }
   if (toneKeywords.includes('conclusion') || toneKeywords.includes('warm')) {
-    return 'warm smile, open body language, nodding affirmatively';
+    return 'warm smile, open body language, nodding affirmatively, welcoming hand gestures, relaxed but expressive, genuine expression';
   }
-  return 'playful expression, energetic gestures, witty smile';
+  if (sceneType?.type === 'hook') {
+    return 'surprised expression, wide eyes, animated gestures, forward lean, high energy, engaging facial expression';
+  }
+  return 'playful expression, energetic gestures, witty smile, animated hand movements, expressive body language, engaging posture';
 };
 
 /**
  * Build a comprehensive visual prompt for InfiniteTalk
+ * Now includes camera movement instructions for dynamic shots
  */
 const buildVisualPrompt = (
   scene: Scene,
@@ -142,16 +351,22 @@ const buildVisualPrompt = (
   seedImages: Record<string, string>,
   studioSetup: string,
   sceneTypeInfo: SceneTypeInfo,
-  expressionHint: string
+  expressionHint: string,
+  cameraMovement?: CameraMovement
 ): string => {
   const hostA = config.characters.hostA;
   const hostB = config.characters.hostB;
   
-  // Shot framing instructions
-  const shotFraming = {
+  // Shot framing instructions - NEW: Extended with advanced shot types
+  const shotFraming: Record<string, string> = {
+    'extreme_closeup': 'Extreme close-up shot, very tight framing on face only, eyes and mouth prominent, maximum emotional impact',
     'closeup': 'Close-up shot, tight framing on face and upper torso, emphasizing facial expressions',
-    'medium': 'Medium shot, standard podcast framing showing desk and microphone',
-    'wide': 'Wide shot, showing full studio setup with both positions visible'
+    'medium_closeup': 'Medium close-up shot, framing from chest to head, intimate dialogue framing, showing subtle expressions',
+    'medium': 'Medium shot, standard podcast framing showing desk and microphone, professional news aesthetic',
+    'medium_wide': 'Medium wide shot, showing more context including desk setup and background, establishing scene',
+    'wide': 'Wide shot, showing full studio setup with both positions visible, establishing full environment',
+    'dutch_angle': 'Dutch angle shot (tilted camera), creating tension and unease, dramatic framing, off-kilter composition',
+    'over_shoulder': 'Over-the-shoulder shot, showing one character from behind the other, conversation framing, dynamic perspective'
   };
   
   // Lighting adjustments based on mood
@@ -178,12 +393,26 @@ INFINITETALK VISUAL PROMPT
 ===========================
 
 SCENE TYPE: ${sceneTypeInfo.type.toUpperCase()}
-SHOT: ${shotFraming[scene.shot]}
+SHOT: ${shotFraming[scene.shot] || shotFraming['medium']}
+CAMERA ANGLE: ${sceneTypeInfo.cameraAngle ? 
+  (sceneTypeInfo.cameraAngle === 'low_angle' ? 'Low angle shot, camera looking up, creates power and intensity' :
+   sceneTypeInfo.cameraAngle === 'high_angle' ? 'High angle shot, camera looking down, creates conclusion and overview' :
+   sceneTypeInfo.cameraAngle === 'bird_eye' ? 'Bird\'s eye view, top-down perspective, wide context' :
+   sceneTypeInfo.cameraAngle === 'worm_eye' ? 'Worm\'s eye view, extreme low angle, dramatic perspective' :
+   'Eye-level shot, standard perspective') : 'Eye-level shot, standard perspective'}
 MODEL: ${scene.model}
 
 STUDIO ENVIRONMENT:
 ${studioSetup}
 Lighting: ${lightingAdjustments[sceneTypeInfo.lightingMood]}
+
+${sceneTypeInfo.type === 'hook' || sceneTypeInfo.type === 'conflict' ? `
+BACKGROUND CONTEXT (NEW: Dynamic Backgrounds):
+- For financial news: Subtle stock market charts or financial data visualization in background
+- For breaking news: Newsroom environment with screens showing headlines
+- For analysis: Clean professional studio with data displays
+- Background should be subtle, not distracting from characters
+` : ''}
 
 CHARACTER(S) VISIBLE: ${speakingHost}
 ${effectiveVideoMode === 'hostA' ? `
@@ -205,9 +434,29 @@ ${selectedSeedImage}
 
 LIP-SYNC REQUIREMENTS:
 - Accurate mouth movements matching audio
-- Subtle head movements and gestures
 - Natural blinking and micro-expressions
 - Maintain character consistency with seed image
+
+DYNAMIC EXPRESSIONS & GESTURES (CRITICAL FOR ENGAGEMENT):
+- ${expressionHint}
+- Hand gestures should be natural and match the dialogue emphasis
+- Head movements (nodding, shaking, tilting) should reflect agreement/disagreement
+- Posture changes (leaning forward/back) should match emotional intensity
+- Facial expressions should be pronounced and clear (not subtle)
+- Body language should be animated and engaging, not static
+- Gestures should occur at key moments: when emphasizing numbers, asking questions, making points
+
+${cameraMovement ? `
+CAMERA MOVEMENT (CRITICAL FOR DYNAMIC SHOTS):
+- Movement Type: ${cameraMovement.type}
+- Intensity: ${cameraMovement.intensity}
+- Duration: ${cameraMovement.duration.toFixed(1)}s
+- Start Time: ${cameraMovement.startTime.toFixed(1)}s into scene
+- ${cameraMovement.type === 'push_in' ? 'Slowly push camera closer to subject for emphasis' : ''}
+- ${cameraMovement.type === 'pull_out' ? 'Slowly pull camera back to reveal more context' : ''}
+- ${cameraMovement.type === 'pan_right' || cameraMovement.type === 'pan_left' ? `Smooth ${cameraMovement.type === 'pan_right' ? 'right' : 'left'} pan for visual interest` : ''}
+- Movement should be ${cameraMovement.intensity} and natural, not jarring
+` : 'CAMERA: Static, eye-level position (no movement)'}
 
 CRITICAL: Generate EXACTLY the characters described (animated chimpanzees), NOT humans.
 `.trim();
@@ -222,9 +471,15 @@ export const generateScenePrompts = (
   config: ChannelConfig
 ): ScenePrompt[] => {
   // Use channel config seed images, fall back to defaults if not configured
+  // NEW: Select seed image variants based on scene type
   const seedImages = {
     ...FALLBACK_SEED_IMAGES,
     ...(config.seedImages || {})
+  };
+  
+  // Helper to get seed image with variant selection
+  const getSeedImageForScene = (character: 'hostA' | 'hostB', sceneType: SceneTypeInfo, index: number): string => {
+    return selectSeedImageVariant(character, sceneType, config, index);
   };
 
   // Use channel config studio setup, fall back to default if not configured
@@ -245,17 +500,43 @@ export const generateScenePrompts = (
         scene.video_mode,
         sceneTypeInfo.emotionalTone,
         config.characters.hostA.personality || config.characters.hostA.bio,
-        config.characters.hostB.personality || config.characters.hostB.bio
+        config.characters.hostB.personality || config.characters.hostB.bio,
+        sceneTypeInfo // NEW: Pass scene type for more contextual expressions
       );
+      
+      // CRITICAL FIX: Generate camera movement for dynamic shots
+      // Estimate scene duration from text (words / 2.5 words per second)
+      const wordCount = scene.text.split(/\s+/).length;
+      const estimatedDuration = Math.max(3, wordCount / 2.5);
+      const cameraMovement = generateCameraMovement(index, totalScenes, sceneTypeInfo, estimatedDuration);
+      
+      // NEW: Select seed image variant based on scene type
+      const selectedSeedImage = scene.video_mode === 'hostA'
+        ? getSeedImageForScene('hostA', sceneTypeInfo, index)
+        : getSeedImageForScene('hostB', sceneTypeInfo, index);
+      
+      // Update seedImages with selected variant for this scene
+      const sceneSeedImages = {
+        ...seedImages,
+        hostASolo: scene.video_mode === 'hostA' ? selectedSeedImage : seedImages.hostASolo,
+        hostBSolo: scene.video_mode === 'hostB' ? selectedSeedImage : seedImages.hostBSolo
+      };
       
       const visualPrompt = buildVisualPrompt(
         correctedScene,
         config,
-        seedImages,
+        sceneSeedImages,
         studioSetup,
         sceneTypeInfo,
-        expressionHint
+        expressionHint,
+        cameraMovement
       );
+      
+      // CRITICAL FIX: Generate camera movement for dynamic shots
+      // Estimate scene duration from text (words / 2.5 words per second)
+      const wordCount = scene.text.split(/\s+/).length;
+      const estimatedDuration = Math.max(3, wordCount / 2.5);
+      const cameraMovement = generateCameraMovement(index, totalScenes, sceneTypeInfo, estimatedDuration);
 
       return {
         sceneNumber,
@@ -264,7 +545,8 @@ export const generateScenePrompts = (
         scene: correctedScene,
         visualPrompt,
         lightingMood: sceneTypeInfo.lightingMood,
-        expressionHint
+        expressionHint,
+        cameraMovement // NEW: Include camera movement
       };
     });
 };

@@ -215,3 +215,63 @@ export const VOICES = {
   /** Default voice for host B */
   DEFAULT_HOST_B: 'shimmer',
 } as const;
+
+// =============================================================================
+// CHARACTER BEHAVIOR DEFAULTS
+// =============================================================================
+
+import type { CharacterBehavior } from './types';
+
+/**
+ * Get default behavior configuration for a character
+ * Used when creating new characters or when behaviorInstructions is missing
+ */
+export const getDefaultBehavior = (): CharacterBehavior => ({
+  speakingStyle: {
+    sentenceLength: 'medium',
+    formality: 'casual',
+    energy: 'medium',
+    useContractions: true,
+    useSlang: false,
+    useNumbers: 'often'
+  },
+  tone: {
+    default: 'sarcastic',
+    variations: {
+      forGoodNews: 'playful',
+      forBadNews: 'sarcastic',
+      forControversial: 'analytical'
+    }
+  },
+  viewpoints: {
+    onMarkets: 'skeptical',
+    onCompanies: 'critical',
+    onRegulation: 'neutral',
+    onInnovation: 'cautious'
+  },
+  catchphrases: [],
+  expressions: {
+    agreement: ['Exactly!', 'Totally'],
+    disagreement: ['Wait, hold on', "I'm not so sure"],
+    surprise: ['Wow', 'No way'],
+    skepticism: ['Really?', 'I doubt it']
+  },
+  argumentation: {
+    style: 'direct',
+    useExamples: true,
+    useAnalogies: false,
+    useData: 'often',
+    challengeOthers: true
+  },
+  interaction: {
+    interruptFrequency: 'sometimes',
+    buildOnOthers: true,
+    createContrast: true,
+    agreementLevel: 'sometimes'
+  },
+  customInstructions: '',
+  dialogueExamples: {
+    good: [],
+    bad: []
+  }
+});

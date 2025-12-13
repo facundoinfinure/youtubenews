@@ -325,6 +325,199 @@ export async function applyHighPassFilter(
   return ctx.startRendering();
 }
 
+/**
+ * NEW: Apply parametric EQ for professional audio mixing
+ * Enhances voice clarity and presence
+ */
+export async function applyParametricEQ(
+  audioBuffer: AudioBuffer,
+  options: {
+    lowShelf?: { frequency: number; gain: number }; // Bass boost/cut
+    midBoost?: { frequency: number; gain: number; Q: number }; // Presence boost
+    highShelf?: { frequency: number; gain: number }; // Treble boost/cut
+  } = {}
+): Promise<AudioBuffer> {
+  const ctx = new OfflineAudioContext(
+    audioBuffer.numberOfChannels,
+    audioBuffer.length,
+    audioBuffer.sampleRate
+  );
+  
+  const source = ctx.createBufferSource();
+  source.buffer = audioBuffer;
+  
+  let currentNode: AudioNode = source;
+  
+  // Low shelf (bass)
+  if (options.lowShelf) {
+    const lowShelf = ctx.createBiquadFilter();
+    lowShelf.type = 'lowshelf';
+    lowShelf.frequency.value = options.lowShelf.frequency;
+    lowShelf.gain.value = options.lowShelf.gain;
+    currentNode.connect(lowShelf);
+    currentNode = lowShelf;
+  }
+  
+  // Mid boost (presence - for voice clarity)
+  if (options.midBoost) {
+    const midBoost = ctx.createBiquadFilter();
+    midBoost.type = 'peaking';
+    midBoost.frequency.value = options.midBoost.frequency;
+    midBoost.gain.value = options.midBoost.gain;
+    midBoost.Q.value = options.midBoost.Q;
+    currentNode.connect(midBoost);
+    currentNode = midBoost;
+  }
+  
+  // High shelf (treble)
+  if (options.highShelf) {
+    const highShelf = ctx.createBiquadFilter();
+    highShelf.type = 'highshelf';
+    highShelf.frequency.value = options.highShelf.frequency;
+    highShelf.gain.value = options.highShelf.gain;
+    currentNode.connect(highShelf);
+    currentNode = highShelf;
+  }
+  
+  currentNode.connect(ctx.destination);
+  source.start(0);
+  return ctx.startRendering();
+}
+
+/**
+ * NEW: Apply subtle reverb for ambient feel
+ * Adds depth without being obvious
+ */
+export async function applyReverb(
+  audioBuffer: AudioBuffer,
+  options: {
+    roomSize?: number; // 0-1, default 0.3 (subtle)
+    damping?: number; // 0-1, default 0.5
+    wetLevel?: number; // 0-1, default 0.15 (subtle)
+  } = {}
+): Promise<AudioBuffer> {
+  const {
+    roomSize = 0.3,
+    damping = 0.5,
+    wetLevel = 0.15 // Subtle reverb
+  } = options;
+  
+  const ctx = new OfflineAudioContext(
+    audioBuffer.numberOfChannels,
+    audioBuffer.length,
+    audioBuffer.sampleRate
+  );
+  
+  const source = ctx.createBufferSource();
+  source.buffer = audioBuffer;
+  
+  // Create convolver for reverb (simplified - uses impulse response)
+  // For production, use a proper impulse response file
+  // For now, use a simple delay-based reverb simulation
+  const delay = ctx.createDelay();
+  delay.delayTime.value = 0.03; // 30ms delay
+  
+  const gain = ctx.createGain();
+  gain.gain.value = wetLevel;
+  
+  const dryGain = ctx.createGain();
+  dryGain.gain.value = 1 - wetLevel;
+  
+  // Mix dry and wet signals
+  source.connect(dryGain);
+  source.connect(delay);
+  delay.connect(gain);
+  
+  const merger = ctx.createChannelMerger(audioBuffer.numberOfChannels);
+  dryGain.connect(merger, 0, 0);
+  if (audioBuffer.numberOfChannels > 1) {
+    dryGain.connect(merger, 0, 1);
+  }
+  gain.connect(merger, 0, 0);
+  if (audioBuffer.numberOfChannels > 1) {
+    gain.connect(merger, 0, 1);
+  }
+  
+  merger.connect(ctx.destination);
+  source.start(0);
+  return ctx.startRendering();
+}
+
+/**
+ * NEW: Professional audio mixing function
+ * Applies all enhancements: EQ, compression, normalization, reverb
+ */
+export async function applyProfessionalAudioMixing(
+  audioBuffer: AudioBuffer,
+  options: {
+    normalize?: boolean;
+    targetLUFS?: number;
+    applyEQ?: boolean;
+    applyCompression?: boolean;
+    applyReverb?: boolean;
+    voiceType?: 'male' | 'female';
+  } = {}
+): Promise<AudioBuffer> {
+  const {
+    normalize = true,
+    targetLUFS = TARGET_LOUDNESS_LUFS,
+    applyEQ = true,
+    applyCompression = true,
+    applyReverb = false, // Disabled by default
+    voiceType = 'male'
+  } = options;
+  
+  let processed = audioBuffer;
+  
+  // 1. High-pass filter (remove rumble)
+  processed = await applyHighPassFilter(processed, 80);
+  
+  // 2. Parametric EQ (voice enhancement)
+  if (applyEQ) {
+    // Voice-specific EQ curves
+    if (voiceType === 'male') {
+      processed = await applyParametricEQ(processed, {
+        lowShelf: { frequency: 100, gain: 2 }, // Slight bass boost
+        midBoost: { frequency: 2000, gain: 3, Q: 1.5 }, // Presence boost
+        highShelf: { frequency: 8000, gain: 1 } // Slight treble
+      });
+    } else {
+      processed = await applyParametricEQ(processed, {
+        lowShelf: { frequency: 150, gain: 1 },
+        midBoost: { frequency: 3000, gain: 4, Q: 1.5 }, // More presence for female voices
+        highShelf: { frequency: 10000, gain: 2 } // More treble
+      });
+    }
+  }
+  
+  // 3. Compression (if enabled)
+  if (applyCompression) {
+    // Compression is applied during normalization
+    // This is handled in normalizeAudio function
+  }
+  
+  // 4. Normalization
+  if (normalize) {
+    processed = await normalizeAudio(processed, {
+      targetLUFS,
+      applyCompression,
+      compressionRatio: 3,
+      compressionThreshold: -20
+    });
+  }
+  
+  // 5. Reverb (subtle, if enabled)
+  if (applyReverb) {
+    processed = await applyReverb(processed, {
+      roomSize: 0.3,
+      damping: 0.5,
+      wetLevel: 0.1 // Very subtle
+    });
+  }
+  
+  return processed;
+}
+
 // =============================================================================================
 // AUDIO EXPORT
 // =============================================================================================
@@ -402,6 +595,7 @@ export interface ProcessedAudioResult {
 
 /**
  * Process audio segment with normalization and enhancement
+ * NEW: Enhanced with professional mixing options
  */
 export async function processAudioSegment(
   audioBase64: string,
@@ -412,6 +606,10 @@ export async function processAudioSegment(
     highPassCutoff?: number;
     applyNoiseGate?: boolean;
     noiseGateThreshold?: number;
+    applyEQ?: boolean; // NEW: Enable parametric EQ
+    applyCompression?: boolean; // NEW: Enable compression
+    applyReverb?: boolean; // NEW: Enable subtle reverb
+    voiceType?: 'male' | 'female'; // NEW: For voice-specific EQ
   } = {}
 ): Promise<ProcessedAudioResult> {
   const {
@@ -420,7 +618,11 @@ export async function processAudioSegment(
     applyHighPass = true,
     highPassCutoff = 80,
     applyNoiseGate: useNoiseGate = false,
-    noiseGateThreshold = -50
+    noiseGateThreshold = -50,
+    applyEQ = true, // NEW: Enable by default
+    applyCompression = true, // NEW: Enable by default
+    applyReverb = false, // NEW: Disabled by default
+    voiceType = 'male' // NEW: Default to male
   } = options;
   
   // Decode audio
@@ -428,19 +630,32 @@ export async function processAudioSegment(
   const ctx = new AudioContext();
   let audioBuffer = await decodeAudioData(audioData, ctx);
   
-  // Apply high-pass filter
-  if (applyHighPass) {
-    audioBuffer = await applyHighPassFilter(audioBuffer, highPassCutoff);
-  }
-  
-  // Apply noise gate
-  if (useNoiseGate) {
-    audioBuffer = applyNoiseGate(audioBuffer, noiseGateThreshold);
-  }
-  
-  // Normalize
-  if (normalize) {
-    audioBuffer = await normalizeAudio(audioBuffer, { targetLUFS });
+  // NEW: Apply professional mixing (includes high-pass, EQ, compression, normalization, reverb)
+  if (applyEQ || applyCompression || applyReverb) {
+    audioBuffer = await applyProfessionalAudioMixing(audioBuffer, {
+      normalize,
+      targetLUFS,
+      applyEQ,
+      applyCompression,
+      applyReverb,
+      voiceType
+    });
+  } else {
+    // Legacy path: individual processing
+    // Apply high-pass filter
+    if (applyHighPass) {
+      audioBuffer = await applyHighPassFilter(audioBuffer, highPassCutoff);
+    }
+    
+    // Apply noise gate
+    if (useNoiseGate) {
+      audioBuffer = applyNoiseGate(audioBuffer, noiseGateThreshold);
+    }
+    
+    // Normalize
+    if (normalize) {
+      audioBuffer = await normalizeAudio(audioBuffer, { targetLUFS });
+    }
   }
   
   // Export

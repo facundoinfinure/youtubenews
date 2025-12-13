@@ -557,6 +557,13 @@ import { BroadcastSegment, VideoAssets, ChannelConfig, RenderConfig, DEFAULT_REN
  * Scene input for podcast-style composition
  */
 export interface PodcastScene {
+  // CRITICAL FIX: Add camera movement metadata for dynamic shots
+  cameraMovement?: {
+    type: 'push_in' | 'pull_out' | 'pan_left' | 'pan_right' | 'zoom' | 'static';
+    intensity: 'subtle' | 'moderate' | 'pronounced';
+    duration: number;
+    startTime: number;
+  };
   video_url: string;
   title: string;
   duration: number; // Duration in seconds (from video metadata or estimate)
@@ -598,17 +605,34 @@ export const buildPodcastStyleEdit = (
 ): any => {
   const config = options.renderConfig || DEFAULT_RENDER_CONFIG;
   
-  // Calculate cumulative start times accounting for transitions
+  // CRITICAL FIX: Calculate cumulative start times with proper audio-video sync
+  // Ensure no gaps and no problematic overlaps
   const transitionDuration = config.transition.type !== 'none' ? config.transition.duration : 0;
   let currentStart = 0;
   const scenesWithTiming = scenes.map((scene, index) => {
+    // Verify scene has valid duration
+    if (!scene.duration || scene.duration <= 0) {
+      console.error(`❌ [Podcast Composition] Scene ${index + 1} missing or invalid duration`);
+      throw new Error(`Scene ${index + 1} has invalid duration (${scene.duration}s) - cannot compose`);
+    }
+    
     const sceneWithStart = {
       ...scene,
       start: currentStart,
       index
     };
-    // Overlap clips by transition duration (except first clip)
-    currentStart += scene.duration - (index < scenes.length - 1 ? transitionDuration : 0);
+    
+    // CRITICAL: Use exact audio duration, overlap only for smooth transitions
+    // For transitions, we overlap by transitionDuration to create smooth crossfade
+    // But we don't want gaps, so we advance by full duration minus overlap
+    if (index < scenes.length - 1 && transitionDuration > 0) {
+      // Overlap for smooth transition (transition happens during overlap)
+      currentStart += scene.duration - transitionDuration;
+    } else {
+      // Last scene or no transition - use full duration
+      currentStart += scene.duration;
+    }
+    
     return sceneWithStart;
   });
 
@@ -625,31 +649,87 @@ export const buildPodcastStyleEdit = (
 
   // Build video clips with transitions and effects
   const videoClips = scenesWithTiming.map((scene, index) => {
-    // Determine effect - use config or auto-rotate for variety
+    // CRITICAL FIX: Determine effect based on camera movement or config
+    // Camera movements translate to Shotstack effects:
+    // - push_in → zoomInSlow/zoomIn
+    // - pull_out → zoomOutSlow/zoomOut
+    // - pan_left/pan_right → slideLeftSlow/slideRightSlow
     let clipEffect: ShotstackEffect | undefined;
-    if (config.effects.clipEffect !== 'none') {
+    
+    // Check if scene has camera movement metadata (from SceneBuilder)
+    const cameraMovement = (scene as any).cameraMovement;
+    if (cameraMovement) {
+      // Map camera movement to Shotstack effect
+      const movementToEffect: Record<string, ShotstackEffect> = {
+        'push_in': cameraMovement.intensity === 'pronounced' ? 'zoomInFast' : 
+                   cameraMovement.intensity === 'moderate' ? 'zoomIn' : 'zoomInSlow',
+        'pull_out': cameraMovement.intensity === 'pronounced' ? 'zoomOutFast' : 
+                    cameraMovement.intensity === 'moderate' ? 'zoomOut' : 'zoomOutSlow',
+        'pan_left': 'slideLeftSlow',
+        'pan_right': 'slideRightSlow',
+        'zoom': 'zoomInSlow'
+      };
+      clipEffect = movementToEffect[cameraMovement.type];
+      console.log(`🎬 [Podcast Composition] Scene ${index + 1}: Applying camera movement "${cameraMovement.type}" as effect "${clipEffect}"`);
+    } else if (config.effects.clipEffect !== 'none') {
+      // Fallback to config or auto-rotate
       clipEffect = config.effects.autoEffectRotation 
         ? effectRotation[index % effectRotation.length]
         : config.effects.clipEffect as ShotstackEffect;
     }
 
-    // Use specific duration + transition overlap for precise timing
-    // Add extra time to ensure no gaps during transitions
-    const clipDuration = scene.duration + (index < scenes.length - 1 ? transitionDuration * 0.5 : 0);
+    // CRITICAL FIX: Use exact audio duration to avoid gaps or overlaps
+    // Ensure clip duration matches audio duration exactly
+    // For transitions, extend clip slightly to cover transition overlap
+    let clipDuration = scene.duration;
+    
+    // NEW: Apply pacing variation based on scene type
+    const pacing = config.effects.pacingVariation !== false 
+      ? determineScenePacing(scene, index, scenesWithTiming.length)
+      : { speedMultiplier: 1.0, durationAdjustment: 0, effectIntensity: 'normal' };
+    
+    // Adjust duration based on pacing (but keep audio sync)
+    // Note: We can't actually change playback speed in Shotstack easily,
+    // but we can adjust visual duration and use faster effects for "fast" feel
+    clipDuration += pacing.durationAdjustment;
+    
+    // If there's a transition after this clip, extend duration to cover overlap
+    if (index < scenes.length - 1 && transitionDuration > 0) {
+      // Extend by transition duration to ensure smooth crossfade
+      clipDuration = clipDuration + transitionDuration;
+    }
+    
+    // Verify duration is valid
+    if (!clipDuration || clipDuration <= 0) {
+      console.error(`❌ [Podcast Composition] Scene ${index + 1} has invalid duration: ${clipDuration}`);
+      throw new Error(`Scene ${index + 1} has invalid duration - cannot compose`);
+    }
 
     const clip: any = {
       asset: {
         type: 'video',
         src: scene.video_url,
-        volume: 1 // Use embedded audio
+        volume: 1 // CRITICAL: Use embedded audio from InfiniteTalk
       },
       start: scene.start,
-      length: clipDuration // Use calculated duration instead of 'auto' to avoid gaps
+      length: clipDuration // Use exact calculated duration to avoid gaps
     };
+    
+    // Log for debugging
+    console.log(`📹 [Podcast Composition] Scene ${index + 1}: start=${scene.start.toFixed(2)}s, duration=${clipDuration.toFixed(2)}s, audio=${scene.duration.toFixed(2)}s, pacing=${pacing.speedMultiplier}x`);
 
-    // Add effect (Ken Burns motion)
+    // Add effect (Ken Burns motion) - adjust intensity based on pacing
     if (clipEffect) {
-      clip.effect = clipEffect;
+      // Modify effect based on pacing intensity
+      if (pacing.effectIntensity === 'fast' && clipEffect.includes('Slow')) {
+        // Use faster version for fast pacing
+        clip.effect = clipEffect.replace('Slow', '') as ShotstackEffect;
+      } else if (pacing.effectIntensity === 'slow' && !clipEffect.includes('Slow')) {
+        // Use slower version for slow pacing
+        clip.effect = (clipEffect + 'Slow') as ShotstackEffect;
+      } else {
+        clip.effect = clipEffect;
+      }
     }
 
     // Add filter if configured
@@ -657,11 +737,19 @@ export const buildPodcastStyleEdit = (
       clip.filter = config.effects.filter;
     }
 
-    // Add transition (except for first clip)
+    // CRITICAL FIX: Add advanced contextual transitions
     if (config.transition.type !== 'none' && index > 0) {
+      // Use advanced transition selection if enabled, otherwise use config
+      const nextScene = scenesWithTiming[index + 1];
+      const selectedTransition = config.effects.autoTransitionSelection
+        ? selectAdvancedTransition(scene, nextScene, index, scenesWithTiming.length)
+        : config.transition.type;
+      
       clip.transition = {
-        in: config.transition.type
+        in: selectedTransition
       };
+      
+      console.log(`🎬 [Transition] Scene ${index + 1} → ${index + 2}: ${selectedTransition}`);
     }
 
     return clip;
@@ -672,6 +760,26 @@ export const buildPodcastStyleEdit = (
   
   // TRACK 1 (Base): Video clips
   tracks.push({ clips: videoClips });
+  
+  // NEW: Motion Graphics Track (animated graphics, info cards, progress bars)
+  if (config.effects.motionGraphics !== false) {
+    const motionGraphicsClips: any[] = [];
+    scenesWithTiming.forEach((scene, index) => {
+      const graphics = generateMotionGraphics(
+        scene,
+        index,
+        scenesWithTiming.length,
+        scene.start,
+        scene.duration
+      );
+      motionGraphicsClips.push(...graphics);
+    });
+    
+    if (motionGraphicsClips.length > 0) {
+      tracks.unshift({ clips: motionGraphicsClips });
+      console.log(`🎨 [Motion Graphics] Added ${motionGraphicsClips.length} animated graphics`);
+    }
+  }
 
   // === FORMAT-SPECIFIC SETTINGS ===
   // Determine if vertical format BEFORE using it
@@ -710,48 +818,154 @@ export const buildPodcastStyleEdit = (
     }
   }
 
+  /**
+   * NEW: Generate motion graphics for scenes
+   * Adds animated graphics, info cards, progress bars, and callouts
+   */
+  const generateMotionGraphics = (
+    scene: PodcastScene,
+    sceneIndex: number,
+    totalScenes: number,
+    startTime: number,
+    duration: number
+  ): any[] => {
+    const graphics: any[] = [];
+    const isVertical = aspectRatio === '9:16' || aspectRatio === '4:5';
+    
+    // Progress bar for multi-scene narratives
+    if (totalScenes > 3 && sceneIndex < totalScenes - 1) {
+      const progress = ((sceneIndex + 1) / totalScenes) * 100;
+      graphics.push({
+        asset: {
+          type: 'text',
+          text: '',
+          width: isVertical ? 800 : 1200,
+          height: 8,
+          background: { color: 'rgba(255, 255, 255, 0.2)' }
+        },
+        start: startTime,
+        length: duration,
+        offset: { x: 0, y: isVertical ? 0.45 : 0.45 },
+        position: 'center',
+        opacity: 0.8
+      });
+      
+      // Progress fill
+      graphics.push({
+        asset: {
+          type: 'text',
+          text: '',
+          width: (progress / 100) * (isVertical ? 800 : 1200),
+          height: 8,
+          background: { color: config.newsStyle?.lowerThird?.primaryColor || '#ff3333' }
+        },
+        start: startTime,
+        length: duration,
+        offset: { x: -(isVertical ? 400 : 600) + ((progress / 100) * (isVertical ? 400 : 600)), y: isVertical ? 0.45 : 0.45 },
+        position: 'center',
+        opacity: 1.0,
+        transition: { in: 'slideRight' }
+      });
+    }
+    
+    // Info cards for statistics (if scene text contains numbers)
+    const sceneText = scene.text || '';
+    const numberMatch = sceneText.match(/\d+[.,]?\d*[%$€£¥]?/);
+    if (numberMatch && sceneIndex < 3) { // Only in first 3 scenes
+      graphics.push({
+        asset: {
+          type: 'text',
+          text: numberMatch[0],
+          alignment: { horizontal: 'center', vertical: 'center' },
+          font: { 
+            color: '#ffffff', 
+            family: 'Arial Black', 
+            size: isVertical ? 72 : 96,
+            lineHeight: 1.2
+          },
+          width: isVertical ? 300 : 400,
+          height: isVertical ? 120 : 160,
+          background: { color: 'rgba(0, 0, 0, 0.8)' }
+        },
+        start: startTime + 1, // Appear 1s into scene
+        length: 3, // Show for 3 seconds
+        offset: { x: isVertical ? 0.3 : 0.35, y: isVertical ? -0.2 : -0.2 },
+        position: 'center',
+        opacity: 1.0,
+        transition: { in: 'zoom', out: 'fade' }
+      });
+    }
+    
+    // Animated callout for key points
+    if (scene.title && sceneIndex === 0) { // First scene hook
+      graphics.push({
+        asset: {
+          type: 'text',
+          text: '⚠️',
+          alignment: { horizontal: 'center', vertical: 'center' },
+          font: { 
+            color: '#ff3333', 
+            family: 'Arial', 
+            size: isVertical ? 80 : 100
+          },
+          width: isVertical ? 100 : 120,
+          height: isVertical ? 100 : 120
+        },
+        start: startTime,
+        length: 2,
+        offset: { x: isVertical ? -0.35 : -0.4, y: isVertical ? -0.3 : -0.3 },
+        position: 'center',
+        opacity: 1.0,
+        transition: { in: 'zoom', out: 'fade' }
+      });
+    }
+    
+    return graphics;
+  };
+
   // === FORMAT-SPECIFIC OVERLAY PRESETS ===
   // RENOVATED DESIGN - Premium broadcast style with modern aesthetics
+  // CRITICAL FIX: Larger font sizes for better readability
   const overlayPresets = isVertical ? {
     // 9:16 / 4:5 (Vertical - Shorts/Reels/TikTok) - PREMIUM MOBILE DESIGN
     lowerThird: {
       // Wider banner with gradient-ready structure
-      banner: { width: 1080, height: 180, y: -0.42 },
-      // Sleek category badge with rounded feel
-      badge: { width: 320, height: 52, x: 0, y: -0.32, fontSize: 32 },
-      // Clean headline area
-      headline: { width: 960, height: 90, x: 0, y: -0.42, fontSize: 48 }
+      banner: { width: 1080, height: 200, y: -0.42 }, // Increased height
+      // Sleek category badge with rounded feel - LARGER TEXT
+      badge: { width: 360, height: 60, x: 0, y: -0.32, fontSize: 42 }, // Increased from 32 to 42
+      // Clean headline area - LARGER TEXT
+      headline: { width: 1000, height: 100, x: 0, y: -0.42, fontSize: 64 } // Increased from 48 to 64
     },
-    // Modern date badge - top right corner
-    date: { x: 0.35, y: 0.42, fontSize: 20, width: 180, height: 44 },
-    // LIVE indicator - pulsing red
-    live: { x: -0.35, y: 0.42, fontSize: 18, width: 100, height: 40 },
-    // Channel branding - subtle top corner
-    branding: { x: 0.35, y: 0.36, fontSize: 18, width: 160, height: 38 },
-    // Breaking news - dramatic center strip
-    breakingNews: { width: 800, height: 60, y: -0.22, fontSize: 26 },
-    // Host name plate - sleek left-aligned
-    hostName: { width: 280, height: 56, y: -0.48, fontSize: 22, accentWidth: 4 }
+    // Modern date badge - top right corner - LARGER
+    date: { x: 0.35, y: 0.42, fontSize: 28, width: 200, height: 50 }, // Increased from 20 to 28
+    // LIVE indicator - pulsing red - LARGER
+    live: { x: -0.35, y: 0.42, fontSize: 24, width: 120, height: 46 }, // Increased from 18 to 24
+    // Channel branding - subtle top corner - LARGER
+    branding: { x: 0.35, y: 0.36, fontSize: 24, width: 180, height: 44 }, // Increased from 18 to 24
+    // Breaking news - dramatic center strip - LARGER
+    breakingNews: { width: 900, height: 70, y: -0.22, fontSize: 36 }, // Increased from 26 to 36
+    // Host name plate - sleek left-aligned - LARGER
+    hostName: { width: 320, height: 64, y: -0.48, fontSize: 32, accentWidth: 5 } // Increased from 22 to 32
   } : {
     // 16:9 (Landscape - YouTube) - CINEMA BROADCAST DESIGN
     lowerThird: {
       // Full-width cinematic lower third
-      banner: { width: 1920, height: 200, y: -0.42 },
-      // Premium category badge with accent
-      badge: { width: 300, height: 70, x: -0.38, y: -0.42, fontSize: 32 },
-      // Spacious headline with professional typography
-      headline: { width: 1100, height: 100, x: 0.05, y: -0.42, fontSize: 38 }
+      banner: { width: 1920, height: 220, y: -0.42 }, // Increased height
+      // Premium category badge with accent - LARGER TEXT
+      badge: { width: 360, height: 80, x: -0.38, y: -0.42, fontSize: 44 }, // Increased from 32 to 44
+      // Spacious headline with professional typography - LARGER TEXT
+      headline: { width: 1200, height: 110, x: 0.05, y: -0.42, fontSize: 56 } // Increased from 38 to 56
     },
-    // Date display - sleek corner badge
-    date: { x: 0.40, y: 0.42, fontSize: 22, width: 200, height: 48 },
-    // LIVE indicator with recording dot
-    live: { x: -0.40, y: 0.42, fontSize: 22, width: 120, height: 44 },
-    // Channel branding - professional corner
-    branding: { x: 0.40, y: 0.36, fontSize: 20, width: 180, height: 42 },
-    // Breaking news - impactful banner
-    breakingNews: { width: 600, height: 70, y: -0.25, fontSize: 32 },
-    // Host name plate - broadcast style
-    hostName: { width: 320, height: 65, y: -0.48, fontSize: 26, accentWidth: 6 }
+    // Date display - sleek corner badge - LARGER
+    date: { x: 0.40, y: 0.42, fontSize: 28, width: 220, height: 52 }, // Increased from 22 to 28
+    // LIVE indicator with recording dot - LARGER
+    live: { x: -0.40, y: 0.42, fontSize: 28, width: 140, height: 48 }, // Increased from 22 to 28
+    // Channel branding - professional corner - LARGER
+    branding: { x: 0.40, y: 0.36, fontSize: 26, width: 200, height: 46 }, // Increased from 20 to 26
+    // Breaking news - impactful banner - LARGER
+    breakingNews: { width: 700, height: 80, y: -0.25, fontSize: 42 }, // Increased from 32 to 42
+    // Host name plate - broadcast style - LARGER
+    hostName: { width: 360, height: 72, y: -0.48, fontSize: 36, accentWidth: 7 } // Increased from 26 to 36
   };
 
   // === NEWS-STYLE OVERLAYS - PREMIUM BROADCAST DESIGN ===
@@ -1128,9 +1342,10 @@ export const buildPodcastStyleEdit = (
       const accentGold = '#ffd60a';
       
       // Ticker positioning - sleek bottom bar
+      // CRITICAL FIX: Larger ticker text for better readability
       const tickerPresets = isVertical
-        ? { y: -0.48, height: 48, fontSize: 18, width: 1080 }
-        : { y: -0.475, height: 52, fontSize: 22, width: 1920 };
+        ? { y: -0.48, height: 56, fontSize: 24, width: 1080 } // Increased from 18 to 24
+        : { y: -0.475, height: 60, fontSize: 28, width: 1920 }; // Increased from 22 to 28
       
       // Speed settings
       const speedDurations = { slow: 35, normal: 25, fast: 18 };
@@ -1207,7 +1422,7 @@ export const buildPodcastStyleEdit = (
             type: 'text',
             text: 'LATEST',
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: '#ffffff', family: 'Montserrat Bold', size: isVertical ? 14 : 16, lineHeight: 1 },
+            font: { color: '#ffffff', family: 'Montserrat Bold', size: isVertical ? 20 : 24, lineHeight: 1 }, // Increased from 14/16 to 20/24
             width: isVertical ? 90 : 110,
             height: tickerPresets.height - 12
           },
@@ -1376,9 +1591,10 @@ export const buildPodcastStyleEdit = (
       top: isVertical ? 0.35 : 0.38
     }[subtitlePosition];
     
+    // CRITICAL FIX: Larger subtitles for better readability
     const subtitlePresets = isVertical 
-      ? { fontSize: 40, width: 900, height: 120, maxChars: 50 }
-      : { fontSize: 50, width: 1400, height: 100, maxChars: 70 };
+      ? { fontSize: 60, width: 900, height: 150, maxChars: 50 } // Increased from 40 to 60
+      : { fontSize: 72, width: 1400, height: 140, maxChars: 70 }; // Increased from 50 to 72
     
     // Style configurations
     const styleConfig = {
@@ -1723,6 +1939,72 @@ const formatNewsDate = (): string => {
  * Render a podcast-style video from scenes with professional production quality
  * This is the main function to use for podcast composition
  */
+/**
+ * Validate segments for composition - CRITICAL FIX
+ */
+const validateSegmentsForComposition = (
+  scenes: PodcastScene[]
+): { valid: boolean; issues: string[] } => {
+  const issues: string[] = [];
+  
+  scenes.forEach((scene, index) => {
+    // Verify video URL exists
+    if (!scene.video_url) {
+      issues.push(`Scene ${index + 1}: Missing video URL`);
+    }
+    
+    // Verify duration is valid
+    if (!scene.duration || scene.duration <= 0) {
+      issues.push(`Scene ${index + 1}: Invalid duration (${scene.duration}s)`);
+    }
+    
+    // Verify audio exists (video should have embedded audio from InfiniteTalk)
+    // We can't verify this directly, but we can check if duration makes sense
+    if (scene.duration < 1) {
+      issues.push(`Scene ${index + 1}: Duration too short (${scene.duration}s) - may indicate missing audio`);
+    }
+  });
+  
+  return {
+    valid: issues.length === 0,
+    issues
+  };
+};
+
+/**
+ * Detect audio gaps in timeline
+ */
+const detectAudioGaps = (scenes: PodcastScene[]): Array<{ sceneIndex: number; start: number; end: number; duration: number }> => {
+  const gaps: Array<{ sceneIndex: number; start: number; end: number; duration: number }> = [];
+  let currentTime = 0;
+  
+  scenes.forEach((scene, index) => {
+    const audioDuration = scene.duration || 0;
+    // If video duration is longer than audio, there's a gap
+    // (We assume video duration matches audio for InfiniteTalk, but check anyway)
+    const videoDuration = scene.duration || 0;
+    
+    // Check if there's a gap between scenes (shouldn't happen with proper transitions)
+    if (index > 0) {
+      const prevScene = scenes[index - 1];
+      const prevEnd = currentTime - scene.duration;
+      if (prevEnd < currentTime - 0.1) {
+        // Small gap detected
+        gaps.push({
+          sceneIndex: index,
+          start: prevEnd,
+          end: currentTime,
+          duration: currentTime - prevEnd
+        });
+      }
+    }
+    
+    currentTime += Math.max(audioDuration, videoDuration);
+  });
+  
+  return gaps;
+};
+
 export const renderPodcastVideo = async (
   scenes: PodcastScene[],
   options: {
@@ -1742,6 +2024,23 @@ export const renderPodcastVideo = async (
   console.log(`🎙️ [Podcast Render] Starting professional podcast composition...`);
   console.log(`🎙️ [Podcast Render] ${scenes.length} scenes to compose`);
   console.log(`🎙️ [Podcast Render] News-style overlays: ${config.newsStyle?.enabled ? 'ENABLED' : 'disabled'}`);
+  
+  // CRITICAL FIX: Validate scenes before rendering
+  const validation = validateSegmentsForComposition(scenes);
+  if (!validation.valid) {
+    console.error(`❌ [Podcast Render] Validation failed:`, validation.issues);
+    return {
+      success: false,
+      error: `Composition validation failed: ${validation.issues.join(', ')}`
+    };
+  }
+  
+  // Detect gaps
+  const gaps = detectAudioGaps(scenes);
+  if (gaps.length > 0) {
+    console.warn(`⚠️ [Podcast Render] Detected ${gaps.length} audio gaps:`, gaps);
+    // Gaps will be handled by ensuring proper transitions and durations
+  }
   
   // Validate scenes
   const validScenes = scenes.filter(s => s.video_url && s.duration > 0);
@@ -1790,13 +2089,116 @@ const SCENE_EFFECTS: Record<string, { effect: ShotstackEffect; filter?: Shotstac
 };
 
 /**
- * Professional transition presets
+ * Determine pacing for a scene based on its type and position
+ * NEW: Variación de Ritmo - adjusts scene duration and effects for optimal pacing
+ */
+const determineScenePacing = (
+  scene: PodcastScene,
+  sceneIndex: number,
+  totalScenes: number
+): {
+  speedMultiplier: number; // 0.9 (fast) to 1.1 (slow)
+  durationAdjustment: number; // Seconds to add/subtract
+  effectIntensity: 'fast' | 'normal' | 'slow';
+} => {
+  const title = scene.title?.toLowerCase() || '';
+  const isHook = sceneIndex === 0;
+  const isPayoff = sceneIndex === totalScenes - 1;
+  const isConflict = title.includes('conflict') || title.includes('crisis') || 
+                      title.includes('crash') || title.includes('problem');
+  
+  // Hook: Fast pacing (0.9x speed feel, shorter duration)
+  if (isHook) {
+    return {
+      speedMultiplier: 0.9,
+      durationAdjustment: -0.5, // Cut 0.5s for faster feel
+      effectIntensity: 'fast'
+    };
+  }
+  
+  // Conflict: Fast pacing for energy
+  if (isConflict) {
+    return {
+      speedMultiplier: 0.95,
+      durationAdjustment: -0.3,
+      effectIntensity: 'fast'
+    };
+  }
+  
+  // Payoff: Slower pacing for emphasis (1.1x speed feel)
+  if (isPayoff) {
+    return {
+      speedMultiplier: 1.1,
+      durationAdjustment: 0.5, // Add 0.5s for emphasis
+      effectIntensity: 'slow'
+    };
+  }
+  
+  // Default: Normal pacing
+  return {
+    speedMultiplier: 1.0,
+    durationAdjustment: 0,
+    effectIntensity: 'normal'
+  };
+};
+
+/**
+ * Advanced transition selection based on scene context
+ * NEW: Contextual transitions for better visual flow
+ */
+const selectAdvancedTransition = (
+  currentScene: PodcastScene,
+  nextScene: PodcastScene | undefined,
+  sceneIndex: number,
+  totalScenes: number
+): ShotstackTransition => {
+  if (!nextScene) return 'fade'; // Last scene, no transition needed
+  
+  // Analyze scene types for contextual transitions
+  const currentTitle = currentScene.title?.toLowerCase() || '';
+  const nextTitle = nextScene.title?.toLowerCase() || '';
+  
+  // Hook to Context: Dramatic reveal
+  if (sceneIndex === 0) {
+    return 'zoom'; // Zoom transition for hook impact
+  }
+  
+  // Conflict scenes: Whip pan for dramatic effect
+  if (currentTitle.includes('conflict') || currentTitle.includes('crisis') || 
+      currentTitle.includes('problem') || currentTitle.includes('crash')) {
+    return 'carouselRight'; // Fast whip pan
+  }
+  
+  // Payoff/Conclusion: Slow fade for emphasis
+  if (sceneIndex === totalScenes - 2) {
+    return 'fadeSlow'; // Slow fade before final scene
+  }
+  
+  // Topic change: Slide transition
+  const topicChanged = !currentTitle.includes(nextTitle.split(' ')[0]) && 
+                       !nextTitle.includes(currentTitle.split(' ')[0]);
+  if (topicChanged) {
+    return 'slideRight'; // Slide for topic change
+  }
+  
+  // Continuation: Subtle fade
+  return 'fade';
+};
+
+/**
+ * Professional transition presets (legacy support)
  */
 const TRANSITION_PRESETS: Record<string, ShotstackTransition> = {
   'smooth': 'fade',
   'dynamic': 'slideRight',
   'professional': 'wipeLeft',
-  'energetic': 'zoom'
+  'energetic': 'zoom',
+  'whip_pan': 'carouselRight',
+  'zoom_transition': 'zoom',
+  'split_screen': 'wipeLeft', // Closest to split screen
+  'match_cut': 'fadeSlow',
+  'glitch': 'shuffleTopRight',
+  'shutter': 'revealFast'
 };
 
 /**

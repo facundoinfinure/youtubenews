@@ -257,4 +257,121 @@ export class CostTracker {
         entriesCache = [];
         await this.loadFromSupabase(days);
     }
+
+    /**
+     * NEW: Predict cost before generating
+     */
+    static predictCost(task: string, model: string, estimatedCalls: number = 1): number {
+        // Cost estimates per task/model
+        const costEstimates: Record<string, Record<string, number>> = {
+            'script': {
+                'gpt-4o': 0.01,
+                'gpt-4o-mini': 0.002
+            },
+            'viralHook': {
+                'gpt-4o': 0.01,
+                'gpt-4o-mini': 0.002
+            },
+            'metadata': {
+                'gpt-4o': 0.015,
+                'gpt-4o-mini': 0.003
+            },
+            'audio': {
+                'openai-tts': 0.015,
+                'elevenlabs': 0.18
+            },
+            'video': {
+                'infinitetalk-single': 0.30,
+                'infinitetalk-multi': 0.36,
+                'infinitetalk-480p': 0.15
+            },
+            'thumbnail': {
+                'dall-e-3': 0.04,
+                'wavespeed/nano-banana-pro': 0.14
+            }
+        };
+
+        const taskEstimate = costEstimates[task]?.[model] || 0.01;
+        return taskEstimate * estimatedCalls;
+    }
+
+    /**
+     * NEW: Get cost breakdown for a production
+     */
+    static async getProductionCostBreakdown(productionId: string) {
+        if (!supabase) return null;
+
+        try {
+            const { data, error } = await supabase
+                .from('api_costs')
+                .select('task, model, cost, cached')
+                .eq('channel_id', currentChannelId)
+                .order('created_at', { ascending: false })
+                .limit(100);
+
+            if (error) return null;
+
+            const breakdown = this.groupBy(data || [], 'task');
+            return Object.entries(breakdown).map(([task, entries]) => ({
+                task,
+                totalCost: entries.reduce((sum: number, e: any) => sum + (parseFloat(e.cost) || 0), 0),
+                count: entries.length,
+                cached: entries.filter((e: any) => e.cached).length,
+                averageCost: entries.reduce((sum: number, e: any) => sum + (parseFloat(e.cost) || 0), 0) / entries.length
+            }));
+        } catch (e) {
+            console.warn('Cost breakdown failed:', e);
+            return null;
+        }
+    }
+
+    /**
+     * NEW: Check if budget limit is exceeded
+     */
+    static async checkBudgetLimit(budgetLimit: number, days: number = 1): Promise<{
+        exceeded: boolean;
+        currentCost: number;
+        remaining: number;
+        percentage: number;
+    }> {
+        const stats = await this.getStats(days);
+        const exceeded = stats.totalCost > budgetLimit;
+        
+        return {
+            exceeded,
+            currentCost: stats.totalCost,
+            remaining: Math.max(0, budgetLimit - stats.totalCost),
+            percentage: (stats.totalCost / budgetLimit) * 100
+        };
+    }
+
+    /**
+     * NEW: Get cost optimization suggestions
+     */
+    static async getOptimizationSuggestions(): Promise<string[]> {
+        const stats = await this.getStats(30);
+        const suggestions: string[] = [];
+
+        // Check cache hit rate
+        if (stats.cacheHitRate < 50) {
+            suggestions.push(`Low cache hit rate (${stats.cacheHitRate.toFixed(1)}%). Consider enabling more aggressive caching.`);
+        }
+
+        // Check expensive tasks
+        const expensiveTasks = stats.breakdown
+            .filter(b => b.cost > 1.0)
+            .sort((a, b) => b.cost - a.cost);
+        
+        if (expensiveTasks.length > 0) {
+            suggestions.push(`High cost tasks: ${expensiveTasks.slice(0, 3).map(t => `${t.task} ($${t.cost.toFixed(2)})`).join(', ')}. Consider using lower-cost models or increasing cache usage.`);
+        }
+
+        // Check video costs
+        const videoCost = stats.breakdown.find(b => b.task === 'video')?.cost || 0;
+        if (videoCost > 5.0) {
+            suggestions.push(`Video generation is expensive ($${videoCost.toFixed(2)}). Consider using 480p for non-critical scenes.`);
+        }
+
+        return suggestions;
+    }
 }

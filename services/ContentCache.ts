@@ -343,4 +343,156 @@ export class ContentCache {
             console.warn('Cache preload failed:', e);
         }
     }
+
+    /**
+     * NEW: Fuzzy matching for similar content
+     * Finds cache entries with similar keys (for dialogue/text matching)
+     */
+    static async findSimilar(key: string, similarityThreshold: number = 0.8): Promise<CacheEntry<any> | null> {
+        // Normalize key for comparison
+        const normalizedKey = key.toLowerCase().trim();
+        
+        // Check memory cache first
+        for (const [cacheKey, entry] of memoryCache.entries()) {
+            const normalizedCacheKey = cacheKey.toLowerCase().trim();
+            const similarity = this.calculateSimilarity(normalizedKey, normalizedCacheKey);
+            if (similarity >= similarityThreshold) {
+                console.log(`🔍 Fuzzy cache match: ${key} ~ ${cacheKey} (${(similarity * 100).toFixed(1)}% similar)`);
+                return entry;
+            }
+        }
+
+        // Check Supabase for similar keys
+        if (supabase && currentChannelId) {
+            try {
+                const { data, error } = await supabase
+                    .from('content_cache')
+                    .select('cache_key, cache_value, created_at, cost_saved, expires_at')
+                    .eq('channel_id', currentChannelId)
+                    .gt('expires_at', new Date().toISOString())
+                    .limit(100);
+
+                if (!error && data) {
+                    for (const row of data) {
+                        const normalizedCacheKey = row.cache_key.toLowerCase().trim();
+                        const similarity = this.calculateSimilarity(normalizedKey, normalizedCacheKey);
+                        if (similarity >= similarityThreshold) {
+                            const entry: CacheEntry<any> = {
+                                value: row.cache_value,
+                                timestamp: new Date(row.created_at).getTime(),
+                                cost: parseFloat(row.cost_saved) || 0,
+                                expires_at: row.expires_at ? new Date(row.expires_at).getTime() : undefined
+                            };
+                            memoryCache.set(row.cache_key, entry);
+                            console.log(`🔍 Fuzzy cache match (DB): ${key} ~ ${row.cache_key} (${(similarity * 100).toFixed(1)}% similar)`);
+                            return entry;
+                        }
+                    }
+                }
+            } catch (e) {
+                console.warn('Fuzzy cache search failed:', e);
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * NEW: Calculate similarity between two strings (Levenshtein-based)
+     */
+    private static calculateSimilarity(str1: string, str2: string): number {
+        const longer = str1.length > str2.length ? str1 : str2;
+        const shorter = str1.length > str2.length ? str2 : str1;
+        
+        if (longer.length === 0) return 1.0;
+        
+        const distance = this.levenshteinDistance(longer, shorter);
+        return (longer.length - distance) / longer.length;
+    }
+
+    /**
+     * NEW: Levenshtein distance calculation
+     */
+    private static levenshteinDistance(str1: string, str2: string): number {
+        const matrix: number[][] = [];
+        
+        for (let i = 0; i <= str2.length; i++) {
+            matrix[i] = [i];
+        }
+        
+        for (let j = 0; j <= str1.length; j++) {
+            matrix[0][j] = j;
+        }
+        
+        for (let i = 1; i <= str2.length; i++) {
+            for (let j = 1; j <= str1.length; j++) {
+                if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
+                    matrix[i][j] = matrix[i - 1][j - 1];
+                } else {
+                    matrix[i][j] = Math.min(
+                        matrix[i - 1][j - 1] + 1,
+                        matrix[i][j - 1] + 1,
+                        matrix[i - 1][j] + 1
+                    );
+                }
+            }
+        }
+        
+        return matrix[str2.length][str1.length];
+    }
+
+    /**
+     * NEW: Get or generate with fuzzy matching fallback
+     */
+    static async getOrGenerateWithFuzzy<T>(
+        key: string,
+        generator: () => Promise<T>,
+        ttl: number = 3600000,
+        cost: number = 0,
+        similarityThreshold: number = 0.85
+    ): Promise<T> {
+        // Try exact match first
+        const exact = await this.getAsync<T>(key, ttl);
+        if (exact !== null) {
+            return exact;
+        }
+
+        // Try fuzzy match
+        const fuzzy = await this.findSimilar(key, similarityThreshold);
+        if (fuzzy) {
+            console.log(`✅ Using fuzzy cache match for: ${key}`);
+            return fuzzy.value as T;
+        }
+
+        // Generate new
+        return this.getOrGenerate(key, generator, ttl, cost);
+    }
+
+    /**
+     * NEW: Cache warming - pre-generate common resources
+     */
+    static async warmCache(keys: string[], generators: Map<string, () => Promise<any>>) {
+        console.log(`🔥 Warming cache for ${keys.length} entries...`);
+        const warmPromises = keys.map(async (key) => {
+            const generator = generators.get(key);
+            if (generator) {
+                try {
+                    await this.getOrGenerate(key, generator, 3600000, 0);
+                } catch (e) {
+                    console.warn(`Cache warming failed for ${key}:`, e);
+                }
+            }
+        });
+        await Promise.all(warmPromises);
+        console.log(`✅ Cache warming complete`);
+    }
+
+    /**
+     * NEW: Predictive caching - cache likely-to-be-used resources
+     */
+    static async predictiveCache(pattern: string, generator: (key: string) => Promise<any>, count: number = 5) {
+        // This would be called with patterns like "common_dialogue_*" or "frequent_news_*"
+        // For now, it's a placeholder for future implementation
+        console.log(`🔮 Predictive caching for pattern: ${pattern} (${count} entries)`);
+    }
 }

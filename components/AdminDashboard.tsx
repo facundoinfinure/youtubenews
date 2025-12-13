@@ -6,11 +6,13 @@ import { uploadVideoToYouTube, fetchYouTubeVideoStats, extractYouTubeVideoId, ge
 import { generateSeedImage } from '../services/geminiService';
 import { CostTracker } from '../services/CostTracker';
 import { ContentCache } from '../services/ContentCache';
+import { AnalyticsService, PerformancePattern, OptimizationSuggestion } from '../services/analyticsService';
 import { VideoListSkeleton, AnalyticsCardSkeleton, EmptyState } from './LoadingStates';
 import { parseLocalDate } from '../utils/dateUtils';
 import { getStorageUsage, cleanupOldFiles } from '../services/storageManager';
 import { renderProductionToShotstack, hasVideosForRender } from '../services/shotstackService';
 import { CommandPalette, useCommandPalette } from './ui/CommandPalette';
+import { CharacterBehaviorEditor } from './CharacterBehaviorEditor';
 import { 
   IconLayoutDashboard, IconBarChart, IconSettings, IconFilm, 
   IconDollarSign, IconHardDrive, IconSliders, IconPlus,
@@ -311,6 +313,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
   const [lastAnalyticsFetch, setLastAnalyticsFetch] = useState<string | null>(null);
   const [productionsWithAnalytics, setProductionsWithAnalytics] = useState<Array<Production & { analytics?: VideoAnalyticsRecord }>>([]);
   const [isLoadingProductions, setIsLoadingProductions] = useState(false);
+  // NEW: Enhanced analytics state
+  const [performancePatterns, setPerformancePatterns] = useState<PerformancePattern[]>([]);
+  const [optimizationSuggestions, setOptimizationSuggestions] = useState<OptimizationSuggestion[]>([]);
+  const [isLoadingPatterns, setIsLoadingPatterns] = useState(false);
   const [expandedProductions, setExpandedProductions] = useState<Set<string>>(new Set());
   const [selectedProductionForVersions, setSelectedProductionForVersions] = useState<string | null>(null);
   const [productionVersions, setProductionVersions] = useState<Production[]>([]);
@@ -320,6 +326,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
   // Seed image generation states
   const [generatingSeedImage, setGeneratingSeedImage] = useState<'hostASolo' | 'hostBSolo' | 'twoShot' | null>(null);
   const [uploadingSeedImage, setUploadingSeedImage] = useState<'hostASolo' | 'hostBSolo' | 'twoShot' | null>(null);
+  // NEW: Character behavior editor state
+  const [editingBehaviorFor, setEditingBehaviorFor] = useState<'hostA' | 'hostB' | null>(null);
   const seedImageInputRef = useRef<HTMLInputElement>(null);
   // Seed image format tab (16:9 or 9:16)
   const [seedImageFormat, setSeedImageFormat] = useState<'16:9' | '9:16'>('16:9');
@@ -437,6 +445,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
     if (activeTab === 'insights' && activeChannel) {
       getProductionsWithAnalytics(activeChannel.id).then(setProductionsWithAnalytics);
       getLastAnalyticsFetch(activeChannel.id).then(setLastAnalyticsFetch);
+      
+      // NEW: Load performance patterns and optimization suggestions
+      setIsLoadingPatterns(true);
+      AnalyticsService.analyzePerformancePatterns(activeChannel.id, '28days')
+        .then(setPerformancePatterns)
+        .finally(() => setIsLoadingPatterns(false));
+      
+      AnalyticsService.getOptimizationSuggestions(activeChannel.id)
+        .then(setOptimizationSuggestions);
     }
   }, [activeTab, activeChannel]);
   
@@ -1058,6 +1075,66 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                     </div>
                   </div>
                   
+                  {/* NEW: Performance Patterns Section */}
+                  {performancePatterns.length > 0 && (
+                    <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
+                      <h3 className="text-lg font-bold text-white mb-4">📈 Performance Patterns</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {performancePatterns.slice(0, 4).map((pattern, idx) => (
+                          <div key={idx} className="bg-[#111] p-4 rounded-lg border border-[#333]">
+                            <div className="font-semibold text-cyan-400 mb-2">{pattern.pattern}</div>
+                            <div className="text-sm text-gray-400 mb-3">{pattern.description}</div>
+                            <div className="grid grid-cols-3 gap-2 text-xs">
+                              <div>
+                                <div className="text-gray-500">Avg Views</div>
+                                <div className="text-white font-bold">{pattern.avgPerformance.views.toFixed(0)}</div>
+                              </div>
+                              <div>
+                                <div className="text-gray-500">Engagement</div>
+                                <div className="text-white font-bold">{pattern.avgPerformance.engagementRate.toFixed(1)}%</div>
+                              </div>
+                              <div>
+                                <div className="text-gray-500">CTR</div>
+                                <div className="text-white font-bold">{pattern.avgPerformance.estimatedCTR.toFixed(0)}%</div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* NEW: Optimization Suggestions */}
+                  {optimizationSuggestions.length > 0 && (
+                    <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
+                      <h3 className="text-lg font-bold text-white mb-4">💡 Optimization Suggestions</h3>
+                      <div className="space-y-3">
+                        {optimizationSuggestions.slice(0, 5).map((suggestion, idx) => (
+                          <div key={idx} className={`p-4 rounded-lg border ${
+                            suggestion.priority === 'high' ? 'border-red-500/50 bg-red-500/5' :
+                            suggestion.priority === 'medium' ? 'border-yellow-500/50 bg-yellow-500/5' :
+                            'border-blue-500/50 bg-blue-500/5'
+                          }`}>
+                            <div className="flex items-start justify-between mb-2">
+                              <div className="font-semibold text-white">{suggestion.title}</div>
+                              <span className={`text-xs px-2 py-1 rounded ${
+                                suggestion.priority === 'high' ? 'bg-red-500/20 text-red-400' :
+                                suggestion.priority === 'medium' ? 'bg-yellow-500/20 text-yellow-400' :
+                                'bg-blue-500/20 text-blue-400'
+                              }`}>
+                                {suggestion.priority.toUpperCase()}
+                              </span>
+                            </div>
+                            <div className="text-sm text-gray-400 mb-2">{suggestion.description}</div>
+                            <div className="text-xs text-cyan-400">
+                              <strong>Action:</strong> {suggestion.action} | <strong>Impact:</strong> {suggestion.expectedImpact}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Video List with Analytics */}
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     {/* Sidebar: Video List */}
@@ -1461,19 +1538,61 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
 
             {/* Characters */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <CharacterEditor
-                label="Host A (Left)"
-                profile={tempConfig.characters.hostA}
-                onChange={(p) => setTempConfig({ ...tempConfig, characters: { ...tempConfig.characters, hostA: p } })}
-                ttsProvider={tempConfig.ttsProvider || 'openai'}
-              />
-              <CharacterEditor
-                label="Host B (Right)"
-                profile={tempConfig.characters.hostB}
-                onChange={(p) => setTempConfig({ ...tempConfig, characters: { ...tempConfig.characters, hostB: p } })}
-                ttsProvider={tempConfig.ttsProvider || 'openai'}
-              />
+              <div className="space-y-3">
+                <CharacterEditor
+                  label="Host A (Left)"
+                  profile={tempConfig.characters.hostA}
+                  onChange={(p) => setTempConfig({ ...tempConfig, characters: { ...tempConfig.characters, hostA: p } })}
+                  ttsProvider={tempConfig.ttsProvider || 'openai'}
+                />
+                <button
+                  onClick={() => setEditingBehaviorFor('hostA')}
+                  className="w-full px-4 py-2 bg-accent-500/20 hover:bg-accent-500/30 text-accent-400 rounded-lg border border-accent-500/30 transition-colors text-sm font-medium"
+                >
+                  ⚙️ Configurar Comportamiento Avanzado
+                </button>
+              </div>
+              <div className="space-y-3">
+                <CharacterEditor
+                  label="Host B (Right)"
+                  profile={tempConfig.characters.hostB}
+                  onChange={(p) => setTempConfig({ ...tempConfig, characters: { ...tempConfig.characters, hostB: p } })}
+                  ttsProvider={tempConfig.ttsProvider || 'openai'}
+                />
+                <button
+                  onClick={() => setEditingBehaviorFor('hostB')}
+                  className="w-full px-4 py-2 bg-accent-500/20 hover:bg-accent-500/30 text-accent-400 rounded-lg border border-accent-500/30 transition-colors text-sm font-medium"
+                >
+                  ⚙️ Configurar Comportamiento Avanzado
+                </button>
+              </div>
             </div>
+
+            {/* Character Behavior Editor Modal */}
+            {editingBehaviorFor && (
+              <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 overflow-y-auto">
+                <div className="bg-[#1a1a1a] rounded-xl border border-white/20 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+                  <CharacterBehaviorEditor
+                    character={tempConfig.characters[editingBehaviorFor]}
+                    onSave={(behavior) => {
+                      setTempConfig({
+                        ...tempConfig,
+                        characters: {
+                          ...tempConfig.characters,
+                          [editingBehaviorFor]: {
+                            ...tempConfig.characters[editingBehaviorFor],
+                            behaviorInstructions: behavior
+                          }
+                        }
+                      });
+                      setEditingBehaviorFor(null);
+                      toast.success(`Comportamiento de ${tempConfig.characters[editingBehaviorFor].name} guardado`);
+                    }}
+                    onCancel={() => setEditingBehaviorFor(null)}
+                  />
+                </div>
+              </div>
+            )}
 
             {/* Narrative Engine Settings (v2.0) */}
             <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">

@@ -18,9 +18,27 @@ export interface ScriptLine {
 }
 
 // Narrative Engine Types (v2.0)
-export type NarrativeType = "classic" | "double_conflict" | "hot_take" | "perspective_clash";
+// NEW: Extended narrative types for more variety
+export type NarrativeType = 
+  | "classic" 
+  | "double_conflict" 
+  | "hot_take" 
+  | "perspective_clash"
+  | "inverted_pyramid"    // NEW: News → Details → Context → Analysis → Takeaway
+  | "question_driven"     // NEW: Question → Answer 1 → Answer 2 → Debate → Synthesis → Conclusion
+  | "timeline_arc"        // NEW: Present → Past → Context → Development → Current → Future → Implications
+  | "contrast_arc";        // NEW: Situation A → Situation B → Comparison → Analysis → Verdict
 export type VideoMode = "hostA" | "hostB"; // Removed "both" - each scene focuses on one character for dynamic pacing
-export type ShotType = "medium" | "closeup" | "wide";
+// NEW: Extended shot types for advanced camera system
+export type ShotType = 
+  | "extreme_closeup"  // NEW: For dramatic moments
+  | "closeup"           // Standard closeup
+  | "medium_closeup"    // NEW: Intimate dialogue
+  | "medium"            // Standard medium shot
+  | "medium_wide"       // NEW: For context
+  | "wide"              // Standard wide shot
+  | "dutch_angle"       // NEW: For tension
+  | "over_shoulder";     // NEW: For conversations
 
 export interface Scene {
   // Scene title for lower-third overlay (e.g., "Market Outlook Explained")
@@ -152,6 +170,74 @@ export interface CharacterProfile {
   gender?: "male" | "female";
   // ElevenLabs TTS (v2.7)
   elevenLabsVoiceId?: string; // ElevenLabs voice ID for Argentine/Spanish voices
+  // NEW: Advanced behavior instructions (configurable from Admin)
+  behaviorInstructions?: CharacterBehavior;
+}
+
+// NEW: Advanced Character Behavior Configuration
+export interface CharacterBehavior {
+  // Estilo de habla
+  speakingStyle: {
+    sentenceLength: 'short' | 'medium' | 'long'; // Preferencia de longitud
+    formality: 'casual' | 'professional' | 'mixed';
+    energy: 'low' | 'medium' | 'high';
+    useContractions: boolean;
+    useSlang: boolean;
+    useNumbers: 'always' | 'often' | 'sometimes' | 'rarely';
+  };
+  
+  // Tono y actitud
+  tone: {
+    default: 'sarcastic' | 'serious' | 'playful' | 'analytical' | 'empathetic';
+    variations: {
+      forGoodNews: 'sarcastic' | 'serious' | 'playful' | 'analytical' | 'empathetic';
+      forBadNews: 'sarcastic' | 'serious' | 'playful' | 'analytical' | 'empathetic';
+      forControversial: 'sarcastic' | 'serious' | 'playful' | 'analytical' | 'empathetic';
+    };
+  };
+  
+  // Opiniones y perspectiva
+  viewpoints: {
+    onMarkets: 'bullish' | 'bearish' | 'neutral' | 'skeptical' | 'optimistic';
+    onCompanies: 'pro-business' | 'critical' | 'neutral' | 'skeptical';
+    onRegulation: 'pro-regulation' | 'anti-regulation' | 'neutral' | 'pragmatic';
+    onInnovation: 'enthusiastic' | 'cautious' | 'neutral' | 'skeptical';
+  };
+  
+  // Frases y expresiones características
+  catchphrases: string[]; // Frases que el personaje usa frecuentemente
+  expressions: {
+    agreement: string[]; // "Exactly!", "Totally", "I agree"
+    disagreement: string[]; // "Wait, hold on", "I'm not so sure", "Actually..."
+    surprise: string[]; // "Wow", "No way", "That's insane"
+    skepticism: string[]; // "Really?", "I doubt it", "That seems fishy"
+  };
+  
+  // Estilo de argumentación
+  argumentation: {
+    style: 'direct' | 'indirect' | 'questioning' | 'assertive' | 'diplomatic';
+    useExamples: boolean;
+    useAnalogies: boolean;
+    useData: 'always' | 'often' | 'sometimes' | 'rarely';
+    challengeOthers: boolean; // Si desafía al otro host
+  };
+  
+  // Interacción con el otro host
+  interaction: {
+    interruptFrequency: 'never' | 'rarely' | 'sometimes' | 'often';
+    buildOnOthers: boolean; // Si construye sobre lo que dice el otro
+    createContrast: boolean; // Si busca crear contraste
+    agreementLevel: 'always' | 'often' | 'sometimes' | 'rarely' | 'never';
+  };
+  
+  // Instrucciones personalizadas (texto libre)
+  customInstructions: string; // Instrucciones adicionales en texto libre
+  
+  // Ejemplos de diálogo
+  dialogueExamples: {
+    good: string[]; // Ejemplos de buenos diálogos de este personaje
+    bad: string[]; // Ejemplos de qué NO hacer
+  };
 }
 
 // Shotstack Render Configuration Types
@@ -182,6 +268,9 @@ export interface RenderConfig {
     clipEffect: ShotstackEffectType; // Applied to each clip
     filter: ShotstackFilterType; // Visual filter
     autoEffectRotation: boolean; // Auto-rotate effects for variety
+    autoTransitionSelection?: boolean; // NEW: Select transitions based on scene context
+    pacingVariation?: boolean; // NEW: Vary pacing based on scene type (hook=fast, payoff=slow)
+    motionGraphics?: boolean; // NEW: Enable animated motion graphics (progress bars, info cards, callouts)
   };
   
   // Watermark/Logo
@@ -275,7 +364,10 @@ export const DEFAULT_RENDER_CONFIG: RenderConfig = {
   effects: {
     clipEffect: 'zoomInSlow',
     filter: 'none',
-    autoEffectRotation: true
+    autoEffectRotation: true,
+    autoTransitionSelection: true, // NEW: Enable contextual transitions
+    pacingVariation: true, // NEW: Enable pacing variation (hook=fast, payoff=slow)
+    motionGraphics: true // NEW: Enable motion graphics (progress bars, info cards, callouts)
   },
   watermark: {
     enabled: false,

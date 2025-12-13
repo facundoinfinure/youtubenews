@@ -18,13 +18,16 @@ import {
   ScriptWithScenes,
   ScriptHistoryItem
 } from '../types';
-import { saveProduction, updateSegmentStatus, deleteAudioFromStorage } from '../services/supabaseService';
+import { saveProduction, updateSegmentStatus, deleteAudioFromStorage, getProductionById } from '../services/supabaseService';
 import { uploadVideoToYouTube } from '../services/youtubeService';
 import { SceneList } from './SceneCard';
+import { ScriptTimelineEditor } from './ScriptTimelineEditor';
 import { renderProductionToShotstack } from '../services/shotstackService';
 import { parseLocalDate } from '../utils/dateUtils';
 import { analyzeScriptForShorts, regenerateScene, ScriptAnalysis } from '../services/geminiService';
+import { analyzeScriptRetention, RetentionAnalysis } from '../services/scriptRetentionAnalyzer';
 import { getTranslationsForChannel, Translations } from '../utils/i18n';
+import { logger } from '../services/logger';
 // import { AudioManager } from './AudioManager'; // Ocultado - gestión de audio disponible en Admin Dashboard
 
 // =============================================================================================
@@ -594,6 +597,9 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
     production.wizard_state || createEmptyWizardState()
   );
   
+  // NEW: Visual script editor state
+  const [showTimelineEditor, setShowTimelineEditor] = useState(false);
+  
   // Local state - use localProduction to avoid stale prop issues during navigation
   const [localProduction, setLocalProduction] = useState<Production>(production);
   const [fetchedNews, setFetchedNews] = useState<NewsItem[]>(production.fetched_news || []);
@@ -611,6 +617,9 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
   // Script analysis for YouTube Shorts
   const [scriptAnalysis, setScriptAnalysis] = useState<ScriptAnalysis | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  
+  // Retention analysis
+  const [retentionAnalysis, setRetentionAnalysis] = useState<RetentionAnalysis | null>(null);
   
   // Selected improvements for script regeneration
   const [selectedSuggestions, setSelectedSuggestions] = useState<Set<number>>(new Set());
@@ -691,22 +700,130 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
     setLocalProduction(production);
   }, [production]);
 
-  // Sync wizard state when production prop changes (e.g., when production is loaded/updated externally)
+  // CRITICAL FIX: Load complete production state from DB on mount
+  // This ensures all generated data (scenes, segments, etc.) is loaded when wizard opens
   useEffect(() => {
-    if (production.wizard_state) {
-      setWizardState(production.wizard_state);
-    }
-    if (production.fetched_news) {
-      setFetchedNews(production.fetched_news);
-    }
-    if (production.selected_news_ids) {
-      setSelectedNewsIds(production.selected_news_ids);
-    }
-    // Sync script history when production changes
-    if (production.script_history) {
-      setScriptHistory(production.script_history);
-    }
-  }, [production.id]); // Only sync when production ID changes (loading a different production)
+    const loadProductionState = async () => {
+      if (production.id) {
+        try {
+          // Load fresh production from DB
+          const freshProduction = await getProductionById(production.id);
+          
+          if (freshProduction) {
+            logger.info('wizard', 'Loading production state from DB', {
+              productionId: production.id,
+              hasWizardState: !!freshProduction.wizard_state,
+              hasScenes: !!freshProduction.scenes,
+              hasSegments: !!freshProduction.segments,
+              hasViralMetadata: !!freshProduction.viral_metadata
+            });
+            
+            // Restore wizard_state
+            if (freshProduction.wizard_state) {
+              setWizardState(freshProduction.wizard_state);
+            }
+            
+            // Restore all generated data
+            if (freshProduction.fetched_news) {
+              setFetchedNews(freshProduction.fetched_news);
+            }
+            if (freshProduction.selected_news_ids) {
+              setSelectedNewsIds(freshProduction.selected_news_ids);
+            }
+            if (freshProduction.scenes) {
+              // Scenes are already in localProduction, but ensure they're synced
+              setLocalProduction(prev => ({
+                ...prev,
+                scenes: freshProduction.scenes
+              }));
+            }
+            if (freshProduction.viral_metadata) {
+              setLocalProduction(prev => ({
+                ...prev,
+                viral_metadata: freshProduction.viral_metadata
+              }));
+            }
+            if (freshProduction.segments) {
+              setLocalProduction(prev => ({
+                ...prev,
+                segments: freshProduction.segments
+              }));
+            }
+            if (freshProduction.script_history) {
+              setScriptHistory(freshProduction.script_history);
+            }
+            
+            // Update local production with all fresh data
+            setLocalProduction(freshProduction);
+            onUpdateProduction(freshProduction);
+            
+            logger.info('wizard', 'Production state loaded successfully', {
+              currentStep: freshProduction.wizard_state?.currentStep,
+              scenesCount: freshProduction.scenes ? Object.keys(freshProduction.scenes.scenes || {}).length : 0,
+              segmentsCount: freshProduction.segments?.length || 0
+            });
+          }
+        } catch (error) {
+          logger.error('wizard', 'Failed to load production state', { error, productionId: production.id });
+          toast.error('Error loading production state. Some data may be missing.');
+        }
+      }
+    };
+    
+    // Load on mount
+    loadProductionState();
+  }, [production.id]); // Only reload when production ID changes
+  
+  // Continuous synchronization - poll for external changes every 3 seconds
+  useEffect(() => {
+    if (!production.id) return;
+    
+    const syncInterval = setInterval(async () => {
+      try {
+        const fresh = await getProductionById(production.id);
+        if (fresh) {
+          // Check if there are meaningful changes
+          const currentDataHash = JSON.stringify({
+            wizard_state: localProduction.wizard_state,
+            scenes: localProduction.scenes,
+            segments: localProduction.segments,
+            viral_metadata: localProduction.viral_metadata
+          });
+          const freshDataHash = JSON.stringify({
+            wizard_state: fresh.wizard_state,
+            scenes: fresh.scenes,
+            segments: fresh.segments,
+            viral_metadata: fresh.viral_metadata
+          });
+          
+          if (currentDataHash !== freshDataHash) {
+            logger.info('wizard', 'External changes detected, syncing...', {
+              productionId: production.id
+            });
+            
+            // Update wizard state if changed
+            if (fresh.wizard_state && JSON.stringify(fresh.wizard_state) !== JSON.stringify(wizardState)) {
+              setWizardState(fresh.wizard_state);
+            }
+            
+            // Update local production
+            setLocalProduction(fresh);
+            onUpdateProduction(fresh);
+            
+            // Update other state if needed
+            if (fresh.fetched_news) setFetchedNews(fresh.fetched_news);
+            if (fresh.selected_news_ids) setSelectedNewsIds(fresh.selected_news_ids);
+            if (fresh.script_history) setScriptHistory(fresh.script_history);
+          }
+        }
+      } catch (error) {
+        // Silent fail for sync - don't spam errors
+        logger.warn('wizard', 'Sync check failed', { error });
+      }
+    }, 3000); // Every 3 seconds
+    
+    return () => clearInterval(syncInterval);
+  }, [production.id, localProduction.id, wizardState.currentStep]); // Re-run if production changes
   
 
   // All wizard steps
@@ -715,30 +832,81 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
     'audio_generate', 'video_generate', 'render_final', 'publish', 'done'
   ];
 
-  // Save wizard state to production - ONLY updates wizard_state, not other fields
-  // IMPORTANT: This must be defined before functions that use it
-  const saveWizardState = useCallback(async (newState: ProductionWizardState) => {
+  // CRITICAL FIX: Save wizard state AND all generated data together
+  // This ensures data persistence when steps complete
+  const saveWizardState = useCallback(async (newState: ProductionWizardState, additionalData?: Partial<Production>) => {
     setWizardState(newState);
     
-    // Only update wizard-specific fields to avoid overwriting other data like scenes
+    // CRITICAL: Include all generated data from localProduction to ensure nothing is lost
     const partialUpdate: Partial<Production> = {
       id: production.id,
       wizard_state: newState,
       fetched_news: fetchedNews,
       selected_news_ids: selectedNewsIds,
+      // Include all generated data from localProduction
+      scenes: localProduction.scenes,
+      viral_metadata: localProduction.viral_metadata,
+      segments: localProduction.segments,
+      narrative_used: localProduction.narrative_used,
+      script_history: localProduction.script_history,
+      video_assets: localProduction.video_assets,
+      final_video_url: localProduction.final_video_url,
+      final_video_poster: localProduction.final_video_poster,
+      youtube_id: localProduction.youtube_id,
       updated_at: new Date().toISOString(),
-      last_checkpoint_at: new Date().toISOString()
+      last_checkpoint_at: new Date().toISOString(),
+      // Allow additional data to be passed (e.g., when completing a step)
+      ...additionalData
     };
+    
+    logger.info('wizard', 'Saving wizard state with data', {
+      productionId: production.id,
+      currentStep: newState.currentStep,
+      hasScenes: !!partialUpdate.scenes,
+      hasSegments: !!partialUpdate.segments,
+      hasViralMetadata: !!partialUpdate.viral_metadata
+    });
     
     await saveProduction(partialUpdate as Production);
     
     // Merge with current production to preserve all fields
     const updatedProduction: Production = {
-      ...production,
+      ...localProduction, // Use localProduction as base to preserve all data
       ...partialUpdate
     };
+    
+    setLocalProduction(updatedProduction);
     onUpdateProduction(updatedProduction);
-  }, [production, fetchedNews, selectedNewsIds, onUpdateProduction]);
+    
+    // Verify save was successful
+    try {
+      const saved = await getProductionById(production.id);
+      if (saved) {
+        const savedHash = JSON.stringify({
+          wizard_state: saved.wizard_state,
+          scenes: saved.scenes
+        });
+        const expectedHash = JSON.stringify({
+          wizard_state: newState,
+          scenes: partialUpdate.scenes
+        });
+        
+        if (savedHash !== expectedHash) {
+          logger.warn('wizard', 'State may not have saved correctly', {
+            productionId: production.id,
+            step: newState.currentStep
+          });
+        } else {
+          logger.info('wizard', 'State saved and verified successfully', {
+            productionId: production.id,
+            step: newState.currentStep
+          });
+        }
+      }
+    } catch (error) {
+      logger.warn('wizard', 'Could not verify save', { error });
+    }
+  }, [production.id, fetchedNews, selectedNewsIds, localProduction, wizardState, onUpdateProduction]);
 
   // Update a specific step's status
   const updateStepStatus = useCallback(async (
@@ -1021,17 +1189,43 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
       setLocalProduction(updatedProduction); // Update local state immediately
       onUpdateProduction(updatedProduction);
       
+      // CRITICAL FIX: Update wizard state AND ensure data is saved together
       await updateStepStatus('scriptGenerate', 'completed', {
         narrativeType: scenes.narrative_used,
         generatedAt: new Date().toISOString()
+      });
+      
+      // Also save wizard state with the generated data to ensure sync
+      const currentWizardState = wizardState;
+      const newWizardState: ProductionWizardState = {
+        ...currentWizardState,
+        scriptGenerate: {
+          ...currentWizardState.scriptGenerate,
+          status: 'completed',
+          completedAt: new Date().toISOString(),
+          data: {
+            narrativeType: scenes.narrative_used,
+            generatedAt: new Date().toISOString()
+          }
+        },
+        currentStep: 'script_review' // Advance to next step
+      };
+      
+      await saveWizardState(newWizardState, {
+        scenes: updatedProduction.scenes,
+        viral_metadata: updatedProduction.viral_metadata,
+        segments: updatedProduction.segments,
+        narrative_used: updatedProduction.narrative_used,
+        script_history: updatedProduction.script_history
       });
       
       setProgressStatus({ message: '¡Guión completado!', progress: 100 });
       await new Promise(r => setTimeout(r, 400));
       
       // AUTO-ANALYZE: Automatically analyze the script after generation
-      setProgressStatus({ message: 'Analizando guión...', detail: 'Evaluando potencial viral', progress: 95 });
+      setProgressStatus({ message: 'Analizando guión...', detail: 'Evaluando potencial viral y retención', progress: 95 });
       try {
+        // Analyze for YouTube Shorts
         const analysis = await analyzeScriptForShorts(
           scenes.scenes,
           config.characters.hostA.name,
@@ -1039,6 +1233,24 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
           config.language
         );
         setScriptAnalysis(analysis);
+        
+        // Analyze retention (CRITICAL for 80%+ retention target)
+        const retention = await analyzeScriptRetention(scenes);
+        setRetentionAnalysis(retention);
+        
+        // Show warning if retention is low
+        if (retention.retentionScore < 80) {
+          toast.error(
+            `⚠️ Retención estimada: ${retention.retentionScore}% (objetivo: 80%+). ` +
+            `Considera regenerar el guión con mejoras.`,
+            { duration: 8000 }
+          );
+        } else {
+          toast.success(
+            `✅ Retención estimada: ${retention.retentionScore}% - Excelente!`,
+            { duration: 5000 }
+          );
+        }
         
         // Update the history item with analysis
         const historyWithAnalysis = [...updatedHistory];
@@ -2419,8 +2631,78 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
               </div>
             )}
             
+            {/* NEW: Visual Timeline Editor Button */}
+            <div className="mb-4 flex justify-end">
+              <button
+                onClick={() => setShowTimelineEditor(true)}
+                className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-sm font-medium flex items-center gap-2"
+              >
+                📝 Open Visual Editor
+              </button>
+            </div>
+
+            {/* Visual Timeline Editor Modal */}
+            {showTimelineEditor && localProduction.scenes && (
+              <ScriptTimelineEditor
+                scriptWithScenes={localProduction.scenes}
+                onUpdate={(updatedScript) => {
+                  setLocalProduction({ ...localProduction, scenes: updatedScript });
+                  setShowTimelineEditor(false);
+                }}
+                onCancel={() => setShowTimelineEditor(false)}
+                hostAName={config.characters.hostA.name}
+                hostBName={config.characters.hostB.name}
+              />
+            )}
+
             {/* Scene List with Edit/Regenerate capabilities */}
             <div className="max-h-[350px] overflow-y-auto pr-2">
+              {/* NEW: Live Preview Section */}
+              {wizardState.currentStep === 'audio_generation' || wizardState.currentStep === 'video_generation' ? (
+                <div className="mb-6 bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
+                  <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                    <span className="animate-pulse">🔴</span>
+                    Live Preview - Generating Assets
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-96 overflow-y-auto">
+                    {localProduction.segments?.map((segment, idx) => {
+                      const hasAudio = !!segment.audioUrl;
+                      const hasVideo = !!segment.videoUrl;
+                      return (
+                        <div key={idx} className="bg-[#111] p-4 rounded-lg border border-[#333]">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs font-semibold text-cyan-400">Scene {idx + 1}</span>
+                            <div className="flex gap-2">
+                              {hasAudio ? (
+                                <span className="text-xs bg-green-500/20 text-green-400 px-2 py-1 rounded">🎙️ Audio</span>
+                              ) : (
+                                <span className="text-xs bg-gray-500/20 text-gray-400 px-2 py-1 rounded animate-pulse">⏳ Audio...</span>
+                              )}
+                              {hasVideo ? (
+                                <span className="text-xs bg-green-500/20 text-green-400 px-2 py-1 rounded">🎬 Video</span>
+                              ) : (
+                                <span className="text-xs bg-gray-500/20 text-gray-400 px-2 py-1 rounded animate-pulse">⏳ Video...</span>
+                              )}
+                            </div>
+                          </div>
+                          <p className="text-sm text-white/70 line-clamp-3">{segment.text}</p>
+                          {hasVideo && segment.videoUrl && (
+                            <video 
+                              src={segment.videoUrl} 
+                              className="mt-2 w-full rounded-lg"
+                              muted
+                              playsInline
+                              autoPlay
+                              loop
+                            />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+
               <SceneList
                 scenes={scenes}
                 hostAName={config.characters.hostA.name}

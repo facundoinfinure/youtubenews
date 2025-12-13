@@ -113,6 +113,71 @@ export const generateScriptWithGPT = async (
   type SoundEffectType = 'transition' | 'emphasis' | 'notification' | 'ambient' | 'none';
   const availableSoundEffects = await listAvailableSoundEffects();
 
+  /**
+   * Build detailed character behavior prompt from behaviorInstructions
+   * NEW: Advanced behavior configuration from Admin Dashboard
+   */
+  const buildCharacterBehaviorPrompt = (character: typeof hostA | typeof hostB, characterName: string): string => {
+    const behavior = character.behaviorInstructions;
+    if (!behavior) return ''; // No behavior instructions configured
+    
+    return `
+=== ADVANCED BEHAVIOR INSTRUCTIONS FOR ${characterName.toUpperCase()} ===
+
+SPEAKING STYLE:
+- Sentence Length: ${behavior.speakingStyle.sentenceLength} (${behavior.speakingStyle.sentenceLength === 'short' ? '5-10 words' : behavior.speakingStyle.sentenceLength === 'medium' ? '10-15 words' : '15+ words'})
+- Formality: ${behavior.speakingStyle.formality}
+- Energy Level: ${behavior.speakingStyle.energy}
+- Use Contractions: ${behavior.speakingStyle.useContractions ? 'YES' : 'NO'}
+- Use Slang: ${behavior.speakingStyle.useSlang ? 'YES' : 'NO'}
+- Use Numbers: ${behavior.speakingStyle.useNumbers}
+
+TONE & ATTITUDE:
+- Default Tone: ${behavior.tone.default}
+- Tone for Good News: ${behavior.tone.variations.forGoodNews}
+- Tone for Bad News: ${behavior.tone.variations.forBadNews}
+- Tone for Controversial Topics: ${behavior.tone.variations.forControversial}
+
+VIEWPOINTS & PERSPECTIVES:
+- On Markets: ${behavior.viewpoints.onMarkets}
+- On Companies: ${behavior.viewpoints.onCompanies}
+- On Regulation: ${behavior.viewpoints.onRegulation}
+- On Innovation: ${behavior.viewpoints.onInnovation}
+
+CATCHPHRASES (Use these frequently):
+${behavior.catchphrases.length > 0 ? behavior.catchphrases.map(cp => `- "${cp}"`).join('\n') : '- None configured'}
+
+EXPRESSIONS:
+- Agreement: ${behavior.expressions.agreement.join(', ')}
+- Disagreement: ${behavior.expressions.disagreement.join(', ')}
+- Surprise: ${behavior.expressions.surprise.join(', ')}
+- Skepticism: ${behavior.expressions.skepticism.join(', ')}
+
+ARGUMENTATION STYLE:
+- Style: ${behavior.argumentation.style}
+- Use Examples: ${behavior.argumentation.useExamples ? 'YES' : 'NO'}
+- Use Analogies: ${behavior.argumentation.useAnalogies ? 'YES' : 'NO'}
+- Use Data: ${behavior.argumentation.useData}
+- Challenge Others: ${behavior.argumentation.challengeOthers ? 'YES' : 'NO'}
+
+INTERACTION WITH OTHER HOST:
+- Interrupt Frequency: ${behavior.interaction.interruptFrequency}
+- Build on Others' Points: ${behavior.interaction.buildOnOthers ? 'YES' : 'NO'}
+- Create Contrast: ${behavior.interaction.createContrast ? 'YES' : 'NO'}
+- Agreement Level: ${behavior.interaction.agreementLevel}
+
+${behavior.customInstructions ? `CUSTOM INSTRUCTIONS:\n${behavior.customInstructions}\n` : ''}
+
+${behavior.dialogueExamples.good.length > 0 ? `GOOD DIALOGUE EXAMPLES:\n${behavior.dialogueExamples.good.map(ex => `- "${ex}"`).join('\n')}\n` : ''}
+${behavior.dialogueExamples.bad.length > 0 ? `WHAT NOT TO DO:\n${behavior.dialogueExamples.bad.map(ex => `- "${ex}"`).join('\n')}\n` : ''}
+
+CRITICAL: ${characterName}'s dialogue MUST follow ALL these behavior instructions precisely.
+`.trim();
+  };
+  
+  const hostABehaviorPrompt = buildCharacterBehaviorPrompt(hostA, hostA.name);
+  const hostBBehaviorPrompt = buildCharacterBehaviorPrompt(hostB, hostB.name);
+
   const hostProfilePrompt = `
 === HOST PROFILES (CRITICAL: Each host MUST speak according to their personality) ===
 
@@ -123,6 +188,7 @@ HOST A (${hostA.name}):
 - SPEAKING STYLE: ${hostA.name} MUST express opinions that align with their personality above. 
   If they are pro-market/libertarian: celebrate free enterprise, private investment, deregulation.
   If they are progressive: question environmental impact, corporate accountability, social costs.
+${hostABehaviorPrompt ? `\n${hostABehaviorPrompt}\n` : ''}
 
 HOST B (${hostB.name}):
 - Gender: ${hostB.gender || 'female'}
@@ -130,25 +196,86 @@ HOST B (${hostB.name}):
 - PERSONALITY & IDEOLOGY: ${hostB.personality || hostB.bio}
 - SPEAKING STYLE: ${hostB.name} MUST express opinions that align with their personality above.
   They should provide CONTRAST to Host A - challenging or supporting from their own ideological stance.
+${hostBBehaviorPrompt ? `\n${hostBBehaviorPrompt}\n` : ''}
 
 ⚠️ CRITICAL RULE: Each host's dialogue MUST reflect their specific personality/ideology.
 - If a host is described as "free-market, libertarian" → they should CELEBRATE private enterprise, be skeptical of regulations
 - If a host is described as "progressive, social equity" → they should QUESTION corporate motives, environmental impact
 - DO NOT MIX UP THE IDEOLOGIES - each host has a DISTINCT viewpoint that creates debate
+${hostABehaviorPrompt || hostBBehaviorPrompt ? '\n⚠️ ADDITIONAL: Follow ALL advanced behavior instructions configured above for each host.' : ''}
 `.trim();
 
+  // CRITICAL FIX: Redesigned narrative structures optimized for 80%+ retention
   const narrativeInstructions = `
-Choose ONE narrative structure based on the complexity of the news:
-Classic Arc (6 scenes)
-Double Conflict Arc (7 scenes)
-Hot Take Compressed (4 scenes)
-Perspective Clash (6 scenes)
+Choose ONE narrative structure optimized for MAXIMUM RETENTION (target: 80%+):
 
-Logic:
-- Use Double Conflict if multiple drivers or volatile news
-- Use Hot Take if the story is simple or meme-like
-- Use Perspective Clash if the story has two clear interpretations
-- Otherwise use Classic
+1. VIRAL HOOK HEAVY (5 scenes) - RECOMMENDED FOR MAXIMUM RETENTION
+   Structure: Hook (4s) → Context (8s) → Revelation (12s) → Impact (14s) → CTA (12s)
+   Total: ~50 seconds
+   Best for: Breaking news, dramatic stories, high-impact events
+   Retention target: 85%+
+
+2. Classic Arc (6 scenes) - Balanced structure
+   Structure: Hook (5s) → Rising (8s) → Conflict (10s) → Comeback (10s) → Rising2 (10s) → Payoff (12s)
+   Total: ~55 seconds
+   Best for: Complex stories with multiple angles
+   Retention target: 75%+
+
+3. Hot Take Compressed (4 scenes) - Fast-paced
+   Structure: Hook (4s) → Conflict (8s) → Comeback (10s) → Payoff (13s)
+   Total: ~35 seconds
+   Best for: Simple stories, meme-worthy content
+   Retention target: 80%+
+
+4. Double Conflict Arc (7 scenes) - For volatile news
+   Structure: Hook (4s) → Rising (7s) → ConflictA (9s) → RisingA (8s) → ConflictB (9s) → RisingB (8s) → Payoff (10s)
+   Total: ~55 seconds
+   Best for: Multiple crises, volatile markets
+   Retention target: 75%+
+
+5. Perspective Clash (6 scenes) - For debates
+   Structure: Hook (5s) → hostA POV (10s) → hostB POV (10s) → Clash (10s) → Synthesis (10s) → Payoff (10s)
+   Total: ~55 seconds
+   Best for: Controversial topics, two-sided stories
+   Retention target: 75%+
+
+6. Inverted Pyramid (5 scenes) - NEW: News-first structure
+   Structure: News (4s) → Details (8s) → Context (10s) → Analysis (12s) → Takeaway (11s)
+   Total: ~45 seconds
+   Best for: Breaking news, factual reporting
+   Retention target: 80%+
+
+7. Question-Driven (6 scenes) - NEW: Curiosity-based
+   Structure: Question (5s) → Answer1 (9s) → Answer2 (9s) → Debate (10s) → Synthesis (10s) → Conclusion (12s)
+   Total: ~55 seconds
+   Best for: Complex questions, multiple perspectives
+   Retention target: 75%+
+
+8. Timeline Arc (7 scenes) - NEW: Temporal progression
+   Structure: Present (4s) → Past (8s) → Context (9s) → Development (9s) → Current (9s) → Future (10s) → Implications (11s)
+   Total: ~60 seconds
+   Best for: Evolving stories, historical context
+   Retention target: 70%+
+
+9. Contrast Arc (5 scenes) - NEW: Comparison structure
+   Structure: Hook (4s) → Situation A (10s) → Situation B (10s) → Comparison (12s) → Verdict (14s)
+   Total: ~50 seconds
+   Best for: Comparing options, before/after stories
+   Retention target: 75%+
+
+SELECTION LOGIC (Prioritize retention):
+- Use VIRAL HOOK HEAVY if story is breaking/urgent (highest retention)
+- Use Hot Take if story is simple/meme-like (fast retention)
+- Use Inverted Pyramid for breaking news/factual reporting
+- Use Question-Driven for complex questions needing exploration
+- Use Timeline Arc for evolving stories with history
+- Use Contrast Arc for comparison/versus stories
+- Use Double Conflict if multiple volatile drivers
+- Use Perspective Clash if story has two clear opposing views
+- Otherwise use Classic Arc
+
+CRITICAL: Each scene MUST be 6-10 seconds when read at normal pace (40-60 words).
+Total video MUST be 45-60 seconds. If longer, cut ruthlessly.
 `.trim();
 
   // Language detection for transition phrases
@@ -251,7 +378,7 @@ CRITICAL RULES:
 Return STRICT JSON (no markdown) with this exact format:
 {
   "title": "Episode title",
-  "narrative_used": "classic | double_conflict | hot_take | perspective_clash",
+  "narrative_used": "classic | double_conflict | hot_take | perspective_clash | inverted_pyramid | question_driven | timeline_arc | contrast_arc",
   "scenes": {
     "1": {
       "title": "Scene Title Here",
@@ -327,8 +454,67 @@ ${config.ethicalGuardrails?.humorRules?.targetInstitutions ? '- OK to criticize 
 ${config.ethicalGuardrails?.customInstructions ? `- Additional rules: ${config.ethicalGuardrails.customInstructions}` : ''}
 `.trim() : '';
 
+  // CRITICAL VIRALITY RULES - Must be at the top for maximum impact
+  const viralityRules = `
+🚨 CRITICAL VIRALITY RULES (MUST FOLLOW FOR 80%+ RETENTION):
+
+1. HOOK (First Scene - 3-5 seconds):
+   - MUST start with a shocking statement, question, or number
+   - Examples: "This company just lost $50 BILLION in one day"
+   - Examples: "Why is everyone selling? Here's what they're hiding"
+   - Examples: "47% drop in 24 hours - here's why"
+   - NEVER start with "Today we're talking about..." or "Let's discuss..."
+   - Hook MUST be under 20 words and create immediate curiosity
+
+2. RETENTION TECHNIQUES (Apply throughout):
+   - End each scene with a "curiosity gap" that makes viewer want to continue
+   - Use "but wait, there's more..." patterns
+   - Create "information debt" - promise answers later
+   - Use cliffhangers between scenes: "Here's the twist...", "But that's not all...", "Wait until you hear this..."
+
+3. PACING (Critical for retention):
+   - First 10 seconds: HIGH ENERGY, fast-paced (hook + quick context)
+   - Middle: Steady information delivery with mini-hooks
+   - Last 10 seconds: Strong conclusion with call-to-action
+   - NO dead air, NO slow moments, NO filler words
+   - Each scene: 6-10 seconds MAX when read at normal pace
+
+4. LENGTH OPTIMIZATION (Target: 45-60 seconds total):
+   - Target: 45-60 seconds total (NOT 90+ seconds)
+   - Each scene: 6-10 seconds MAX (40-60 words)
+   - Cut unnecessary words ruthlessly
+   - One key point per scene
+   - If script is longer than 60 seconds when read at normal pace, it's TOO LONG - cut it down immediately
+
+5. ENGAGEMENT HOOKS (Use throughout):
+   - Use numbers and statistics: "$2.3 billion", "47% drop", "3x increase"
+   - Create contrast: "Everyone thinks X, but Y is happening"
+   - Use emotional triggers: "This is INSANE", "You won't believe this", "This changes everything"
+   - Add urgency: "This is happening RIGHT NOW", "Breaking:"
+   - Use power words: SHOCKING, SECRET, INSANE, CRAZY, UNBELIEVABLE, HIDDEN
+
+6. DIALOGUE OPTIMIZATION:
+   - Short, punchy sentences (5-10 words max per sentence)
+   - NO long explanations or complex sentences
+   - Use contractions for natural flow
+   - Alternate hosts every 1-2 sentences (NOT every paragraph)
+   - Each host speaks 1-2 sentences max before switching
+
+7. STRUCTURE FOR RETENTION:
+   - Scene 1 (Hook): Shocking opening (3-5s, 15-25 words)
+   - Scene 2: Quick context (4-6s, 20-30 words)
+   - Scene 3: The twist/revelation (5-7s, 25-35 words)
+   - Scene 4: Why it matters (4-6s, 20-30 words)
+   - Scene 5: Implications (4-6s, 20-30 words)
+   - Scene 6: Strong conclusion + CTA (5-7s, 25-35 words)
+
+CRITICAL: If the script is longer than 60 seconds when read at normal pace, it's TOO LONG. Cut it down immediately.
+`.trim();
+
   const systemPrompt = `
 You are the head writer of "${config.channelName}", a daily business/markets podcast hosted by two animated chimpanzees.
+
+${viralityRules}
 
 ${hostProfilePrompt}
 
@@ -947,40 +1133,191 @@ Return ONLY valid JSON: {"title": "...", "title_variants": ["...", "..."], "desc
 };
 
 /**
- * Generate a viral hook for the intro
+ * Viral Hook Analysis Interface
+ */
+export interface ViralHookAnalysis {
+  hook: string;
+  predictedCTR: number; // 0-100
+  curiosityScore: number; // 0-100
+  trendingRelevance: number; // 0-100
+  emotionalImpact: 'high' | 'medium' | 'low';
+  hasNumber: boolean;
+  hasQuestion: boolean;
+  hasShockWord: boolean;
+  wordCount: number;
+}
+
+/**
+ * Generate multiple viral hook variants with analysis
+ * NEW: Hook Optimized with AI - generates 5-10 variants and analyzes them
+ */
+export const generateViralHookVariantsWithGPT = async (
+  news: NewsItem[],
+  config: ChannelConfig,
+  trendingTopics: string[] = []
+): Promise<ViralHookAnalysis[]> => {
+  const topStory = news[0];
+  const language = config.language || 'English';
+  const isSpanish = language.toLowerCase().includes('spanish') || 
+                    language.toLowerCase().includes('español');
+
+  const powerWords = isSpanish
+    ? 'ALERTA, URGENTE, EXCLUSIVO, REVELADO, ESCÁNDALO, BOMBA, IMPACTANTE'
+    : 'YOU, THIS, NOW, SHOCKING, BREAKING, EXPOSED, REVEALED, INSANE';
+
+  const prompt = `You are a VIRAL content scriptwriter specializing in YouTube hooks (100M+ views).
+
+Generate 8-10 DIFFERENT opening hook variants (2-3 sentences, max 30 words each) for this news:
+"${topStory.headline}"
+${topStory.summary ? `Summary: ${topStory.summary.substring(0, 200)}` : ''}
+
+TRENDING TOPICS: ${trendingTopics.slice(0, 5).join(', ')}
+
+HOOK FORMULAS (use different approaches):
+1. Shocking Statement: Start with a surprising fact or number
+2. Urgent Question: Pose a compelling question that creates curiosity
+3. Breaking News: Frame as urgent/breaking information
+4. Contrast/Contradiction: "Everyone thinks X, but Y is happening"
+5. Personal Connection: "This affects YOU because..."
+6. Revelation: "Here's what they're hiding..."
+7. Number Hook: Start with a specific statistic or amount
+8. Emotional Trigger: Appeal to fear, excitement, or surprise
+
+POWER WORDS: ${powerWords}
+
+Channel tone: ${config.tone}
+Language: ${language}
+
+Return JSON array with this exact format:
+[
+  {
+    "hook": "First hook variant text here",
+    "approach": "shocking_statement" | "urgent_question" | "breaking_news" | "contrast" | "personal" | "revelation" | "number" | "emotional"
+  },
+  {
+    "hook": "Second hook variant text here",
+    "approach": "..."
+  },
+  ...
+]
+
+Generate 8-10 unique variants using different approaches.`;
+
+  try {
+    const response = await openaiRequest('chat/completions', {
+      model: 'gpt-4o',
+      messages: [{ role: 'user', content: prompt }],
+      response_format: { type: 'json_object' },
+      temperature: 0.9
+    });
+
+    CostTracker.track('viralHook', 'gpt-4o', 0.01);
+
+    const content = response.choices[0]?.message?.content || '{}';
+    const parsed = JSON.parse(content);
+    
+    // Handle both array and object with variants key
+    const variants = Array.isArray(parsed) 
+      ? parsed 
+      : (parsed.variants || parsed.hooks || []);
+    
+    if (!Array.isArray(variants) || variants.length === 0) {
+      throw new Error('No variants returned');
+    }
+
+    // Analyze each hook variant
+    const analyzed: ViralHookAnalysis[] = variants.map((v: any) => {
+      const hook = (v.hook || v.text || '').trim();
+      const wordCount = hook.split(/\s+/).length;
+      const hasNumber = /\d+/.test(hook);
+      const hasQuestion = hook.includes('?');
+      const hasShockWord = new RegExp(
+        isSpanish 
+          ? 'alerta|urgente|exclusivo|revelado|escándalo|bomba|impactante|increíble|insólito'
+          : 'shocking|breaking|exposed|revealed|insane|crazy|unbelievable|secret|hidden',
+        'i'
+      ).test(hook);
+      
+      // Calculate curiosity score
+      let curiosityScore = 0;
+      if (hasQuestion) curiosityScore += 30;
+      if (hasShockWord) curiosityScore += 25;
+      if (hasNumber) curiosityScore += 20;
+      if (hook.toLowerCase().includes('you') || hook.toLowerCase().includes('tu')) curiosityScore += 15;
+      if (hook.toLowerCase().includes('this') || hook.toLowerCase().includes('esto')) curiosityScore += 10;
+      curiosityScore = Math.min(100, curiosityScore);
+      
+      // Calculate trending relevance
+      const trendingRelevance = trendingTopics.length > 0
+        ? trendingTopics.reduce((score, topic) => {
+            const topicLower = topic.toLowerCase();
+            const hookLower = hook.toLowerCase();
+            return score + (hookLower.includes(topicLower) ? 20 : 0);
+          }, 0)
+        : 50; // Default if no trending topics
+      
+      // Determine emotional impact
+      const emotionalImpact: 'high' | 'medium' | 'low' = 
+        (hasShockWord && hasNumber) ? 'high' :
+        (hasShockWord || hasQuestion) ? 'medium' : 'low';
+      
+      // Predict CTR (0-100) based on multiple factors
+      let predictedCTR = 50; // Base
+      if (hasNumber) predictedCTR += 15;
+      if (hasQuestion) predictedCTR += 12;
+      if (hasShockWord) predictedCTR += 10;
+      if (wordCount <= 20) predictedCTR += 8; // Shorter is better
+      if (curiosityScore > 60) predictedCTR += 10;
+      if (trendingRelevance > 60) predictedCTR += 5;
+      predictedCTR = Math.min(100, Math.max(0, predictedCTR));
+      
+      return {
+        hook,
+        predictedCTR,
+        curiosityScore,
+        trendingRelevance,
+        emotionalImpact,
+        hasNumber,
+        hasQuestion,
+        hasShockWord,
+        wordCount
+      };
+    });
+
+    // Sort by predicted CTR (best first)
+    analyzed.sort((a, b) => b.predictedCTR - a.predictedCTR);
+    
+    console.log(`[Hook] ✅ Generated ${analyzed.length} hook variants, best CTR: ${analyzed[0]?.predictedCTR}%`);
+    
+    return analyzed;
+  } catch (error) {
+    console.error('[Hook] ❌ Failed to generate variants:', error);
+    // Fallback: return single hook
+    const fallback = await generateViralHookWithGPT(news, config);
+    return [{
+      hook: fallback,
+      predictedCTR: 50,
+      curiosityScore: 40,
+      trendingRelevance: 50,
+      emotionalImpact: 'medium',
+      hasNumber: false,
+      hasQuestion: false,
+      hasShockWord: false,
+      wordCount: fallback.split(/\s+/).length
+    }];
+  }
+};
+
+/**
+ * Generate a viral hook for the intro (legacy function - now uses variants)
  */
 export const generateViralHookWithGPT = async (
   news: NewsItem[],
   config: ChannelConfig
 ): Promise<string> => {
-  const topStory = news[0];
-
-  const prompt = `You are a VIRAL content scriptwriter (100M+ views).
-
-Create an ATTENTION-GRABBING opening hook (2-3 sentences, max 30 words) for this news:
-"${topStory.headline}"
-
-HOOK FORMULA:
-1. Shocking statement OR urgent question
-2. Promise immediate value
-3. Create curiosity gap
-
-POWER WORDS: YOU, THIS, NOW, SHOCKING, BREAKING, EXPOSED, REVEALED
-
-Channel tone: ${config.tone}
-Language: ${config.language}
-
-Return ONLY the hook text, no explanation, no quotes.`;
-
-  const response = await openaiRequest('chat/completions', {
-    model: 'gpt-4o',
-    messages: [{ role: 'user', content: prompt }],
-    temperature: 0.9
-  });
-
-  CostTracker.track('viralHook', 'gpt-4o', 0.005);
-
-  return response.choices[0]?.message?.content?.trim() || "You won't believe this news...";
+  const variants = await generateViralHookVariantsWithGPT(news, config);
+  // Return the best hook (highest predicted CTR)
+  return variants[0]?.hook || "You won't believe this news...";
 };
 
 // =============================================================================================
