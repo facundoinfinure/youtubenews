@@ -1,4 +1,5 @@
 import { ChannelConfig, Scene, ScriptWithScenes, ShotType, VideoMode, NarrativeType } from "../types";
+import { getSeedImageForScene as getSeedImageVariation } from "./seedImageVariations";
 
 export interface CameraMovement {
   type: 'push_in' | 'pull_out' | 'pan_left' | 'pan_right' | 'zoom' | 'static';
@@ -510,10 +511,16 @@ export const generateScenePrompts = (
       const sceneEstimatedDuration = Math.max(3, sceneWordCount / 2.5);
       const sceneCameraMovement = generateCameraMovement(index, totalScenes, sceneTypeInfo, sceneEstimatedDuration);
       
-      // NEW: Select seed image variant based on scene type
-      const selectedSeedImage = scene.video_mode === 'hostA'
-        ? getSeedImageForScene('hostA', sceneTypeInfo, index)
-        : getSeedImageForScene('hostB', sceneTypeInfo, index);
+      // NEW: Select seed image variant based on scene type and camera angle
+      // Use seed image variations service for dynamic angles
+      let selectedSeedImage: string;
+      if (scene.video_mode === 'hostA') {
+        selectedSeedImage = getSeedImageVariation(config, 'hostA', sceneTypeInfo.cameraAngle || 'eye_level');
+      } else if (scene.video_mode === 'hostB') {
+        selectedSeedImage = getSeedImageVariation(config, 'hostB', sceneTypeInfo.cameraAngle || 'eye_level');
+      } else {
+        selectedSeedImage = getSeedImageVariation(config, 'twoShot', sceneTypeInfo.cameraAngle || 'eye_level');
+      }
       
       // Update seedImages with selected variant for this scene
       const sceneSeedImages = {

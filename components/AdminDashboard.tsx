@@ -4,6 +4,10 @@ import { ChannelConfig, CharacterProfile, StoredVideo, Channel, UserProfile, Pro
 import { fetchVideosFromDB, saveConfigToDB, getAllChannels, saveChannel, getChannelById, uploadImageToStorage, uploadChannelLogo, getIncompleteProductions, getAllProductions, getPublishedProductions, createProductionVersion, getProductionVersions, exportProduction, importProduction, deleteProduction, updateSegmentStatus, saveProduction, saveVideoToDB, connectYouTube, deleteNewsForChannel, saveVideoAnalytics, getVideoAnalytics, getLastAnalyticsFetch, getProductionsWithAnalytics, VideoAnalyticsRecord } from '../services/supabaseService';
 import { uploadVideoToYouTube, fetchYouTubeVideoStats, extractYouTubeVideoId, getAnalyticsDateRange, YouTubeVideoStats } from '../services/youtubeService';
 import { generateSeedImage } from '../services/geminiService';
+import { generateAllSeedVariations } from '../services/seedImageVariations';
+import { SeedImageVariationsManager } from './SeedImageVariationsManager';
+import { SettingsSection } from './ui/SettingsSection';
+import { ConfigCard } from './ui/ConfigCard';
 import { CostTracker } from '../services/CostTracker';
 import { ContentCache } from '../services/ContentCache';
 import { AnalyticsService, PerformancePattern, OptimizationSuggestion } from '../services/analyticsService';
@@ -326,6 +330,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
   // Seed image generation states
   const [generatingSeedImage, setGeneratingSeedImage] = useState<'hostASolo' | 'hostBSolo' | 'twoShot' | null>(null);
   const [uploadingSeedImage, setUploadingSeedImage] = useState<'hostASolo' | 'hostBSolo' | 'twoShot' | null>(null);
+  const [generatingVariations, setGeneratingVariations] = useState(false);
   // NEW: Character behavior editor state
   const [editingBehaviorFor, setEditingBehaviorFor] = useState<'hostA' | 'hostB' | null>(null);
   const seedImageInputRef = useRef<HTMLInputElement>(null);
@@ -1361,11 +1366,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
               )}
             </div>
 
-            {/* General Settings */}
-            <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
-              <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
-                <span className="text-yellow-500">📺</span> Channel Branding
-              </h3>
+            {/* Channel Branding - Mejorado con SettingsSection */}
+            <SettingsSection
+              title="Channel Branding"
+              icon={<span>📺</span>}
+              description="Configura la identidad visual de tu canal"
+            >
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                   <label className="text-sm text-gray-400 block mb-1">Channel Name</label>
@@ -1390,13 +1396,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                   </div>
                 </div>
               </div>
-            </div>
+            </SettingsSection>
 
-            {/* Content Strategy */}
-            <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
-              <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
-                <span className="text-blue-500">🌍</span> Content Strategy
-              </h3>
+            {/* Content Strategy - Mejorado */}
+            <SettingsSection
+              title="Content Strategy"
+              icon={<span>📰</span>}
+              description="Define cómo se genera y estructura el contenido"
+            >
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div>
                   <label className="text-sm text-gray-400 block mb-1">Target Country</label>
@@ -1534,39 +1541,45 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                   </p>
                 </div>
               </div>
-            </div>
+            </SettingsSection>
 
-            {/* Characters */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-3">
-                <CharacterEditor
-                  label="Host A (Left)"
-                  profile={tempConfig.characters.hostA}
-                  onChange={(p) => setTempConfig({ ...tempConfig, characters: { ...tempConfig.characters, hostA: p } })}
-                  ttsProvider={tempConfig.ttsProvider || 'openai'}
-                />
-                <button
-                  onClick={() => setEditingBehaviorFor('hostA')}
-                  className="w-full px-4 py-2 bg-accent-500/20 hover:bg-accent-500/30 text-accent-400 rounded-lg border border-accent-500/30 transition-colors text-sm font-medium"
-                >
-                  ⚙️ Configurar Comportamiento Avanzado
-                </button>
+            {/* Hosts Configuration - Mejorado */}
+            <SettingsSection
+              title="Hosts Configuration"
+              icon={<span>👥</span>}
+              description="Configura la personalidad, apariencia y comportamiento de cada host"
+            >
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-3">
+                  <CharacterEditor
+                    label="Host A (Left)"
+                    profile={tempConfig.characters.hostA}
+                    onChange={(p) => setTempConfig({ ...tempConfig, characters: { ...tempConfig.characters, hostA: p } })}
+                    ttsProvider={tempConfig.ttsProvider || 'openai'}
+                  />
+                  <button
+                    onClick={() => setEditingBehaviorFor('hostA')}
+                    className="w-full px-4 py-2 bg-accent-500/20 hover:bg-accent-500/30 text-accent-400 rounded-lg border border-accent-500/30 transition-colors text-sm font-medium"
+                  >
+                    ⚙️ Configurar Comportamiento Avanzado
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  <CharacterEditor
+                    label="Host B (Right)"
+                    profile={tempConfig.characters.hostB}
+                    onChange={(p) => setTempConfig({ ...tempConfig, characters: { ...tempConfig.characters, hostB: p } })}
+                    ttsProvider={tempConfig.ttsProvider || 'openai'}
+                  />
+                  <button
+                    onClick={() => setEditingBehaviorFor('hostB')}
+                    className="w-full px-4 py-2 bg-accent-500/20 hover:bg-accent-500/30 text-accent-400 rounded-lg border border-accent-500/30 transition-colors text-sm font-medium"
+                  >
+                    ⚙️ Configurar Comportamiento Avanzado
+                  </button>
+                </div>
               </div>
-              <div className="space-y-3">
-                <CharacterEditor
-                  label="Host B (Right)"
-                  profile={tempConfig.characters.hostB}
-                  onChange={(p) => setTempConfig({ ...tempConfig, characters: { ...tempConfig.characters, hostB: p } })}
-                  ttsProvider={tempConfig.ttsProvider || 'openai'}
-                />
-                <button
-                  onClick={() => setEditingBehaviorFor('hostB')}
-                  className="w-full px-4 py-2 bg-accent-500/20 hover:bg-accent-500/30 text-accent-400 rounded-lg border border-accent-500/30 transition-colors text-sm font-medium"
-                >
-                  ⚙️ Configurar Comportamiento Avanzado
-                </button>
-              </div>
-            </div>
+            </SettingsSection>
 
             {/* Character Behavior Editor Modal */}
             {editingBehaviorFor && (
@@ -1594,14 +1607,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
               </div>
             )}
 
-            {/* Narrative Engine Settings (v2.0) */}
-            <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
-              <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
-                <span className="text-green-500">🎬</span> Narrative Engine Settings (v2.0)
-              </h3>
-              <p className="text-sm text-gray-400 mb-4">
-                Configure the visual prompts and studio setup used by the v2.0 Narrative Engine for InfiniteTalk video generation.
-              </p>
+            {/* Narrative Engine Settings (v2.0) - Mejorado */}
+            <SettingsSection
+              title="Narrative Engine Settings (v2.0)"
+              icon={<span>🎬</span>}
+              description="Configura los prompts visuales y el setup del estudio para la generación de video"
+            >
 
               <div className="space-y-4">
                 <div>
@@ -1945,6 +1956,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                   </div>
                 </div>
 
+                {/* NEW: Seed Image Variations Manager - Componente mejorado */}
+                <SettingsSection
+                  title="Variaciones de Ángulos de Cámara"
+                  icon={<span>🎬</span>}
+                  description="Gestiona las variaciones de imágenes semilla con diferentes ángulos para escenas dinámicas"
+                  collapsible={true}
+                  defaultExpanded={true}
+                >
+                  <SeedImageVariationsManager
+                    config={tempConfig}
+                    channelId={activeChannel?.id || ''}
+                    onVariationsGenerated={(variations) => {
+                      setTempConfig(prev => ({
+                        ...prev,
+                        seed_image_variations: variations
+                      }));
+                    }}
+                  />
+                </SettingsSection>
+
                 {/* Hidden file input for uploads */}
                 <input
                   ref={seedImageInputRef}
@@ -2008,35 +2039,39 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                   The prompts are still used for scene-specific variations.
                 </p>
               </div>
-            </div>
+            </SettingsSection>
 
-            {/* Ethical Guardrails (v2.6) */}
-            <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
-              <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
-                <span className="text-red-500">🛡️</span> Ethical Guardrails
-              </h3>
-              <p className="text-sm text-gray-400 mb-4">
-                Configure how the AI handles sensitive topics and humor. These rules ensure content remains appropriate while maintaining your channel's style.
-              </p>
+            {/* Ethical Guardrails (v2.6) - Mejorado */}
+            <SettingsSection
+              title="Ethical Guardrails"
+              icon={<span>🛡️</span>}
+              description="Configura cómo la IA maneja temas sensibles y humor. Estas reglas aseguran que el contenido sea apropiado manteniendo el estilo de tu canal."
+            >
 
               <div className="space-y-6">
                 {/* Enable/Disable */}
-                <label className="flex items-center gap-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={tempConfig.ethicalGuardrails?.enabled ?? true}
-                    onChange={(e) => setTempConfig({
-                      ...tempConfig,
-                      ethicalGuardrails: {
-                        ...DEFAULT_ETHICAL_GUARDRAILS,
-                        ...tempConfig.ethicalGuardrails,
-                        enabled: e.target.checked
-                      }
-                    })}
-                    className="w-5 h-5 accent-red-500"
-                  />
-                  <span className="text-white font-medium">Enable Ethical Guardrails</span>
-                </label>
+                <ConfigCard
+                  title="Enable Ethical Guardrails"
+                  description="Activa o desactiva las reglas éticas para el contenido generado"
+                  variant="warning"
+                >
+                  <label className="flex items-center gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={tempConfig.ethicalGuardrails?.enabled ?? true}
+                      onChange={(e) => setTempConfig({
+                        ...tempConfig,
+                        ethicalGuardrails: {
+                          ...DEFAULT_ETHICAL_GUARDRAILS,
+                          ...tempConfig.ethicalGuardrails,
+                          enabled: e.target.checked
+                        }
+                      })}
+                      className="w-5 h-5 accent-red-500"
+                    />
+                    <span className="text-white font-medium">Enable Ethical Guardrails</span>
+                  </label>
+                </ConfigCard>
 
                 {(tempConfig.ethicalGuardrails?.enabled ?? true) && (
                   <>
@@ -2243,7 +2278,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                   </>
                 )}
               </div>
-            </div>
+            </SettingsSection>
 
           </div>
         )}
