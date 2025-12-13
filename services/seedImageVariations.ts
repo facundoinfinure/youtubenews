@@ -14,6 +14,7 @@
 import { ChannelConfig } from '../types';
 import { supabase } from './supabaseService';
 import { CostTracker } from './CostTracker';
+import { generateImageWithDALLE } from './openaiService';
 
 export interface SeedImageVariations {
   hostA: {
@@ -70,46 +71,93 @@ CRITICAL: Maintain exact character appearance, outfit, and features from the ref
 STYLE: Ultra-detailed 3D render, professional photography quality, consistent character design.
 `.trim();
 
-    // Usar DALL-E para generar variación basada en la imagen original
-    // Usamos image-to-image generation con prompt descriptivo del ángulo
-    const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8080';
+    // Try WaveSpeed image edit endpoint first (if backend is available)
+    const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
     
-    // Try WaveSpeed image edit endpoint first
-    try {
-      const response = await fetch(`${BACKEND_URL}/api/wavespeed/api/v3/google/nano-banana-pro/edit`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          prompt: prompt,
-          image: originalImageUrl, // Reference image
-          num_outputs: 1,
-          aspect_ratio: '16:9'
-        })
-      });
+    if (BACKEND_URL) {
+      try {
+        const response = await fetch(`${BACKEND_URL}/api/wavespeed/api/v3/google/nano-banana-pro/edit`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            prompt: prompt,
+            image: originalImageUrl, // Reference image
+            num_outputs: 1,
+            aspect_ratio: '16:9'
+          })
+        });
 
-      if (response.ok) {
-        const result = await response.json();
-        const imageUrl = result.output?.[0] || result.url || result.image_url;
-        if (imageUrl) {
-          // Track cost and return
-          CostTracker.track('seed_image_variation', 'wavespeed/nano-banana-pro', 0.14);
-          return imageUrl;
+        if (response.ok) {
+          const result = await response.json();
+          const imageUrl = result.output?.[0] || result.url || result.image_url;
+          if (imageUrl) {
+            // Track cost and return
+            CostTracker.track('seed_image_variation', 'wavespeed/nano-banana-pro', 0.14);
+            console.log(`✅ [Seed Variations] Generated ${angle} variation via WaveSpeed`);
+            return imageUrl;
+          }
+        } else {
+          console.warn(`⚠️ [Seed Variations] WaveSpeed returned ${response.status}, trying DALL-E fallback...`);
         }
+      } catch (error) {
+        console.warn('⚠️ [Seed Variations] WaveSpeed request failed (backend may not be available), trying DALL-E fallback:', (error as Error).message);
       }
-    } catch (error) {
-      console.warn('WaveSpeed image edit failed, trying DALL-E fallback:', error);
+    } else {
+      console.log('ℹ️ [Seed Variations] VITE_BACKEND_URL not configured, skipping WaveSpeed, using DALL-E directly...');
     }
 
     // Fallback: Use DALL-E with enhanced prompt that includes angle description
     // Since DALL-E doesn't support image-to-image directly, we enhance the prompt
     // to describe the character AND the angle
-    const enhancedPrompt = `${prompt}\n\nMaintain exact character appearance, outfit, and features. Only change camera angle to ${angle}.`;
+    console.log(`🎨 [Seed Variations] WaveSpeed failed, trying DALL-E fallback for ${angle}...`);
     
-    // For now, return the original image URL as fallback
-    // In production, you could call DALL-E generateImageWithDALLE here
-    console.warn('⚠️ [Seed Variations] Using original image as fallback (image-to-image not fully implemented)');
+    try {
+      const enhancedPrompt = `${prompt}\n\nMaintain exact character appearance, outfit, and features. Only change camera angle to ${angle}.`;
+      const dalleImage = await generateImageWithDALLE(enhancedPrompt, '1792x1024'); // 16:9 format
+      
+      if (dalleImage) {
+        // Upload to Supabase Storage
+        if (supabase) {
+          try {
+            const fileName = `seed-variations/${channelId}/${angle}-${Date.now()}.png`;
+            // Convert data URI to blob
+            const response = await fetch(dalleImage);
+            const blob = await response.blob();
+            
+            const { data: uploadData, error: uploadError } = await supabase.storage
+              .from('seed-images')
+              .upload(fileName, blob, {
+                cacheControl: '3600',
+                upsert: false
+              });
+
+            if (!uploadError && uploadData) {
+              const { data: { publicUrl } } = supabase.storage
+                .from('seed-images')
+                .getPublicUrl(fileName);
+              
+              CostTracker.track('seed_image_variation', 'dalle-3', 0.04); // DALL-E is cheaper
+              console.log(`✅ [Seed Variations] Generated ${angle} variation via DALL-E: ${publicUrl}`);
+              return publicUrl;
+            }
+          } catch (storageError) {
+            console.warn('⚠️ [Seed Variations] Storage upload failed, using direct DALL-E URL:', storageError);
+          }
+        }
+        
+        // Return DALL-E image directly if storage fails
+        CostTracker.track('seed_image_variation', 'dalle-3', 0.04);
+        console.log(`✅ [Seed Variations] Generated ${angle} variation via DALL-E (direct URL)`);
+        return dalleImage;
+      }
+    } catch (dalleError) {
+      console.error(`❌ [Seed Variations] DALL-E fallback also failed:`, dalleError);
+    }
+    
+    // Last resort: return original image
+    console.warn(`⚠️ [Seed Variations] All generation methods failed for ${angle}, using original image`);
     return originalImageUrl;
 
   } catch (error) {
@@ -136,6 +184,8 @@ export const generateAllHostVariations = async (
   ];
 
   const variations: Partial<SeedImageVariations['hostA']> = {};
+  let successCount = 0;
+  let failCount = 0;
 
   // Generate all variations in parallel (but limit to 3 at a time to avoid rate limits)
   const batchSize = 3;
@@ -144,14 +194,29 @@ export const generateAllHostVariations = async (
     const results = await Promise.all(
       batch.map(angle => 
         generateSeedImageVariation(originalImageUrl, angle, characterDescription, channelId)
-          .then(url => ({ angle, url }))
-          .catch(() => ({ angle, url: null }))
+          .then(url => {
+            if (url && url !== originalImageUrl) {
+              successCount++;
+              return { angle, url, success: true };
+            } else {
+              failCount++;
+              return { angle, url: null, success: false };
+            }
+          })
+          .catch((error) => {
+            failCount++;
+            console.error(`❌ [Seed Variations] Failed to generate ${angle}:`, error);
+            return { angle, url: null, success: false };
+          })
       )
     );
 
-    results.forEach(({ angle, url }) => {
-      if (url) {
+    results.forEach(({ angle, url, success }) => {
+      if (url && url !== originalImageUrl) {
         variations[angle] = url;
+      } else if (!success) {
+        // Use original as fallback only if generation completely failed
+        variations[angle] = originalImageUrl;
       }
     });
 
@@ -161,6 +226,7 @@ export const generateAllHostVariations = async (
     }
   }
 
+  console.log(`📊 [Seed Variations] ${hostType}: ${successCount} generated, ${failCount} failed (using original as fallback)`);
   return variations;
 };
 
@@ -204,6 +270,7 @@ export const generateAllSeedVariations = async (
       twoShotUrl ? generateAllHostVariations(twoShotUrl, twoShotDescription, channelId, 'hostA') : Promise.resolve({})
     ]);
 
+    // Build result, ensuring we have valid URLs (not just original fallbacks)
     const result: SeedImageVariations = {
       hostA: {
         eye_level: (hostAVariations.eye_level as string) || hostAUrl,
@@ -227,8 +294,23 @@ export const generateAllSeedVariations = async (
       }
     };
 
+    // Count how many are actually new (not just original fallbacks)
+    const newVariations = [
+      ...Object.values(result.hostA),
+      ...Object.values(result.hostB),
+      ...Object.values(result.twoShot)
+    ].filter(url => url && url !== hostAUrl && url !== hostBUrl && url !== twoShotUrl).length;
+
+    console.log(`📊 [Seed Variations] Total: ${newVariations} new variations generated, ${15 - newVariations} using original as fallback`);
+
     // Save variations to channel config in Supabase
-    await saveVariationsToConfig(channelId, result);
+    const saveError = await saveVariationsToConfig(channelId, result);
+    if (saveError) {
+      console.warn('⚠️ [Seed Variations] Variations generated but failed to save to config:', saveError);
+      // Still return result even if save failed - user can regenerate
+    } else {
+      console.log(`✅ [Seed Variations] Saved variations to channel config`);
+    }
 
     console.log(`✅ [Seed Variations] Generated all variations for channel ${channelId}`);
     return result;
@@ -241,32 +323,49 @@ export const generateAllSeedVariations = async (
 
 /**
  * Guarda las variaciones en la configuración del canal
+ * Returns error message if failed, null if successful
  */
 const saveVariationsToConfig = async (
   channelId: string,
   variations: SeedImageVariations
-): Promise<void> => {
+): Promise<string | null> => {
   try {
     if (!supabase) {
-      console.warn('⚠️ [Seed Variations] Supabase not initialized');
-      return;
+      return 'Supabase not initialized';
     }
+    
+    // Get current channel config
+    const { data: channel, error: fetchError } = await supabase
+      .from('channels')
+      .select('config')
+      .eq('id', channelId)
+      .single();
+    
+    if (fetchError || !channel) {
+      return `Failed to fetch channel: ${fetchError?.message || 'Channel not found'}`;
+    }
+    
+    // Update config with variations (store in config JSONB)
+    const updatedConfig = {
+      ...channel.config,
+      seed_image_variations: variations
+    };
     
     const { error } = await supabase
       .from('channels')
       .update({
-        seed_image_variations: variations,
+        config: updatedConfig,
         updated_at: new Date().toISOString()
       })
       .eq('id', channelId);
 
     if (error) {
-      console.warn('⚠️ [Seed Variations] Failed to save to config:', error);
-    } else {
-      console.log(`✅ [Seed Variations] Saved variations to channel config`);
+      return `Failed to save: ${error.message}`;
     }
+    
+    return null; // Success
   } catch (error) {
-    console.warn('⚠️ [Seed Variations] Error saving variations:', error);
+    return `Error: ${(error as Error).message}`;
   }
 };
 
@@ -278,7 +377,7 @@ export const getSeedImageForScene = (
   hostType: 'hostA' | 'hostB' | 'twoShot',
   cameraAngle?: 'eye_level' | 'low_angle' | 'high_angle' | 'closeup' | 'wide' | 'bird_eye' | 'worm_eye'
 ): string => {
-  // Check if variations exist in config
+  // Check if variations exist in config (stored in config JSONB)
   const variations = (config as any).seed_image_variations as SeedImageVariations | undefined;
 
   if (!variations) {

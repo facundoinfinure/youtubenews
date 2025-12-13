@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { ChannelConfig } from '../types';
 import { generateAllSeedVariations, SeedImageVariations } from '../services/seedImageVariations';
@@ -18,6 +18,14 @@ export const SeedImageVariationsManager: React.FC<SeedImageVariationsManagerProp
   const [existingVariations, setExistingVariations] = useState<SeedImageVariations | null>(
     (config as any).seed_image_variations || null
   );
+
+  // Update state when config changes
+  useEffect(() => {
+    const variations = (config as any).seed_image_variations;
+    if (variations) {
+      setExistingVariations(variations);
+    }
+  }, [config]);
 
   const seedImages = config.seedImages || {};
   const seedImageFormat = config.format || '16:9';
@@ -49,9 +57,33 @@ export const SeedImageVariationsManager: React.FC<SeedImageVariationsManagerProp
       if (variations) {
         setExistingVariations(variations);
         onVariationsGenerated?.(variations);
-        toast.success('✅ Variaciones generadas exitosamente! Se usarán automáticamente en las escenas.', { id: 'variations' });
+        
+        // Count total variations (all should be present)
+        const totalVariations = Object.keys(variations.hostA).length + 
+                                Object.keys(variations.hostB).length + 
+                                Object.keys(variations.twoShot).length;
+        
+        // Check if backend is available (if all are original URLs, generation likely failed)
+        const allUrls = [
+          ...Object.values(variations.hostA),
+          ...Object.values(variations.hostB),
+          ...Object.values(variations.twoShot)
+        ];
+        const uniqueUrls = new Set(allUrls);
+        
+        if (uniqueUrls.size <= 3) {
+          // Likely all are original images (fallback)
+          toast(`⚠️ Las variaciones se generaron pero el backend no está disponible. Se están usando las imágenes originales como fallback. Verifica que VITE_BACKEND_URL esté configurado.`, { 
+            id: 'variations', 
+            duration: 8000,
+            icon: '⚠️',
+            style: { background: '#fbbf24', color: '#000' }
+          });
+        } else {
+          toast.success(`✅ ${totalVariations} variaciones generadas exitosamente! Se usarán automáticamente en las escenas.`, { id: 'variations', duration: 5000 });
+        }
       } else {
-        toast.error('Error generando variaciones. Algunas pueden haber fallado.', { id: 'variations' });
+        toast.error('❌ Error generando variaciones. Verifica que las imágenes semilla base estén configuradas y que el backend esté disponible.', { id: 'variations', duration: 6000 });
       }
     } catch (error) {
       console.error('Error generating variations:', error);
@@ -80,9 +112,14 @@ export const SeedImageVariationsManager: React.FC<SeedImageVariationsManagerProp
               (eye-level, low-angle, high-angle, closeup, wide) para crear escenas más dinámicas.
             </p>
             {existingVariations && (
-              <p className="text-sm text-green-400 mb-2">
-                ✅ {variationCount} variaciones generadas y guardadas
-              </p>
+              <div className="space-y-1 mb-2">
+                <p className="text-sm text-green-400">
+                  ✅ {variationCount} variaciones generadas y guardadas
+                </p>
+                <p className="text-xs text-gray-500">
+                  Las variaciones se seleccionan automáticamente según el tipo de escena y ángulo de cámara.
+                </p>
+              </div>
             )}
             <p className="text-xs text-yellow-300/70">
               ⚠️ Requiere que las imágenes semilla base estén configuradas. Costo aproximado: ~$0.70 por host (5 variaciones × $0.14).
@@ -116,30 +153,49 @@ export const SeedImageVariationsManager: React.FC<SeedImageVariationsManagerProp
           <h5 className="text-sm font-bold text-gray-300 mb-3">Variaciones Disponibles:</h5>
           <div className="grid grid-cols-3 gap-4 text-xs">
             <div>
-              <div className="text-gray-400 mb-1">Host A:</div>
+              <div className="text-gray-400 mb-1 font-semibold">Host A:</div>
               <div className="space-y-1 text-gray-500">
-                {Object.keys(existingVariations.hostA).map(angle => (
-                  <div key={angle}>• {angle.replace('_', '-')}</div>
-                ))}
+                {Object.entries(existingVariations.hostA).map(([angle, url]) => {
+                  const isOriginal = url === (seedImageFormat === '16:9' ? seedImages.hostASoloUrl : seedImages.hostASoloUrl_9_16);
+                  return (
+                    <div key={angle} className={isOriginal ? 'text-yellow-500' : 'text-green-400'}>
+                      {isOriginal ? '⚠️' : '✅'} {angle.replace('_', '-')}
+                    </div>
+                  );
+                })}
               </div>
             </div>
             <div>
-              <div className="text-gray-400 mb-1">Host B:</div>
+              <div className="text-gray-400 mb-1 font-semibold">Host B:</div>
               <div className="space-y-1 text-gray-500">
-                {Object.keys(existingVariations.hostB).map(angle => (
-                  <div key={angle}>• {angle.replace('_', '-')}</div>
-                ))}
+                {Object.entries(existingVariations.hostB).map(([angle, url]) => {
+                  const isOriginal = url === (seedImageFormat === '16:9' ? seedImages.hostBSoloUrl : seedImages.hostBSoloUrl_9_16);
+                  return (
+                    <div key={angle} className={isOriginal ? 'text-yellow-500' : 'text-green-400'}>
+                      {isOriginal ? '⚠️' : '✅'} {angle.replace('_', '-')}
+                    </div>
+                  );
+                })}
               </div>
             </div>
             <div>
-              <div className="text-gray-400 mb-1">Two-Shot:</div>
+              <div className="text-gray-400 mb-1 font-semibold">Two-Shot:</div>
               <div className="space-y-1 text-gray-500">
-                {Object.keys(existingVariations.twoShot).map(angle => (
-                  <div key={angle}>• {angle.replace('_', '-')}</div>
-                ))}
+                {Object.entries(existingVariations.twoShot).map(([angle, url]) => {
+                  const twoShotBase = seedImageFormat === '16:9' ? seedImages.twoShotUrl : seedImages.twoShotUrl_9_16;
+                  const isOriginal = url === twoShotBase || url === (seedImageFormat === '16:9' ? seedImages.hostASoloUrl : seedImages.hostASoloUrl_9_16);
+                  return (
+                    <div key={angle} className={isOriginal ? 'text-yellow-500' : 'text-green-400'}>
+                      {isOriginal ? '⚠️' : '✅'} {angle.replace('_', '-')}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
+          <p className="text-xs text-gray-500 mt-3">
+            ✅ = Nueva variación generada | ⚠️ = Usando imagen original (fallback)
+          </p>
         </div>
       )}
     </div>
