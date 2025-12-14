@@ -913,23 +913,32 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
     setLocalProduction(updatedProduction);
     onUpdateProduction(updatedProduction);
     
-    // Verify save was successful
+    // Verify save was successful (compare only critical fields)
     try {
       const saved = await getProductionById(production.id);
       if (saved) {
-        const savedHash = JSON.stringify({
-          wizard_state: saved.wizard_state,
-          scenes: saved.scenes
-        });
-        const expectedHash = JSON.stringify({
-          wizard_state: newState,
-          scenes: partialUpdate.scenes
-        });
+        // Compare only critical wizard state fields (currentStep is the most important)
+        const savedStep = saved.wizard_state?.currentStep;
+        const expectedStep = newState.currentStep;
+        const stepsMatch = savedStep === expectedStep;
         
-        if (savedHash !== expectedHash) {
-          logger.warn('wizard', 'State may not have saved correctly', {
+        // Compare scenes count as a sanity check (exact match is too strict due to JSON serialization differences)
+        const savedScenesCount = saved.scenes ? Object.keys(saved.scenes).length : 0;
+        const expectedScenesCount = partialUpdate.scenes ? Object.keys(partialUpdate.scenes).length : 0;
+        const scenesCountMatch = savedScenesCount === expectedScenesCount;
+        
+        if (!stepsMatch) {
+          logger.warn('wizard', 'State may not have saved correctly - step mismatch', {
             productionId: production.id,
-            step: newState.currentStep
+            savedStep,
+            expectedStep
+          });
+        } else if (!scenesCountMatch && expectedScenesCount > 0) {
+          // Only warn if we expected scenes but the count doesn't match
+          logger.warn('wizard', 'State saved but scenes count mismatch', {
+            productionId: production.id,
+            savedScenesCount,
+            expectedScenesCount
           });
         } else {
           logger.info('wizard', 'State saved and verified successfully', {

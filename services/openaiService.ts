@@ -57,6 +57,15 @@ export const openaiRequest = async (
         const errorData = await response.json().catch(() => ({}));
         const errorMsg = errorData.error?.message || 'Unknown error';
         
+        // Handle rate limiting (429) with longer backoff
+        if (response.status === 429 && attempt < retries) {
+          const backoffDelay = Math.min(5000 * Math.pow(2, attempt), 60000); // 5s, 10s, 20s... max 60s
+          console.warn(`[OpenAI] ⚠️ Rate limited (429), retrying after ${backoffDelay}ms (attempt ${attempt + 1}/${retries + 1})...`);
+          lastError = new Error(`OpenAI API error: 429 - ${errorMsg}`);
+          await new Promise(r => setTimeout(r, backoffDelay));
+          continue;
+        }
+        
         // If timeout or server error, allow retry
         if (response.status >= 500 && attempt < retries) {
           console.warn(`[OpenAI] ⚠️ Attempt ${attempt + 1} failed (${response.status}), retrying...`);
@@ -1711,7 +1720,8 @@ export const calculateViralScoresBatch = async (
   }
 
   const BATCH_SIZE = 25; // Process 25 items per API call to avoid timeouts
-  const MAX_PARALLEL = 3; // Max parallel requests to avoid rate limits
+  const MAX_PARALLEL = 2; // Reduced from 3 to 2 to avoid rate limits
+  const DELAY_BETWEEN_GROUPS = 2000; // 2 second delay between batch groups to respect rate limits
   
   console.log(`[Viral Score] 🔥 Analyzing ${newsItems.length} news items in batches of ${BATCH_SIZE}...`);
   
@@ -1728,7 +1738,7 @@ export const calculateViralScoresBatch = async (
   
   console.log(`[Viral Score] 📦 Split into ${batches.length} batches`);
   
-  // Process batches with controlled parallelism
+  // Process batches with controlled parallelism and delays
   const allResults: Array<{ score: number; reasoning: string; originalIndex: number }> = [];
   
   for (let i = 0; i < batches.length; i += MAX_PARALLEL) {
@@ -1739,6 +1749,11 @@ export const calculateViralScoresBatch = async (
     
     const groupResults = await Promise.all(batchPromises);
     groupResults.forEach(results => allResults.push(...results));
+    
+    // Add delay between batch groups to respect rate limits (except after last group)
+    if (i + MAX_PARALLEL < batches.length) {
+      await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_GROUPS));
+    }
   }
   
   // Sort by original index and extract results
