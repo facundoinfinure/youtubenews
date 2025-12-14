@@ -1337,13 +1337,85 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
         const retention = await analyzeScriptRetention(scenes);
         setRetentionAnalysis(retention);
         
-        // Show warning if retention is low
+        // CRITICAL: Auto-improve if retention is low
         if (retention.retentionScore < 80) {
-          toast.error(
+          toast(
             `⚠️ Retención estimada: ${retention.retentionScore}% (objetivo: 80%+). ` +
-            `Considera regenerar el guión con mejoras.`,
-            { duration: 8000 }
+            `Mejorando automáticamente...`,
+            { 
+              duration: 5000,
+              icon: '⚠️',
+              style: { background: '#f59e0b', color: '#fff' }
+            }
           );
+          
+          // Auto-improve script
+          try {
+            setProgressStatus({ 
+              message: 'Mejorando guión automáticamente...', 
+              detail: `Aplicando ${retention.suggestions.length} mejoras para alcanzar 80%+ retención`,
+              progress: 90 
+            });
+            
+            const { autoImproveScript } = await import('../services/geminiService');
+            const improvedScript = await autoImproveScript(
+              scenes,
+              selectedNews,
+              config,
+              undefined, // viralHook
+              3 // maxIterations
+            );
+            
+            // Update with improved script
+            const improvedScenes = improvedScript;
+            const improvedSegments: BroadcastSegment[] = Object.entries(improvedScenes.scenes).map(([key, scene]) => ({
+              speaker: scene.video_mode === 'hostA' ? config.characters.hostA.name : config.characters.hostB.name,
+              text: scene.text,
+              audioBase64: '',
+              sceneTitle: scene.title,
+              sceneIndex: parseInt(key)
+            }));
+            
+            // Re-analyze improved script
+            const improvedRetention = await analyzeScriptRetention(improvedScenes);
+            
+            // Get fresh production for improved script (use the one we already have)
+            const baseProduction = await getProductionById(production.id) || updatedProduction;
+            
+            const improvedProduction: Production = {
+              ...baseProduction,
+              scenes: improvedScenes,
+              segments: improvedSegments
+            };
+            
+            await saveProduction(improvedProduction);
+            const finalProduction = await getProductionById(production.id);
+            if (finalProduction) {
+              setLocalProduction(finalProduction);
+              onUpdateProduction(finalProduction);
+            }
+            
+            setRetentionAnalysis(improvedRetention);
+            
+            if (improvedRetention.retentionScore >= 80) {
+              toast.success(
+                `✅ Guión mejorado! Retención: ${improvedRetention.retentionScore}% (objetivo alcanzado)`,
+                { duration: 6000 }
+              );
+            } else {
+              toast(
+                `⚠️ Mejorado a ${improvedRetention.retentionScore}% (objetivo: 80%+). Puedes regenerar manualmente.`,
+                { 
+                  duration: 8000,
+                  icon: '⚠️',
+                  style: { background: '#f59e0b', color: '#fff' }
+                }
+              );
+            }
+          } catch (improveError) {
+            console.error('[Wizard] Auto-improvement failed:', improveError);
+            toast.error('Error en mejora automática. Puedes regenerar manualmente.');
+          }
         } else {
           toast.success(
             `✅ Retención estimada: ${retention.retentionScore}% - Excelente!`,

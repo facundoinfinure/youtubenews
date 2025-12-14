@@ -206,7 +206,49 @@ ${hostABehaviorPrompt || hostBBehaviorPrompt ? '\n⚠️ ADDITIONAL: Follow ALL 
 `.trim();
 
   // CRITICAL FIX: Redesigned narrative structures optimized for 80%+ retention
+  // ENHANCED: Ultra-viral prompts for maximum engagement
   const narrativeInstructions = `
+🚨 CRITICAL VIRALITY RULES - MUST FOLLOW FOR 80%+ RETENTION:
+
+1. HOOK (First 3-5 seconds) - ABSOLUTELY CRITICAL:
+   - MUST start with a SHOCKING number, question, or statement
+   - Examples: "$50 BILLION lost in one day", "Why is everyone selling?", "This just changed everything"
+   - NEVER start with "Today we're talking about..." or "Let's discuss..."
+   - First sentence MUST be under 15 words and create IMMEDIATE curiosity
+
+2. RETENTION TECHNIQUES (Apply to EVERY scene):
+   - End each scene with a "curiosity gap" - make viewer NEED to continue
+   - Use "but wait, there's more..." patterns
+   - Create "information debt" - promise answers later
+   - Use cliffhangers between scenes: "Here's what they're not telling you..."
+   - Numbers and statistics: "$2.3 billion", "47% drop", "3 reasons why"
+
+3. PACING (CRITICAL):
+   - First 10 seconds: HIGH ENERGY, fast-paced, no dead air
+   - Middle: Steady information delivery with hooks
+   - Last 10 seconds: Strong conclusion with call-to-action
+   - NO slow moments, NO filler words, NO unnecessary explanations
+
+4. LENGTH OPTIMIZATION (MANDATORY):
+   - Target: 45-60 seconds total (NOT 90+ seconds)
+   - Each scene: 6-10 seconds MAX (40-60 words)
+   - Cut ruthlessly - one key point per scene
+   - If script is longer than 60 seconds when read, it's TOO LONG
+
+5. ENGAGEMENT HOOKS (Use throughout):
+   - Numbers: "$2.3 billion", "47% drop", "3 reasons"
+   - Contrast: "Everyone thinks X, but Y is happening"
+   - Emotional triggers: "This is INSANE", "You won't believe this"
+   - Urgency: "This is happening RIGHT NOW"
+   - Questions: "What does this mean for you?"
+
+6. DIALOGUE RULES (CRITICAL):
+   - Short, punchy sentences (5-10 words max)
+   - NO long explanations
+   - Use contractions for natural flow
+   - Alternate hosts every 1-2 sentences (NOT every paragraph)
+   - One key point per sentence
+
 Choose ONE narrative structure optimized for MAXIMUM RETENTION (target: 80%+):
 
 1. VIRAL HOOK HEAVY (5 scenes) - RECOMMENDED FOR MAXIMUM RETENTION

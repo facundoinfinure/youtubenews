@@ -840,12 +840,23 @@ const generateSingleAudio = async (
     }
   }
   
-  // Determine cache key voice - INCLUDE PROVIDER to avoid returning OpenAI audio when ElevenLabs is requested
+  // CRITICAL FIX: Determine cache key voice - INCLUDE PROVIDER to avoid returning OpenAI audio when ElevenLabs is requested
   // Format: "provider:voiceId" (e.g., "elevenlabs:9oPKasc15pfAbMr7N6Gs" or "openai:echo")
+  // This ensures cache separation between providers
   const voiceId = effectiveProvider === 'elevenlabs' && effectiveElevenLabsVoiceId 
     ? effectiveElevenLabsVoiceId 
     : effectiveVoiceName;
   const cacheVoiceKey = `${effectiveProvider}:${voiceId}`;
+  
+  // Log provider decision for debugging
+  console.log(`🎙️ [Audio] Provider decision for ${label}:`, {
+    requestedProvider: ttsProvider,
+    configProvider: freshConfig?.ttsProvider,
+    effectiveProvider,
+    voiceName: effectiveVoiceName,
+    voiceId: effectiveElevenLabsVoiceId || effectiveVoiceName,
+    cacheKey: cacheVoiceKey
+  });
   
   // Check cache first
   if (findCachedAudioFn && channelId) {
