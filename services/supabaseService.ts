@@ -3161,6 +3161,7 @@ export const getLastAnalyticsFetch = async (channelId: string): Promise<string |
   if (!supabase) return null;
 
   try {
+    // Check if table exists first
     const { data, error } = await supabase
       .from('video_analytics')
       .select('fetched_at')
@@ -3170,12 +3171,19 @@ export const getLastAnalyticsFetch = async (channelId: string): Promise<string |
       .maybeSingle();
 
     if (error) {
-      if (error.code === '42P01') return null;
+      // Table doesn't exist or other error - fail silently
+      if (error.code === '42P01' || error.code === 'PGRST116') {
+        // Table doesn't exist - this is OK, just return null
+        return null;
+      }
+      // Other errors - log but don't throw
+      console.warn('⚠️ [Analytics] Error fetching last analytics fetch:', error.message);
       return null;
     }
 
     return data?.fetched_at || null;
   } catch (e) {
+    // Fail silently - table might not exist
     return null;
   }
 };
@@ -3260,10 +3268,25 @@ export const getProductionsWithAnalytics = async (
 
     // Get analytics for these productions
     const productionIds = productions.map(p => p.id);
-    const { data: analytics, error: analyticsError } = await supabase
-      .from('video_analytics')
-      .select('*')
-      .in('production_id', productionIds);
+    let analytics: any[] = [];
+    
+    if (productionIds.length > 0) {
+      const { data: analyticsData, error: analyticsError } = await supabase
+        .from('video_analytics')
+        .select('*')
+        .in('production_id', productionIds);
+      
+      if (analyticsError) {
+        // Table might not exist - fail silently
+        if (analyticsError.code === '42P01' || analyticsError.code === 'PGRST116') {
+          console.warn('⚠️ [Analytics] video_analytics table not found, skipping analytics');
+        } else {
+          console.warn('⚠️ [Analytics] Error fetching analytics:', analyticsError.message);
+        }
+      } else {
+        analytics = analyticsData || [];
+      }
+    }
 
     // Merge analytics with productions
     const analyticsMap = new Map((analytics || []).map(a => [a.production_id, a]));

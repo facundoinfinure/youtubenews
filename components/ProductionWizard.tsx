@@ -724,17 +724,40 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
               hasViralMetadata: !!freshProduction.viral_metadata
             });
             
-            // Restore wizard_state
-            if (freshProduction.wizard_state) {
-              setWizardState(freshProduction.wizard_state);
-            }
-            
-            // Restore all generated data
+            // Restore all generated data FIRST
             if (freshProduction.fetched_news) {
               setFetchedNews(freshProduction.fetched_news);
             }
             if (freshProduction.selected_news_ids) {
               setSelectedNewsIds(freshProduction.selected_news_ids);
+            }
+            
+            // Restore wizard_state
+            if (freshProduction.wizard_state) {
+              setWizardState(freshProduction.wizard_state);
+            } else {
+              // If no wizard_state but we have fetched_news, initialize properly
+              if (freshProduction.fetched_news && freshProduction.fetched_news.length > 0) {
+                const initialWizardState: ProductionWizardState = {
+                  ...createEmptyWizardState(),
+                  currentStep: 'news_select', // Go to selection if news already exists
+                  newsFetch: {
+                    status: 'completed',
+                    completedAt: new Date().toISOString(),
+                    data: { fetchedNews: freshProduction.fetched_news }
+                  }
+                };
+                setWizardState(initialWizardState);
+                // Save this state to DB
+                try {
+                  await saveProduction({
+                    ...freshProduction,
+                    wizard_state: initialWizardState
+                  });
+                } catch (error) {
+                  console.warn('Failed to save initial wizard state:', error);
+                }
+              }
             }
             if (freshProduction.scenes) {
               // Scenes are already in localProduction, but ensure they're synced
@@ -2328,6 +2351,11 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
     switch (wizardState.currentStep) {
       // Step 1: Fetch News
       case 'news_fetch':
+        // CRITICAL FIX: Load fetchedNews from production if not in state
+        if (fetchedNews.length === 0 && production.fetched_news && production.fetched_news.length > 0) {
+          setFetchedNews(production.fetched_news);
+        }
+        
         return (
           <div className="space-y-6">
             <div className="text-center py-8">
@@ -2339,10 +2367,10 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
               </p>
             </div>
             
-            {fetchedNews.length > 0 ? (
+            {(fetchedNews.length > 0 || (production.fetched_news && production.fetched_news.length > 0)) ? (
               <div className="bg-green-900/20 border border-green-500/30 p-4 rounded-lg">
                 <p className="text-green-400">
-                  ✓ Ya tienes {fetchedNews.length} noticias cargadas. Puedes continuar o buscar nuevas.
+                  ✓ Ya tienes {(fetchedNews.length || production.fetched_news?.length || 0)} noticias cargadas. Puedes continuar o buscar nuevas.
                 </p>
               </div>
             ) : null}
@@ -2379,13 +2407,23 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
                 {isLoading ? '⏳ Buscando...' : '🔍 Buscar Noticias'}
               </button>
               
-              {fetchedNews.length > 0 && (
+              {(fetchedNews.length > 0 || (production.fetched_news && production.fetched_news.length > 0)) && (
                 <button
                   onClick={async () => {
+                    // Ensure we have the news loaded
+                    if (fetchedNews.length === 0 && production.fetched_news) {
+                      setFetchedNews(production.fetched_news);
+                    }
+                    
                     const newState: ProductionWizardState = {
                       ...wizardState,
                       currentStep: 'news_select',
-                      newsFetch: { ...wizardState.newsFetch, status: 'completed' }
+                      newsFetch: { 
+                        ...wizardState.newsFetch, 
+                        status: 'completed',
+                        completedAt: new Date().toISOString(),
+                        data: { fetchedNews: fetchedNews.length > 0 ? fetchedNews : (production.fetched_news || []) }
+                      }
                     };
                     await saveWizardState(newState);
                   }}
@@ -2401,6 +2439,38 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
       // Step 2: Select News
       case 'news_select':
         const hasConfirmedSelection = production.selected_news_ids && production.selected_news_ids.length > 0;
+        
+        // CRITICAL FIX: If no fetchedNews but we're on this step, try to load from production
+        if (fetchedNews.length === 0 && production.fetched_news && production.fetched_news.length > 0) {
+          setFetchedNews(production.fetched_news);
+        }
+        
+        // If still no news, show error and allow going back
+        if (fetchedNews.length === 0) {
+          return (
+            <div className="space-y-6">
+              <div className="bg-red-900/20 border border-red-500/30 p-4 rounded-lg">
+                <p className="text-red-400 font-medium mb-2">⚠️ No hay noticias disponibles</p>
+                <p className="text-gray-400 text-sm mb-4">
+                  No se encontraron noticias para seleccionar. Por favor, vuelve al paso anterior para buscar noticias.
+                </p>
+                <button
+                  onClick={async () => {
+                    const newState: ProductionWizardState = {
+                      ...wizardState,
+                      currentStep: 'news_fetch'
+                    };
+                    await saveWizardState(newState);
+                  }}
+                  className="bg-gray-700 hover:bg-gray-600 text-white px-6 py-3 rounded-lg"
+                >
+                  ← Volver a Buscar Noticias
+                </button>
+              </div>
+            </div>
+          );
+        }
+        
         return (
           <div className="space-y-6">
             <div className="flex items-center justify-between">
