@@ -20,7 +20,17 @@ BEGIN
                    WHERE table_name = 'productions' AND column_name = 'narrative_used') THEN
         ALTER TABLE productions 
         ADD COLUMN narrative_used TEXT 
-        CHECK (narrative_used IN ('classic', 'double_conflict', 'hot_take', 'perspective_clash'));
+        CHECK (narrative_used IN (
+          'classic',
+          'double_conflict',
+          'hot_take',
+          'perspective_clash',
+          'viral_hook_heavy',
+          'inverted_pyramid',
+          'question_driven',
+          'timeline_arc',
+          'contrast_arc'
+        ));
         
         COMMENT ON COLUMN productions.narrative_used IS 
             'The narrative structure used: classic (6 scenes), double_conflict (7), hot_take (4), perspective_clash (6)';

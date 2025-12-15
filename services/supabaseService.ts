@@ -1018,6 +1018,18 @@ export const saveProduction = async (
 ): Promise<Production | null> => {
   if (!supabase) return null;
 
+  // Some DBs were migrated with a restrictive CHECK constraint on productions.narrative_used
+  // (only allowing: classic, double_conflict, hot_take, perspective_clash).
+  // Narrative Engine v2.0+ can return additional narrative types; when the DB wasn't migrated yet,
+  // updates/inserts fail with 23514. We handle it gracefully by retrying with narrative_used = null.
+  const isNarrativeUsedConstraintError = (error: any) => {
+    const message = String(error?.message || '');
+    return (
+      error?.code === '23514' &&
+      (message.includes('narrative_used') || message.includes('productions_narrative_used_check'))
+    );
+  };
+
   // Prepare segments without audioBase64 for storage (only if segments were passed)
   const segmentsForStorage = production.segments?.map(seg => ({
     speaker: seg.speaker,
@@ -1118,6 +1130,27 @@ export const saveProduction = async (
       .select()
       .single();
 
+    // If narrative_used CHECK constraint is too restrictive, retry with narrative_used cleared
+    if (
+      error &&
+      isNarrativeUsedConstraintError(error) &&
+      Object.prototype.hasOwnProperty.call(updateData, 'narrative_used')
+    ) {
+      console.warn(
+        "⚠️ narrative_used rejected by DB constraint, retrying with narrative_used=null. " +
+          "Run migration: supabase_narrative_used_constraint_update_migration.sql"
+      );
+      const retryUpdateData = { ...updateData, narrative_used: null };
+      const retryResult = await supabase
+        .from('productions')
+        .update(retryUpdateData)
+        .eq('id', production.id)
+        .select()
+        .single();
+      data = retryResult.data;
+      error = retryResult.error;
+    }
+
     // If segment_status column doesn't exist, retry without it
     if (error && (error.code === 'PGRST204' || error.message?.includes('segment_status'))) {
       console.warn("⚠️ segment_status column not found, retrying without it. Run migration: supabase_segment_status_migration.sql");
@@ -1184,6 +1217,26 @@ export const saveProduction = async (
       .insert(productionData)
       .select()
       .single();
+
+    // If narrative_used CHECK constraint is too restrictive, retry insert with narrative_used cleared
+    if (
+      error &&
+      isNarrativeUsedConstraintError(error) &&
+      Object.prototype.hasOwnProperty.call(productionData, 'narrative_used')
+    ) {
+      console.warn(
+        "⚠️ narrative_used rejected by DB constraint on insert, retrying with narrative_used=null. " +
+          "Run migration: supabase_narrative_used_constraint_update_migration.sql"
+      );
+      const retryProductionData = { ...productionData, narrative_used: null };
+      const retryResult = await supabase
+        .from('productions')
+        .insert(retryProductionData)
+        .select()
+        .single();
+      data = retryResult.data;
+      error = retryResult.error;
+    }
 
     // If segment_status column doesn't exist, retry without it
     if (error && (error.code === 'PGRST204' || error.message?.includes('segment_status'))) {
