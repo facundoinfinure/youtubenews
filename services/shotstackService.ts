@@ -900,7 +900,7 @@ export const buildPodcastStyleEdit = (
       graphics.push({
         asset: {
           type: 'text',
-          text: ' ', // Space required by Shotstack (text cannot be empty)
+          text: '.', // Dot required by Shotstack (text cannot be empty, space causes validation error with small heights)
           alignment: { horizontal: 'center', vertical: 'center' },
           font: { color: 'rgba(255, 255, 255, 0.2)', size: 12 }, // Match background for invisible text
           width: isVertical ? 800 : 1200,
@@ -914,24 +914,27 @@ export const buildPodcastStyleEdit = (
         opacity: 0.8
       });
       
-      // Progress fill
-      graphics.push({
-        asset: {
-          type: 'text',
-          text: ' ', // Space required by Shotstack (text cannot be empty)
-          alignment: { horizontal: 'center', vertical: 'center' },
-          font: { color: config.newsStyle?.lowerThird?.primaryColor || '#ff3333', size: 12 }, // Match background for invisible text
-          width: (progress / 100) * (isVertical ? 800 : 1200),
-          height: 8,
-          background: { color: config.newsStyle?.lowerThird?.primaryColor || '#ff3333' }
-        },
-        start: startTime,
-        length: duration,
-        offset: { x: -(isVertical ? 400 : 600) + ((progress / 100) * (isVertical ? 400 : 600)), y: isVertical ? 0.45 : 0.45 },
-        position: 'center',
-        opacity: 1.0,
-        transition: { in: 'slideRight' }
-      });
+      // Progress fill (only add if width is at least 1px to avoid validation errors)
+      const fillWidth = Math.max(1, (progress / 100) * (isVertical ? 800 : 1200));
+      if (fillWidth >= 1) {
+        graphics.push({
+          asset: {
+            type: 'text',
+            text: '.', // Dot required by Shotstack (text cannot be empty, space causes validation error with small heights)
+            alignment: { horizontal: 'center', vertical: 'center' },
+            font: { color: config.newsStyle?.lowerThird?.primaryColor || '#ff3333', size: 12 }, // Match background for invisible text
+            width: fillWidth,
+            height: 8,
+            background: { color: config.newsStyle?.lowerThird?.primaryColor || '#ff3333' }
+          },
+          start: startTime,
+          length: duration,
+          offset: { x: -(isVertical ? 400 : 600) + ((progress / 100) * (isVertical ? 400 : 600)), y: isVertical ? 0.45 : 0.45 },
+          position: 'center',
+          opacity: 1.0,
+          transition: { in: 'slideRight' }
+        });
+      }
     }
     
     // Info cards for statistics (if scene text contains numbers)
@@ -1031,7 +1034,7 @@ export const buildPodcastStyleEdit = (
         transitionFlashClips.push({
           asset: {
             type: 'text',
-            text: ' ', // Space required by Shotstack (text cannot be empty)
+            text: '.', // Dot required by Shotstack (text cannot be empty, space causes validation error with small heights)
             alignment: { horizontal: 'center', vertical: 'center' },
             font: { color: flashColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: isVertical ? 1080 : 1920,
@@ -1116,7 +1119,7 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: ' ', // Space required by Shotstack (text cannot be empty)
+            text: '.', // Dot required by Shotstack (text cannot be empty, space causes validation error with small heights)
             alignment: { horizontal: 'center', vertical: 'center' },
             font: { color: secondaryColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: presets.lowerThird.banner.width,
@@ -1137,7 +1140,7 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: ' ', // Space required by Shotstack (text cannot be empty)
+            text: '.', // Dot required by Shotstack (text cannot be empty, space causes validation error with small heights)
             alignment: { horizontal: 'center', vertical: 'center' },
             font: { color: primaryColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: presets.lowerThird.banner.width,
@@ -1157,7 +1160,7 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: ' ', // Space required by Shotstack (text cannot be empty)
+            text: '.', // Dot required by Shotstack (text cannot be empty, space causes validation error with small heights)
             alignment: { horizontal: 'center', vertical: 'center' },
             font: { color: accentGold, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: presets.lowerThird.banner.width * 0.7,
@@ -1235,7 +1238,7 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: ' ', // Space required by Shotstack (text cannot be empty)
+            text: '.', // Dot required by Shotstack (text cannot be empty, space causes validation error with small heights)
             alignment: { horizontal: 'center', vertical: 'center' },
             font: { color: '#0d1b2a', family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: presets.date.width,
@@ -1256,7 +1259,7 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: ' ', // Space required by Shotstack (text cannot be empty)
+            text: '.', // Dot required by Shotstack (text cannot be empty, space causes validation error with small heights)
             alignment: { horizontal: 'center', vertical: 'center' },
             font: { color: primaryColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: 4,
@@ -1298,7 +1301,7 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: ' ', // Space required by Shotstack (text cannot be empty)
+            text: '.', // Dot required by Shotstack (text cannot be empty, space causes validation error with small heights)
             alignment: { horizontal: 'center', vertical: 'center' },
             font: { color: '#dc2626', family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: presets.live.width,
@@ -1362,7 +1365,7 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: ' ', // Space required by Shotstack (text cannot be empty)
+            text: '.', // Dot required by Shotstack (text cannot be empty, space causes validation error with small heights)
             alignment: { horizontal: 'center', vertical: 'center' },
             font: { color: primaryColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: presets.breakingNews.width + 80,
@@ -1382,7 +1385,7 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: ' ', // Space required by Shotstack (text cannot be empty)
+            text: '.', // Dot required by Shotstack (text cannot be empty, space causes validation error with small heights)
             alignment: { horizontal: 'center', vertical: 'center' },
             font: { color: '#ffd60a', family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: presets.breakingNews.width + 80,
@@ -1426,7 +1429,7 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: ' ', // Space required by Shotstack (text cannot be empty)
+            text: '.', // Dot required by Shotstack (text cannot be empty, space causes validation error with small heights)
             alignment: { horizontal: 'center', vertical: 'center' },
             font: { color: '#0d1b2a', family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: presets.branding.width,
@@ -1488,7 +1491,7 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: ' ', // Space required by Shotstack (text cannot be empty)
+            text: '.', // Dot required by Shotstack (text cannot be empty, space causes validation error with small heights)
             alignment: { horizontal: 'center', vertical: 'center' },
             font: { color: tickerBgColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: tickerPresets.width * 1.1,
@@ -1509,7 +1512,7 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: ' ', // Space required by Shotstack (text cannot be empty)
+            text: '.', // Dot required by Shotstack (text cannot be empty, space causes validation error with small heights)
             alignment: { horizontal: 'center', vertical: 'center' },
             font: { color: primaryColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: tickerPresets.width * 1.1,
@@ -1529,7 +1532,7 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: ' ', // Space required by Shotstack (text cannot be empty)
+            text: '.', // Dot required by Shotstack (text cannot be empty, space causes validation error with small heights)
             alignment: { horizontal: 'center', vertical: 'center' },
             font: { color: primaryColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: isVertical ? 100 : 120,
@@ -1613,7 +1616,7 @@ export const buildPodcastStyleEdit = (
         hostNameClips.push({
           asset: {
             type: 'text',
-            text: ' ', // Space required by Shotstack (text cannot be empty)
+            text: '.', // Dot required by Shotstack (text cannot be empty, space causes validation error with small heights)
             alignment: { horizontal: 'center', vertical: 'center' },
             font: { color: '#0d1b2a', family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: hostNamePresets.width,
@@ -1635,7 +1638,7 @@ export const buildPodcastStyleEdit = (
         hostNameClips.push({
           asset: {
             type: 'text',
-            text: ' ', // Space required by Shotstack (text cannot be empty)
+            text: '.', // Dot required by Shotstack (text cannot be empty, space causes validation error with small heights)
             alignment: { horizontal: 'center', vertical: 'center' },
             font: { color: primaryColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: hostNamePresets.accentWidth,
@@ -1656,7 +1659,7 @@ export const buildPodcastStyleEdit = (
         hostNameClips.push({
           asset: {
             type: 'text',
-            text: ' ', // Space required by Shotstack (text cannot be empty)
+            text: '.', // Dot required by Shotstack (text cannot be empty, space causes validation error with small heights)
             alignment: { horizontal: 'center', vertical: 'center' },
             font: { color: accentGold, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: hostNamePresets.width - 10,
