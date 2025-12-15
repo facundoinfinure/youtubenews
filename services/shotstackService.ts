@@ -900,7 +900,9 @@ export const buildPodcastStyleEdit = (
       graphics.push({
         asset: {
           type: 'text',
-          text: '',
+          text: ' ', // Space required by Shotstack (text cannot be empty)
+          alignment: { horizontal: 'center', vertical: 'center' },
+          font: { color: 'rgba(255, 255, 255, 0)', size: 1 }, // Transparent text
           width: isVertical ? 800 : 1200,
           height: 8,
           background: { color: 'rgba(255, 255, 255, 0.2)' }
@@ -916,7 +918,9 @@ export const buildPodcastStyleEdit = (
       graphics.push({
         asset: {
           type: 'text',
-          text: '',
+          text: ' ', // Space required by Shotstack (text cannot be empty)
+          alignment: { horizontal: 'center', vertical: 'center' },
+          font: { color: 'rgba(255, 255, 255, 0)', size: 1 }, // Transparent text
           width: (progress / 100) * (isVertical ? 800 : 1200),
           height: 8,
           background: { color: config.newsStyle?.lowerThird?.primaryColor || '#ff3333' }
@@ -1027,9 +1031,9 @@ export const buildPodcastStyleEdit = (
         transitionFlashClips.push({
           asset: {
             type: 'text',
-            text: '',
+            text: ' ', // Space required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: '#000000', family: 'Roboto', size: 10, lineHeight: 1 },
+            font: { color: 'rgba(0, 0, 0, 0)', family: 'Roboto', size: 1, lineHeight: 1 }, // Transparent text
             width: isVertical ? 1080 : 1920,
             height: isVertical ? 1920 : 1080,
             background: { color: flashColor }
@@ -1112,9 +1116,9 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: '',
+            text: ' ', // Space required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: '#000000', family: 'Roboto', size: 20, lineHeight: 1 },
+            font: { color: 'rgba(0, 0, 0, 0)', family: 'Roboto', size: 1, lineHeight: 1 }, // Transparent text
             width: presets.lowerThird.banner.width,
             height: presets.lowerThird.banner.height,
             background: { color: secondaryColor }
@@ -1133,9 +1137,9 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: '',
+            text: ' ', // Space required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: '#000000', family: 'Roboto', size: 10, lineHeight: 1 },
+            font: { color: 'rgba(0, 0, 0, 0)', family: 'Roboto', size: 1, lineHeight: 1 }, // Transparent text
             width: presets.lowerThird.banner.width,
             height: isVertical ? 6 : 8,
             background: { color: primaryColor }
@@ -1153,9 +1157,9 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: '',
+            text: ' ', // Space required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: '#000000', family: 'Roboto', size: 10, lineHeight: 1 },
+            font: { color: 'rgba(0, 0, 0, 0)', family: 'Roboto', size: 1, lineHeight: 1 }, // Transparent text
             width: presets.lowerThird.banner.width * 0.7,
             height: isVertical ? 2 : 3,
             background: { color: accentGold }
@@ -1231,9 +1235,9 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: '',
+            text: ' ', // Space required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: '#000000', family: 'Roboto', size: 10, lineHeight: 1 },
+            font: { color: 'rgba(0, 0, 0, 0)', family: 'Roboto', size: 1, lineHeight: 1 }, // Transparent text
             width: presets.date.width,
             height: presets.date.height,
             background: { color: '#0d1b2a' }
@@ -1252,9 +1256,9 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: '',
+            text: ' ', // Space required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: '#000000', family: 'Roboto', size: 10, lineHeight: 1 },
+            font: { color: 'rgba(0, 0, 0, 0)', family: 'Roboto', size: 1, lineHeight: 1 }, // Transparent text
             width: 4,
             height: presets.date.height - 8,
             background: { color: primaryColor }
@@ -1294,9 +1298,9 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: '',
+            text: ' ', // Space required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: '#000000', family: 'Roboto', size: 10, lineHeight: 1 },
+            font: { color: 'rgba(0, 0, 0, 0)', family: 'Roboto', size: 1, lineHeight: 1 }, // Transparent text
             width: presets.live.width,
             height: presets.live.height,
             background: { color: '#dc2626' }
@@ -1358,9 +1362,9 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: '',
+            text: ' ', // Space required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: '#000000', family: 'Roboto', size: 10, lineHeight: 1 },
+            font: { color: 'rgba(0, 0, 0, 0)', family: 'Roboto', size: 1, lineHeight: 1 }, // Transparent text
             width: presets.breakingNews.width + 80,
             height: presets.breakingNews.height,
             background: { color: primaryColor }
@@ -1378,9 +1382,9 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: '',
+            text: ' ', // Space required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: '#000000', family: 'Roboto', size: 10, lineHeight: 1 },
+            font: { color: 'rgba(0, 0, 0, 0)', family: 'Roboto', size: 1, lineHeight: 1 }, // Transparent text
             width: presets.breakingNews.width + 80,
             height: 4,
             background: { color: '#ffd60a' }
@@ -1422,9 +1426,9 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: '',
+            text: ' ', // Space required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: '#000000', family: 'Roboto', size: 10, lineHeight: 1 },
+            font: { color: 'rgba(0, 0, 0, 0)', family: 'Roboto', size: 1, lineHeight: 1 }, // Transparent text
             width: presets.branding.width,
             height: presets.branding.height,
             background: { color: '#0d1b2a' }
@@ -1484,9 +1488,9 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: '',
+            text: ' ', // Space required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: '#000000', family: 'Roboto', size: 10, lineHeight: 1 },
+            font: { color: 'rgba(0, 0, 0, 0)', family: 'Roboto', size: 1, lineHeight: 1 }, // Transparent text
             width: tickerPresets.width * 1.1,
             height: tickerPresets.height,
             background: { color: tickerBgColor }
@@ -1505,9 +1509,9 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: '',
+            text: ' ', // Space required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: '#000000', family: 'Roboto', size: 10, lineHeight: 1 },
+            font: { color: 'rgba(0, 0, 0, 0)', family: 'Roboto', size: 1, lineHeight: 1 }, // Transparent text
             width: tickerPresets.width * 1.1,
             height: 4,
             background: { color: primaryColor }
@@ -1525,9 +1529,9 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: '',
+            text: ' ', // Space required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: '#000000', family: 'Roboto', size: 10, lineHeight: 1 },
+            font: { color: 'rgba(0, 0, 0, 0)', family: 'Roboto', size: 1, lineHeight: 1 }, // Transparent text
             width: isVertical ? 100 : 120,
             height: tickerPresets.height - 8,
             background: { color: primaryColor }
@@ -1609,9 +1613,9 @@ export const buildPodcastStyleEdit = (
         hostNameClips.push({
           asset: {
             type: 'text',
-            text: '',
+            text: ' ', // Space required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: '#000000', family: 'Roboto', size: 10, lineHeight: 1 },
+            font: { color: 'rgba(0, 0, 0, 0)', family: 'Roboto', size: 1, lineHeight: 1 }, // Transparent text
             width: hostNamePresets.width,
             height: hostNamePresets.height,
             background: { color: '#0d1b2a' }
@@ -1631,9 +1635,9 @@ export const buildPodcastStyleEdit = (
         hostNameClips.push({
           asset: {
             type: 'text',
-            text: '',
+            text: ' ', // Space required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: '#000000', family: 'Roboto', size: 10, lineHeight: 1 },
+            font: { color: 'rgba(0, 0, 0, 0)', family: 'Roboto', size: 1, lineHeight: 1 }, // Transparent text
             width: hostNamePresets.accentWidth,
             height: hostNamePresets.height,
             background: { color: primaryColor }
@@ -1652,9 +1656,9 @@ export const buildPodcastStyleEdit = (
         hostNameClips.push({
           asset: {
             type: 'text',
-            text: '',
+            text: ' ', // Space required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: '#000000', family: 'Roboto', size: 10, lineHeight: 1 },
+            font: { color: 'rgba(0, 0, 0, 0)', family: 'Roboto', size: 1, lineHeight: 1 }, // Transparent text
             width: hostNamePresets.width - 10,
             height: 2,
             background: { color: accentGold }
