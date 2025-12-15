@@ -592,6 +592,103 @@ const formatNewsDate = (): string => {
 };
 
 /**
+ * Determine pacing for a scene based on its type and position
+ * NEW: Variación de Ritmo - adjusts scene duration and effects for optimal pacing
+ */
+const determineScenePacing = (
+  scene: PodcastScene,
+  sceneIndex: number,
+  totalScenes: number
+): {
+  speedMultiplier: number; // 0.9 (fast) to 1.1 (slow)
+  durationAdjustment: number; // Seconds to add/subtract
+  effectIntensity: 'fast' | 'normal' | 'slow';
+} => {
+  const title = scene.title?.toLowerCase() || '';
+  const isHook = sceneIndex === 0;
+  const isPayoff = sceneIndex === totalScenes - 1;
+  const isConflict = title.includes('conflict') || title.includes('crisis') || 
+                      title.includes('crash') || title.includes('problem');
+  
+  // Hook: Fast pacing (0.9x speed feel, shorter duration)
+  if (isHook) {
+    return {
+      speedMultiplier: 0.9,
+      durationAdjustment: -0.5, // Cut 0.5s for faster feel
+      effectIntensity: 'fast'
+    };
+  }
+  
+  // Conflict: Fast pacing for energy
+  if (isConflict) {
+    return {
+      speedMultiplier: 0.95,
+      durationAdjustment: -0.3,
+      effectIntensity: 'fast'
+    };
+  }
+  
+  // Payoff: Slower pacing for emphasis (1.1x speed feel)
+  if (isPayoff) {
+    return {
+      speedMultiplier: 1.1,
+      durationAdjustment: 0.5, // Add 0.5s for emphasis
+      effectIntensity: 'slow'
+    };
+  }
+  
+  // Default: Normal pacing
+  return {
+    speedMultiplier: 1.0,
+    durationAdjustment: 0,
+    effectIntensity: 'normal'
+  };
+};
+
+/**
+ * Advanced transition selection based on scene context
+ * NEW: Contextual transitions for better visual flow
+ */
+const selectAdvancedTransition = (
+  currentScene: PodcastScene,
+  nextScene: PodcastScene | undefined,
+  sceneIndex: number,
+  totalScenes: number
+): ShotstackTransition => {
+  if (!nextScene) return 'fade'; // Last scene, no transition needed
+  
+  // Analyze scene types for contextual transitions
+  const currentTitle = currentScene.title?.toLowerCase() || '';
+  const nextTitle = nextScene.title?.toLowerCase() || '';
+  
+  // Hook to Context: Dramatic reveal
+  if (sceneIndex === 0) {
+    return 'zoom'; // Zoom transition for hook impact
+  }
+  
+  // Conflict scenes: Whip pan for dramatic effect
+  if (currentTitle.includes('conflict') || currentTitle.includes('crisis') || 
+      currentTitle.includes('problem') || currentTitle.includes('crash')) {
+    return 'carouselRight'; // Fast whip pan
+  }
+  
+  // Payoff/Conclusion: Slow fade for emphasis
+  if (sceneIndex === totalScenes - 2) {
+    return 'fadeSlow'; // Slow fade before final scene
+  }
+  
+  // Topic change: Slide transition
+  const topicChanged = !currentTitle.includes(nextTitle.split(' ')[0]) && 
+                       !nextTitle.includes(currentTitle.split(' ')[0]);
+  if (topicChanged) {
+    return 'slideRight'; // Slide for topic change
+  }
+  
+  // Continuation: Subtle fade
+  return 'fade';
+};
+
+/**
  * Build podcast-style Shotstack edit with professional production quality
  * 
  * This creates a professional podcast aesthetic with:
@@ -783,69 +880,6 @@ export const buildPodcastStyleEdit = (
     return clip;
   });
 
-  // Build tracks array (bottom to top in render order)
-  const tracks: any[] = [];
-  
-  // TRACK 1 (Base): Video clips
-  tracks.push({ clips: videoClips });
-  
-  // NEW: Motion Graphics Track (animated graphics, info cards, progress bars)
-  if (config.effects.motionGraphics !== false) {
-    const motionGraphicsClips: any[] = [];
-    scenesWithTiming.forEach((scene, index) => {
-      const graphics = generateMotionGraphics(
-        scene,
-        index,
-        scenesWithTiming.length,
-        scene.start,
-        scene.duration
-      );
-      motionGraphicsClips.push(...graphics);
-    });
-    
-    if (motionGraphicsClips.length > 0) {
-      tracks.unshift({ clips: motionGraphicsClips });
-      console.log(`🎨 [Motion Graphics] Added ${motionGraphicsClips.length} animated graphics`);
-    }
-  }
-
-  // === FORMAT-SPECIFIC SETTINGS ===
-  // Determine if vertical format BEFORE using it
-  const isVertical = aspectRatio === '9:16' || aspectRatio === '4:5';
-
-  // === TRANSITION COLOR FLASH TRACK ===
-  // Add subtle color flashes during transitions for a more dynamic look
-  if (config.transition.type !== 'none' && scenesWithTiming.length > 1) {
-    const transitionFlashClips: any[] = [];
-    const flashColor = config.newsStyle?.lowerThird?.primaryColor || '#ff3333';
-    
-    scenesWithTiming.forEach((scene, index) => {
-      if (index > 0) {
-        // Add a brief color flash at each transition point
-        transitionFlashClips.push({
-          asset: {
-            type: 'text',
-            text: '',
-            alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: '#000000', family: 'Roboto', size: 10, lineHeight: 1 },
-            width: isVertical ? 1080 : 1920,
-            height: isVertical ? 1920 : 1080,
-            background: { color: flashColor }
-          },
-          start: scene.start - 0.1,
-          length: 0.2,
-          opacity: 0.15,
-          position: 'center',
-          transition: { in: 'fade', out: 'fade' }
-        });
-      }
-    });
-    
-    if (transitionFlashClips.length > 0) {
-      tracks.unshift({ clips: transitionFlashClips });
-    }
-  }
-
   /**
    * NEW: Generate motion graphics for scenes
    * Adds animated graphics, info cards, progress bars, and callouts
@@ -950,6 +984,69 @@ export const buildPodcastStyleEdit = (
     
     return graphics;
   };
+
+  // Build tracks array (bottom to top in render order)
+  const tracks: any[] = [];
+  
+  // TRACK 1 (Base): Video clips
+  tracks.push({ clips: videoClips });
+  
+  // NEW: Motion Graphics Track (animated graphics, info cards, progress bars)
+  if (config.effects.motionGraphics !== false) {
+    const motionGraphicsClips: any[] = [];
+    scenesWithTiming.forEach((scene, index) => {
+      const graphics = generateMotionGraphics(
+        scene,
+        index,
+        scenesWithTiming.length,
+        scene.start,
+        scene.duration
+      );
+      motionGraphicsClips.push(...graphics);
+    });
+    
+    if (motionGraphicsClips.length > 0) {
+      tracks.unshift({ clips: motionGraphicsClips });
+      console.log(`🎨 [Motion Graphics] Added ${motionGraphicsClips.length} animated graphics`);
+    }
+  }
+
+  // === FORMAT-SPECIFIC SETTINGS ===
+  // Determine if vertical format BEFORE using it
+  const isVertical = aspectRatio === '9:16' || aspectRatio === '4:5';
+
+  // === TRANSITION COLOR FLASH TRACK ===
+  // Add subtle color flashes during transitions for a more dynamic look
+  if (config.transition.type !== 'none' && scenesWithTiming.length > 1) {
+    const transitionFlashClips: any[] = [];
+    const flashColor = config.newsStyle?.lowerThird?.primaryColor || '#ff3333';
+    
+    scenesWithTiming.forEach((scene, index) => {
+      if (index > 0) {
+        // Add a brief color flash at each transition point
+        transitionFlashClips.push({
+          asset: {
+            type: 'text',
+            text: '',
+            alignment: { horizontal: 'center', vertical: 'center' },
+            font: { color: '#000000', family: 'Roboto', size: 10, lineHeight: 1 },
+            width: isVertical ? 1080 : 1920,
+            height: isVertical ? 1920 : 1080,
+            background: { color: flashColor }
+          },
+          start: scene.start - 0.1,
+          length: 0.2,
+          opacity: 0.15,
+          position: 'center',
+          transition: { in: 'fade', out: 'fade' }
+        });
+      }
+    });
+    
+    if (transitionFlashClips.length > 0) {
+      tracks.unshift({ clips: transitionFlashClips });
+    }
+  }
 
   // === FORMAT-SPECIFIC OVERLAY PRESETS ===
   // RENOVATED DESIGN - Premium broadcast style with modern aesthetics
@@ -2163,103 +2260,6 @@ const SCENE_EFFECTS: Record<string, { effect: ShotstackEffect; filter?: Shotstac
   'rising': { effect: 'slideRightSlow' },
   'payoff': { effect: 'zoomOutSlow' },
   'default': { effect: 'zoomInSlow' }
-};
-
-/**
- * Determine pacing for a scene based on its type and position
- * NEW: Variación de Ritmo - adjusts scene duration and effects for optimal pacing
- */
-const determineScenePacing = (
-  scene: PodcastScene,
-  sceneIndex: number,
-  totalScenes: number
-): {
-  speedMultiplier: number; // 0.9 (fast) to 1.1 (slow)
-  durationAdjustment: number; // Seconds to add/subtract
-  effectIntensity: 'fast' | 'normal' | 'slow';
-} => {
-  const title = scene.title?.toLowerCase() || '';
-  const isHook = sceneIndex === 0;
-  const isPayoff = sceneIndex === totalScenes - 1;
-  const isConflict = title.includes('conflict') || title.includes('crisis') || 
-                      title.includes('crash') || title.includes('problem');
-  
-  // Hook: Fast pacing (0.9x speed feel, shorter duration)
-  if (isHook) {
-    return {
-      speedMultiplier: 0.9,
-      durationAdjustment: -0.5, // Cut 0.5s for faster feel
-      effectIntensity: 'fast'
-    };
-  }
-  
-  // Conflict: Fast pacing for energy
-  if (isConflict) {
-    return {
-      speedMultiplier: 0.95,
-      durationAdjustment: -0.3,
-      effectIntensity: 'fast'
-    };
-  }
-  
-  // Payoff: Slower pacing for emphasis (1.1x speed feel)
-  if (isPayoff) {
-    return {
-      speedMultiplier: 1.1,
-      durationAdjustment: 0.5, // Add 0.5s for emphasis
-      effectIntensity: 'slow'
-    };
-  }
-  
-  // Default: Normal pacing
-  return {
-    speedMultiplier: 1.0,
-    durationAdjustment: 0,
-    effectIntensity: 'normal'
-  };
-};
-
-/**
- * Advanced transition selection based on scene context
- * NEW: Contextual transitions for better visual flow
- */
-const selectAdvancedTransition = (
-  currentScene: PodcastScene,
-  nextScene: PodcastScene | undefined,
-  sceneIndex: number,
-  totalScenes: number
-): ShotstackTransition => {
-  if (!nextScene) return 'fade'; // Last scene, no transition needed
-  
-  // Analyze scene types for contextual transitions
-  const currentTitle = currentScene.title?.toLowerCase() || '';
-  const nextTitle = nextScene.title?.toLowerCase() || '';
-  
-  // Hook to Context: Dramatic reveal
-  if (sceneIndex === 0) {
-    return 'zoom'; // Zoom transition for hook impact
-  }
-  
-  // Conflict scenes: Whip pan for dramatic effect
-  if (currentTitle.includes('conflict') || currentTitle.includes('crisis') || 
-      currentTitle.includes('problem') || currentTitle.includes('crash')) {
-    return 'carouselRight'; // Fast whip pan
-  }
-  
-  // Payoff/Conclusion: Slow fade for emphasis
-  if (sceneIndex === totalScenes - 2) {
-    return 'fadeSlow'; // Slow fade before final scene
-  }
-  
-  // Topic change: Slide transition
-  const topicChanged = !currentTitle.includes(nextTitle.split(' ')[0]) && 
-                       !nextTitle.includes(currentTitle.split(' ')[0]);
-  if (topicChanged) {
-    return 'slideRight'; // Slide for topic change
-  }
-  
-  // Continuation: Subtle fade
-  return 'fade';
 };
 
 /**
