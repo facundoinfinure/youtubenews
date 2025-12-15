@@ -76,22 +76,28 @@ STYLE: Ultra-detailed 3D render, professional photography quality, consistent ch
     
     if (BACKEND_URL) {
       try {
-        const response = await fetch(`${BACKEND_URL}/api/wavespeed/api/v3/google/nano-banana-pro/edit`, {
+        // FIXED: Use query parameter 'path' for the WaveSpeed proxy
+        // API docs: https://wavespeed.ai/docs/docs-api/google/google-nano-banana-pro-edit
+        const wavespeedPath = 'api/v3/google/nano-banana-pro/edit';
+        const response = await fetch(`${BACKEND_URL}/api/wavespeed?path=${encodeURIComponent(wavespeedPath)}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
             prompt: prompt,
-            image: originalImageUrl, // Reference image
-            num_outputs: 1,
-            aspect_ratio: '16:9'
+            images: [originalImageUrl], // FIXED: 'images' is an array of URLs (1-14 items)
+            aspect_ratio: '16:9',
+            resolution: '1k', // Options: 1k, 2k, 4k
+            output_format: 'png',
+            enable_sync_mode: true // Wait for result directly
           })
         });
 
         if (response.ok) {
           const result = await response.json();
-          const imageUrl = result.output?.[0] || result.url || result.image_url;
+          // WaveSpeed returns data.outputs array when sync mode is enabled
+          const imageUrl = result.data?.outputs?.[0] || result.output?.[0] || result.url || result.image_url;
           if (imageUrl) {
             // Track cost and return
             CostTracker.track('seed_image_variation', 'wavespeed/nano-banana-pro', 0.14);
@@ -99,7 +105,8 @@ STYLE: Ultra-detailed 3D render, professional photography quality, consistent ch
             return imageUrl;
           }
         } else {
-          console.warn(`⚠️ [Seed Variations] WaveSpeed returned ${response.status}, trying DALL-E fallback...`);
+          const errorData = await response.json().catch(() => ({}));
+          console.warn(`⚠️ [Seed Variations] WaveSpeed returned ${response.status}, trying DALL-E fallback...`, errorData);
         }
       } catch (error) {
         console.warn('⚠️ [Seed Variations] WaveSpeed request failed (backend may not be available), trying DALL-E fallback:', (error as Error).message);
