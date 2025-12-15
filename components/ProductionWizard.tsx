@@ -881,6 +881,26 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
     return () => clearInterval(syncInterval);
   }, [production.id]); // Only re-run if production ID changes (not on every state update)
   
+  // CRITICAL FIX: Sync fetchedNews when production prop changes
+  // This ensures that when news is fetched and saved, the state updates immediately
+  useEffect(() => {
+    if (production.fetched_news && production.fetched_news.length > 0) {
+      // Use functional update to avoid stale closure issues
+      setFetchedNews(prevNews => {
+        // Only update if local state is empty or different
+        if (prevNews.length === 0) {
+          return production.fetched_news;
+        } else {
+          // Check if they're different
+          const localNewsIds = new Set(prevNews.map(n => n.id || n.headline));
+          const propNewsIds = new Set(production.fetched_news.map(n => n.id || n.headline));
+          const idsMatch = localNewsIds.size === propNewsIds.size && 
+                           Array.from(localNewsIds).every(id => propNewsIds.has(id));
+          return idsMatch ? prevNews : production.fetched_news;
+        }
+      });
+    }
+  }, [production.fetched_news]); // Only depend on fetched_news, not the entire production object
 
   // All wizard steps
   const allSteps: ProductionStep[] = [
@@ -2543,12 +2563,22 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
         const hasConfirmedSelection = production.selected_news_ids && production.selected_news_ids.length > 0;
         
         // CRITICAL FIX: If no fetchedNews but we're on this step, try to load from production
-        if (fetchedNews.length === 0 && production.fetched_news && production.fetched_news.length > 0) {
-          setFetchedNews(production.fetched_news);
+        // Check both production prop and localProduction
+        const availableNews = fetchedNews.length > 0 
+          ? fetchedNews 
+          : (production.fetched_news && production.fetched_news.length > 0 
+              ? production.fetched_news 
+              : (localProduction.fetched_news && localProduction.fetched_news.length > 0 
+                  ? localProduction.fetched_news 
+                  : []));
+        
+        // Update state if we found news but state is empty
+        if (fetchedNews.length === 0 && availableNews.length > 0) {
+          setFetchedNews(availableNews);
         }
         
         // If still no news, show error and allow going back
-        if (fetchedNews.length === 0) {
+        if (availableNews.length === 0) {
           return (
             <div className="space-y-6">
               <div className="bg-red-900/20 border border-red-500/30 p-4 rounded-lg">
@@ -2593,7 +2623,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
             )}
             
             <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
-              {fetchedNews.map((news, i) => (
+              {availableNews.map((news, i) => (
                 <NewsItemCard
                   key={news.id || i}
                   news={news}
