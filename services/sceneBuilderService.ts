@@ -16,6 +16,10 @@ export interface ScenePrompt {
   visualPrompt: string; // Optimized prompt for InfiniteTalk
   lightingMood: 'neutral' | 'dramatic' | 'warm' | 'cool';
   expressionHint: string;
+  // NEW: The actual seed image URL chosen for this scene (used by InfiniteTalk)
+  seedImageUrl?: string;
+  // NEW: Camera angle used to pick seed variation (if configured)
+  cameraAngle?: 'eye_level' | 'high_angle' | 'low_angle' | 'bird_eye' | 'worm_eye';
   cameraMovement?: CameraMovement; // NEW: Camera movement for dynamic shots
 }
 
@@ -547,6 +551,8 @@ export const generateScenePrompts = (
         visualPrompt,
         lightingMood: sceneTypeInfo.lightingMood,
         expressionHint,
+        seedImageUrl: selectedSeedImage,
+        cameraAngle: sceneTypeInfo.cameraAngle,
         cameraMovement: sceneCameraMovement // NEW: Include camera movement
       };
     });

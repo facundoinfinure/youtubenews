@@ -1253,10 +1253,15 @@ export const generateVideoSegmentsWithInfiniteTalk = async (
     scenePrompt?: string;
     lightingMood?: string;
     expressionHint?: string;
+    seedImageUrl?: string;
+    cameraAngle?: 'eye_level' | 'high_angle' | 'low_angle' | 'bird_eye' | 'worm_eye';
   }> = new Map();
   
   if (scriptWithScenes?.scenes) {
-    Object.entries(scriptWithScenes.scenes).forEach(([sceneNum, scene], idx) => {
+    // Sort by scene number to ensure stable mapping to segment indices (0..n-1)
+    Object.entries(scriptWithScenes.scenes)
+      .sort(([a], [b]) => parseInt(a) - parseInt(b))
+      .forEach(([sceneNum, scene], idx) => {
       const scenePrompt = scenePrompts[idx];
       sceneMetadataMap.set(idx, {
         video_mode: scene.video_mode,
@@ -1264,7 +1269,9 @@ export const generateVideoSegmentsWithInfiniteTalk = async (
         shot: scenePrompt?.scene.shot || scene.shot, // Use corrected shot from Scene Builder
         scenePrompt: scenePrompt?.visualPrompt, // Use optimized visual prompt
         lightingMood: scenePrompt?.lightingMood,
-        expressionHint: scenePrompt?.expressionHint
+        expressionHint: scenePrompt?.expressionHint,
+        seedImageUrl: (scenePrompt as any)?.seedImageUrl,
+        cameraAngle: (scenePrompt as any)?.cameraAngle
       });
     });
   }
@@ -1334,7 +1341,14 @@ export const generateVideoSegmentsWithInfiniteTalk = async (
       
       console.log(`🎭 [InfiniteTalk] Segment ${sceneIndex}: video_mode=${videoMode}, speaker=${segment.speaker}, hostA=${hostAName}, hostB=${hostBName}`);
       
-      if (videoMode === 'hostA' && hostASoloUrl) {
+      // Prefer per-scene seed image variation (if configured) to actually vary camera angle/framing
+      if (sceneMetadata?.seedImageUrl) {
+        imageUrlForSegment = sceneMetadata.seedImageUrl;
+        console.log(
+          `🖼️ [InfiniteTalk Single] Segment ${sceneIndex}: Using Scene Builder seed variation` +
+          `${sceneMetadata.cameraAngle ? ` (cameraAngle: ${sceneMetadata.cameraAngle})` : ''}`
+        );
+      } else if (videoMode === 'hostA' && hostASoloUrl) {
         imageUrlForSegment = hostASoloUrl;
         console.log(`🖼️ [InfiniteTalk Single] Segment ${sceneIndex}: Using Host A solo image (video_mode: hostA)`);
       } else if (videoMode === 'hostB' && hostBSoloUrl) {
