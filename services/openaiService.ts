@@ -38,6 +38,7 @@ export const openaiRequest = async (
   console.log(`[OpenAI] 🔗 Calling: ${endpoint}`);
   
   let lastError: Error | null = null;
+  let consecutive429Errors = 0;
   
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
@@ -57,8 +58,26 @@ export const openaiRequest = async (
         const errorData = await response.json().catch(() => ({}));
         const errorMsg = errorData.error?.message || 'Unknown error';
         
-        // Handle rate limiting (429) with longer backoff
+        // Check if it's a quota exceeded error (don't retry)
+        const isQuotaExceeded = errorMsg.toLowerCase().includes('quota') || 
+                                errorMsg.toLowerCase().includes('exceeded your current quota') ||
+                                errorMsg.toLowerCase().includes('billing');
+        
+        if (isQuotaExceeded) {
+          console.error(`[OpenAI] ❌ Quota exceeded: ${errorMsg}`);
+          throw new Error(`OpenAI API error: 429 - ${errorMsg}`);
+        }
+        
+        // Handle rate limiting (429) with longer backoff (only if not quota exceeded)
         if (response.status === 429 && attempt < retries) {
+          consecutive429Errors++;
+          
+          // If we get multiple 429 errors in a row, reduce retries to avoid hammering the API
+          if (consecutive429Errors >= 2) {
+            console.error(`[OpenAI] ❌ Multiple 429 errors detected. Stopping retries to avoid quota issues.`);
+            throw new Error(`OpenAI API error: 429 - ${errorMsg}`);
+          }
+          
           const backoffDelay = Math.min(5000 * Math.pow(2, attempt), 60000); // 5s, 10s, 20s... max 60s
           console.warn(`[OpenAI] ⚠️ Rate limited (429), retrying after ${backoffDelay}ms (attempt ${attempt + 1}/${retries + 1})...`);
           lastError = new Error(`OpenAI API error: 429 - ${errorMsg}`);
@@ -77,6 +96,8 @@ export const openaiRequest = async (
         throw new Error(`OpenAI API error: ${response.status} - ${errorMsg}`);
       }
       
+      // Reset consecutive 429 counter on success
+      consecutive429Errors = 0;
       return response.json();
     } catch (error: any) {
       if (error.name === 'AbortError') {
@@ -1710,7 +1731,7 @@ Be strict: Average news = 40-60, Breaking/controversial = 70-85, Highly viral = 
 /**
  * Batch calculate viral scores for multiple news items
  * Processes in smaller batches (25 items each) to avoid timeouts
- * Uses parallel processing for speed while respecting API limits
+ * Processes batches SECUENTIALLY to avoid rate limit errors
  */
 export const calculateViralScoresBatch = async (
   newsItems: Array<{ headline: string; summary: string; source: string; date?: string }>
@@ -1720,8 +1741,7 @@ export const calculateViralScoresBatch = async (
   }
 
   const BATCH_SIZE = 25; // Process 25 items per API call to avoid timeouts
-  const MAX_PARALLEL = 2; // Reduced from 3 to 2 to avoid rate limits
-  const DELAY_BETWEEN_GROUPS = 2000; // 2 second delay between batch groups to respect rate limits
+  const DELAY_BETWEEN_BATCHES = 3000; // 3 second delay between batches to respect rate limits
   
   console.log(`[Viral Score] 🔥 Analyzing ${newsItems.length} news items in batches of ${BATCH_SIZE}...`);
   
@@ -1736,23 +1756,50 @@ export const calculateViralScoresBatch = async (
     );
   }
   
-  console.log(`[Viral Score] 📦 Split into ${batches.length} batches`);
+  console.log(`[Viral Score] 📦 Split into ${batches.length} batches (processing sequentially to avoid rate limits)`);
   
-  // Process batches with controlled parallelism and delays
+  // Process batches SEQUENTIALLY to avoid rate limit errors
   const allResults: Array<{ score: number; reasoning: string; originalIndex: number }> = [];
+  let quotaExceeded = false;
   
-  for (let i = 0; i < batches.length; i += MAX_PARALLEL) {
-    const batchGroup = batches.slice(i, i + MAX_PARALLEL);
-    const batchPromises = batchGroup.map((batch, groupIdx) => 
-      processSingleBatch(batch, i + groupIdx + 1, batches.length)
-    );
+  for (let i = 0; i < batches.length; i++) {
+    const batch = batches[i];
     
-    const groupResults = await Promise.all(batchPromises);
-    groupResults.forEach(results => allResults.push(...results));
-    
-    // Add delay between batch groups to respect rate limits (except after last group)
-    if (i + MAX_PARALLEL < batches.length) {
-      await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_GROUPS));
+    try {
+      const batchResults = await processSingleBatch(batch, i + 1, batches.length);
+      allResults.push(...batchResults);
+      
+      // Add delay between batches to respect rate limits (except after last batch)
+      if (i < batches.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_BATCHES));
+      }
+    } catch (error: any) {
+      // Check if it's a quota exceeded error
+      if (error.message?.includes('quota') || error.message?.includes('exceeded your current quota')) {
+        console.error(`[Viral Score] ❌ Quota exceeded at batch ${i + 1}/${batches.length}. Stopping processing.`);
+        quotaExceeded = true;
+        
+        // Use basic algorithm for remaining batches
+        for (let j = i; j < batches.length; j++) {
+          const remainingBatch = batches[j];
+          const fallbackResults = remainingBatch.map(item => ({
+            score: calculateBasicViralScore(item.headline, item.summary, item.source, item.date),
+            reasoning: 'Basic algorithm (quota exceeded)',
+            originalIndex: item.originalIndex
+          }));
+          allResults.push(...fallbackResults);
+        }
+        break;
+      }
+      
+      // For other errors, use basic algorithm for this batch and continue
+      console.warn(`[Viral Score] ⚠️ Batch ${i + 1} failed: ${error.message}, using basic algorithm`);
+      const fallbackResults = batch.map(item => ({
+        score: calculateBasicViralScore(item.headline, item.summary, item.source, item.date),
+        reasoning: 'Basic algorithm (API error)',
+        originalIndex: item.originalIndex
+      }));
+      allResults.push(...fallbackResults);
     }
   }
   
@@ -1763,7 +1810,12 @@ export const calculateViralScoresBatch = async (
   const scores = finalResults.map(r => r.score);
   const minScore = scores.length > 0 ? Math.min(...scores) : 0;
   const maxScore = scores.length > 0 ? Math.max(...scores) : 0;
-  console.log(`[Viral Score] ✅ Completed all ${finalResults.length} items. Score range: ${minScore}-${maxScore}`);
+  
+  if (quotaExceeded) {
+    console.warn(`[Viral Score] ⚠️ Completed ${finalResults.length} items with basic algorithm due to quota exceeded. Score range: ${minScore}-${maxScore}`);
+  } else {
+    console.log(`[Viral Score] ✅ Completed all ${finalResults.length} items. Score range: ${minScore}-${maxScore}`);
+  }
   
   return finalResults;
 };
@@ -1828,9 +1880,15 @@ Return JSON: {"results":[{"i":1,"s":<score>,"r":"<10 word reason>"},...]}`;
     });
     
   } catch (error: any) {
+    // Check if it's a quota exceeded error - propagate it up
+    if (error.message?.includes('quota') || error.message?.includes('exceeded your current quota')) {
+      console.error(`[Viral Score] ❌ Batch ${batchNum} failed due to quota exceeded: ${error.message}`);
+      throw error; // Re-throw to be handled by calculateViralScoresBatch
+    }
+    
     console.warn(`[Viral Score] ⚠️ Batch ${batchNum} failed: ${error.message}, using basic algorithm`);
     
-    // Fallback to basic algorithm for this batch only
+    // Fallback to basic algorithm for this batch only (for non-quota errors)
     return batch.map(item => ({
       score: calculateBasicViralScore(item.headline, item.summary, item.source, item.date),
       reasoning: 'Basic algorithm (API unavailable)',
