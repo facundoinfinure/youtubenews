@@ -884,19 +884,20 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
   // CRITICAL FIX: Sync fetchedNews when production prop changes
   // This ensures that when news is fetched and saved, the state updates immediately
   useEffect(() => {
-    if (production.fetched_news && production.fetched_news.length > 0) {
+    const fetchedNewsFromProp = production.fetched_news;
+    if (fetchedNewsFromProp && fetchedNewsFromProp.length > 0) {
       // Use functional update to avoid stale closure issues
       setFetchedNews(prevNews => {
         // Only update if local state is empty or different
         if (prevNews.length === 0) {
-          return production.fetched_news;
+          return fetchedNewsFromProp;
         } else {
           // Check if they're different
           const localNewsIds = new Set(prevNews.map(n => n.id || n.headline));
-          const propNewsIds = new Set(production.fetched_news.map(n => n.id || n.headline));
+          const propNewsIds = new Set(fetchedNewsFromProp.map(n => n.id || n.headline));
           const idsMatch = localNewsIds.size === propNewsIds.size && 
                            Array.from(localNewsIds).every(id => propNewsIds.has(id));
-          return idsMatch ? prevNews : production.fetched_news;
+          return idsMatch ? prevNews : fetchedNewsFromProp;
         }
       });
     }
