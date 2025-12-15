@@ -1,7 +1,7 @@
 import { GoogleGenAI, Modality } from "@google/genai";
 import { NewsItem, ScriptLine, BroadcastSegment, VideoAssets, ViralMetadata, ChannelConfig, Scene, ScriptWithScenes, VideoMode, ShotType } from "../types";
 import { ContentCache } from "./ContentCache";
-import { retryWithBackoff } from "./retryUtils";
+import { retryWithBackoff, retryVideoGeneration } from "./retryUtils";
 import { getModelForTask, getCostForTask } from "./modelStrategy";
 import { CostTracker } from "./CostTracker";
 import { 
@@ -1368,8 +1368,7 @@ export const generateVideoSegmentsWithInfiniteTalk = async (
 
     console.log(`🎬 [InfiniteTalk] Starting segment ${sceneIndex + 1}/${segments.length} (scene index: ${sceneIndex})...`);
 
-    // Use retry logic for video generation
-    const { retryVideoGeneration } = await import('./retryUtils');
+    // Use retry logic for video generation (static import to avoid Vercel code-splitting issues)
     const result = await retryVideoGeneration(
       async () => {
         const videoResult = await generateInfiniteTalkVideo({
