@@ -581,6 +581,17 @@ export interface PodcastScene {
 }
 
 /**
+ * Format current date for news overlay display
+ */
+const formatNewsDate = (): string => {
+  const now = new Date();
+  const day = now.getDate();
+  const month = now.toLocaleString('en-US', { month: 'short' }).toUpperCase();
+  const year = now.getFullYear();
+  return `${day} ${month} ${year}`;
+};
+
+/**
  * Build podcast-style Shotstack edit with professional production quality
  * 
  * This creates a professional podcast aesthetic with:
@@ -1960,17 +1971,6 @@ export const buildPodcastStyleEdit = (
       aspectRatio
     }
   };
-};
-
-/**
- * Format current date for news overlay display
- */
-const formatNewsDate = (): string => {
-  const now = new Date();
-  const day = now.getDate();
-  const month = now.toLocaleString('en-US', { month: 'short' }).toUpperCase();
-  const year = now.getFullYear();
-  return `${day} ${month} ${year}`;
 };
 
 /**
