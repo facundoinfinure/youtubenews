@@ -998,7 +998,8 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
   const updateStepStatus = useCallback(async (
     step: keyof Omit<ProductionWizardState, 'currentStep'>,
     status: SubStepStatus,
-    data?: any
+    data?: any,
+    additionalData?: Partial<Production>
   ) => {
     const newState: ProductionWizardState = {
       ...wizardState,
@@ -1010,7 +1011,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
         ...(data ? { data: { ...(wizardState[step] as any).data, ...data } } : {})
       }
     };
-    await saveWizardState(newState);
+    await saveWizardState(newState, additionalData);
   }, [wizardState, saveWizardState]);
 
   // Move to next step
@@ -1150,7 +1151,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
           data: { fetchedNews: news, fetchedAt: new Date().toISOString() }
         }
       };
-      await saveWizardState(newState);
+      await saveWizardState(newState, { fetched_news: news });
       
       toast.success(`¡${news.length} noticias encontradas!`);
     } catch (error) {
@@ -1195,7 +1196,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
         data: { selectedIds: selectedNewsIds, confirmedAt: new Date().toISOString() }
       }
     };
-    await saveWizardState(newState);
+    await saveWizardState(newState, { selected_news_ids: selectedNewsIds, fetched_news: fetchedNews });
     
     toast.success('Noticias seleccionadas');
   };
@@ -1578,7 +1579,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
         }
       }
     };
-    await saveWizardState(newState);
+    await saveWizardState(newState, { segment_status: initialSegmentStatus as any });
     
     toast.success('Guión aprobado');
   };
@@ -2376,7 +2377,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
             data: { videoUrl: result.videoUrl, posterUrl: result.posterUrl }
           }
         };
-        await saveWizardState(newState);
+        await saveWizardState(newState, { final_video_url: result.videoUrl, final_video_poster: result.posterUrl });
         
         toast.success('¡Video renderizado!');
       } else {
@@ -2455,7 +2456,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
           data: { youtubeId, publishedAt: new Date().toISOString(), isShort }
         }
       };
-      await saveWizardState(newState);
+      await saveWizardState(newState, { youtube_id: youtubeId });
       
       toast.success('¡Publicado en YouTube!');
     } catch (error) {
