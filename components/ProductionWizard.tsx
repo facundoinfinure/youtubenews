@@ -819,7 +819,9 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
             segment_status: localProduction.segment_status, // CRITICAL: Include segment_status
             viral_metadata: localProduction.viral_metadata,
             video_assets: localProduction.video_assets,
-            final_video_url: localProduction.final_video_url
+            final_video_url: localProduction.final_video_url,
+            fetched_news: localProduction.fetched_news, // Include fetched_news in comparison
+            selected_news_ids: localProduction.selected_news_ids // Include selected_news_ids in comparison
           });
           const freshDataHash = JSON.stringify({
             wizard_state: fresh.wizard_state,
@@ -828,7 +830,9 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
             segment_status: fresh.segment_status, // CRITICAL: Include segment_status
             viral_metadata: fresh.viral_metadata,
             video_assets: fresh.video_assets,
-            final_video_url: fresh.final_video_url
+            final_video_url: fresh.final_video_url,
+            fetched_news: fresh.fetched_news, // Include fetched_news in comparison
+            selected_news_ids: fresh.selected_news_ids // Include selected_news_ids in comparison
           });
           
           if (currentDataHash !== freshDataHash) {
@@ -845,10 +849,27 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
             setLocalProduction(fresh);
             onUpdateProduction(fresh);
             
-            // Update other state if needed
-            if (fresh.fetched_news) setFetchedNews(fresh.fetched_news);
-            if (fresh.selected_news_ids) setSelectedNewsIds(fresh.selected_news_ids);
-            if (fresh.script_history) setScriptHistory(fresh.script_history);
+            // Update other state if needed - but only if DB has data (don't overwrite local with empty)
+            // Only update fetchedNews if DB has news AND it's different from local
+            if (fresh.fetched_news && fresh.fetched_news.length > 0) {
+              const localNewsIds = new Set(fetchedNews.map(n => n.id || n.headline));
+              const freshNewsIds = new Set(fresh.fetched_news.map(n => n.id || n.headline));
+              const idsMatch = localNewsIds.size === freshNewsIds.size && 
+                               Array.from(localNewsIds).every(id => freshNewsIds.has(id));
+              if (!idsMatch) {
+                setFetchedNews(fresh.fetched_news);
+              }
+            } else if (fetchedNews.length === 0) {
+              // Only clear if local is also empty (don't overwrite local news with empty DB)
+              setFetchedNews([]);
+            }
+            
+            if (fresh.selected_news_ids) {
+              setSelectedNewsIds(fresh.selected_news_ids);
+            }
+            if (fresh.script_history) {
+              setScriptHistory(fresh.script_history);
+            }
           }
         }
       } catch (error) {
@@ -858,7 +879,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
     }, 3000); // Every 3 seconds
     
     return () => clearInterval(syncInterval);
-  }, [production.id, localProduction.id, wizardState.currentStep]); // Re-run if production changes
+  }, [production.id]); // Only re-run if production ID changes (not on every state update)
   
 
   // All wizard steps
