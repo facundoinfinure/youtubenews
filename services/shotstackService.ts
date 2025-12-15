@@ -1201,29 +1201,8 @@ export const buildPodcastStyleEdit = (
       });
     }
     
-    // Animated callout for key points
-    if (scene.title && sceneIndex === 0) { // First scene hook
-      graphics.push({
-        asset: {
-          type: 'text',
-          text: '⚠️',
-          alignment: { horizontal: 'center', vertical: 'center' },
-          font: { 
-            color: '#ff3333', 
-            family: 'Arial', 
-            size: isVertical ? 80 : 100
-          },
-          width: isVertical ? 100 : 120,
-          height: isVertical ? 100 : 120
-        },
-        start: startTime,
-        length: 2,
-        offset: { x: isVertical ? -0.35 : -0.4, y: isVertical ? -0.3 : -0.3 },
-        position: 'center',
-        opacity: 1.0,
-        transition: { in: 'zoom', out: 'fade' }
-      });
-    }
+    // NOTE: Removed animated ⚠️ callout - it was distracting and overlapped with subtitles
+    // If you want to re-enable it, uncomment the code below and adjust positioning
     
     return graphics;
   };
@@ -2018,18 +1997,18 @@ export const buildPodcastStyleEdit = (
     const subtitlePosition = config.overlays.subtitlePosition || 'bottom';
     
     // Position presets based on format and position setting
+    // FIXED: Moved subtitles higher to avoid being cut off at bottom
     const positionY = {
-      bottom: isVertical ? -0.25 : -0.28,
-      center: 0,
-      top: isVertical ? 0.35 : 0.38
+      bottom: isVertical ? -0.08 : -0.15, // Higher position to avoid cutoff
+      center: 0.10, // Slightly above center for better visibility
+      top: isVertical ? 0.30 : 0.32
     }[subtitlePosition];
     
-    // VIRAL SHORTS SUBTITLE SETTINGS - Maximum Impact & Readability
-    // Large, bold subtitles that pop - essential for viral shorts engagement
-    // These sizes are optimized for mobile-first viewing (TikTok, Reels, Shorts)
+    // VIRAL SHORTS SUBTITLE SETTINGS - Optimized for readability
+    // Balanced size for visibility without being cut off
     const subtitlePresets = isVertical 
-      ? { fontSize: 84, width: 980, height: 240, maxChars: 35, padding: 28 } // LARGE for mobile - fewer chars per line for impact
-      : { fontSize: 96, width: 1600, height: 220, maxChars: 50, padding: 32 }; // EXTRA LARGE for desktop impact
+      ? { fontSize: 52, width: 950, height: 180, maxChars: 28, padding: 20 } // Smaller, more lines, better fit
+      : { fontSize: 64, width: 1500, height: 200, maxChars: 40, padding: 24 }; // Desktop optimized
     
     // Style configurations - VIRAL OPTIMIZED
     // High contrast, thick outlines, attention-grabbing
