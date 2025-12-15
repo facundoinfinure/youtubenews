@@ -35,6 +35,7 @@ import {
   pollWavespeedImageTask,
   checkWavespeedConfig 
 } from "./wavespeedProxy";
+import { getSeedImageForScene } from "./seedImageVariations";
 
 // Import new services
 import { 
@@ -1341,29 +1342,60 @@ export const generateVideoSegmentsWithInfiniteTalk = async (
       
       console.log(`🎭 [InfiniteTalk] Segment ${sceneIndex}: video_mode=${videoMode}, speaker=${segment.speaker}, hostA=${hostAName}, hostB=${hostBName}`);
       
-      // Prefer per-scene seed image variation (if configured) to actually vary camera angle/framing
+      // Prefer per-scene seed image variation if explicitly provided by Scene Builder
       if (sceneMetadata?.seedImageUrl) {
         imageUrlForSegment = sceneMetadata.seedImageUrl;
         console.log(
           `🖼️ [InfiniteTalk Single] Segment ${sceneIndex}: Using Scene Builder seed variation` +
           `${sceneMetadata.cameraAngle ? ` (cameraAngle: ${sceneMetadata.cameraAngle})` : ''}`
         );
-      } else if (videoMode === 'hostA' && hostASoloUrl) {
-        imageUrlForSegment = hostASoloUrl;
-        console.log(`🖼️ [InfiniteTalk Single] Segment ${sceneIndex}: Using Host A solo image (video_mode: hostA)`);
-      } else if (videoMode === 'hostB' && hostBSoloUrl) {
-        imageUrlForSegment = hostBSoloUrl;
-        console.log(`🖼️ [InfiniteTalk Single] Segment ${sceneIndex}: Using Host B solo image (video_mode: hostB)`);
-      } else if (segment.speaker === hostAName && hostASoloUrl) {
-        imageUrlForSegment = hostASoloUrl;
-        console.log(`🖼️ [InfiniteTalk Single] Segment ${sceneIndex}: Using Host A solo image (by speaker name: ${segment.speaker})`);
-      } else if (segment.speaker === hostBName && hostBSoloUrl) {
-        imageUrlForSegment = hostBSoloUrl;
-        console.log(`🖼️ [InfiniteTalk Single] Segment ${sceneIndex}: Using Host B solo image (by speaker name: ${segment.speaker})`);
       } else {
-        // Fallback: use any available solo image or two-shot
-        imageUrlForSegment = hostASoloUrl || hostBSoloUrl || twoShotUrl || config.referenceImageUrl || '';
-        console.warn(`⚠️ [InfiniteTalk Single] Segment ${sceneIndex}: Using fallback image (no match for video_mode=${videoMode}, speaker=${segment.speaker})`);
+        // NEW: If the channel has `seed_image_variations` in config, use them to vary the framing.
+        // We map shot types to the closest available camera angle when a cameraAngle isn't provided.
+        const shotToAngle = (shot?: ShotType): 'eye_level' | 'low_angle' | 'high_angle' | 'closeup' | 'wide' => {
+          switch (shot) {
+            case 'extreme_closeup':
+            case 'closeup':
+              return 'closeup';
+            case 'wide':
+            case 'medium_wide':
+              return 'wide';
+            // These are "style" shots; fall back to a neutral framing unless a cameraAngle is explicitly given
+            case 'dutch_angle':
+            case 'over_shoulder':
+            case 'medium_closeup':
+            case 'medium':
+            default:
+              return 'eye_level';
+          }
+        };
+
+        const hostType: 'hostA' | 'hostB' = videoMode === 'hostA' ? 'hostA' : 'hostB';
+        const effectiveAngle = (sceneMetadata?.cameraAngle as any) || shotToAngle(sceneMetadata?.shot);
+        const variationUrl = getSeedImageForScene(config, hostType, effectiveAngle);
+
+        if (variationUrl) {
+          imageUrlForSegment = variationUrl;
+          console.log(
+            `🖼️ [InfiniteTalk Single] Segment ${sceneIndex}: Using seed_image_variations (${hostType}, angle=${effectiveAngle})`
+          );
+        } else if (videoMode === 'hostA' && hostASoloUrl) {
+          imageUrlForSegment = hostASoloUrl;
+          console.log(`🖼️ [InfiniteTalk Single] Segment ${sceneIndex}: Using Host A solo image (video_mode: hostA)`);
+        } else if (videoMode === 'hostB' && hostBSoloUrl) {
+          imageUrlForSegment = hostBSoloUrl;
+          console.log(`🖼️ [InfiniteTalk Single] Segment ${sceneIndex}: Using Host B solo image (video_mode: hostB)`);
+        } else if (segment.speaker === hostAName && hostASoloUrl) {
+          imageUrlForSegment = hostASoloUrl;
+          console.log(`🖼️ [InfiniteTalk Single] Segment ${sceneIndex}: Using Host A solo image (by speaker name: ${segment.speaker})`);
+        } else if (segment.speaker === hostBName && hostBSoloUrl) {
+          imageUrlForSegment = hostBSoloUrl;
+          console.log(`🖼️ [InfiniteTalk Single] Segment ${sceneIndex}: Using Host B solo image (by speaker name: ${segment.speaker})`);
+        } else {
+          // Fallback: use any available solo image or two-shot
+          imageUrlForSegment = hostASoloUrl || hostBSoloUrl || twoShotUrl || config.referenceImageUrl || '';
+          console.warn(`⚠️ [InfiniteTalk Single] Segment ${sceneIndex}: Using fallback image (no match for video_mode=${videoMode}, speaker=${segment.speaker})`);
+        }
       }
     }
 

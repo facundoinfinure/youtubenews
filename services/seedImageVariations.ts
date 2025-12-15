@@ -128,13 +128,15 @@ STYLE: Ultra-detailed 3D render, professional photography quality, consistent ch
         // Upload to Supabase Storage
         if (supabase) {
           try {
-            const fileName = `seed-variations/${channelId}/${angle}-${Date.now()}.png`;
+            // Store in a known/verified bucket so URLs are consistently accessible.
+            // `channel-assets` is verified at runtime in the app logs.
+            const fileName = `images/seed-variations/${channelId}/${angle}-${Date.now()}.png`;
             // Convert data URI to blob
             const response = await fetch(dalleImage);
             const blob = await response.blob();
             
             const { data: uploadData, error: uploadError } = await supabase.storage
-              .from('seed-images')
+              .from('channel-assets')
               .upload(fileName, blob, {
                 cacheControl: '3600',
                 upsert: false
@@ -142,7 +144,7 @@ STYLE: Ultra-detailed 3D render, professional photography quality, consistent ch
 
             if (!uploadError && uploadData) {
               const { data: { publicUrl } } = supabase.storage
-                .from('seed-images')
+                .from('channel-assets')
                 .getPublicUrl(fileName);
               
               CostTracker.track('seed_image_variation', 'dalle-3', 0.04); // DALL-E is cheaper

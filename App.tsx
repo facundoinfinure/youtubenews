@@ -1201,7 +1201,9 @@ const App: React.FC = () => {
             .map((seg, originalIdx) => ({
               ...seg,
               audioUrl: (seg as any).audioUrl,
-              _originalIndex: missingVideoIndices[originalIdx] // Track original position
+              // IMPORTANT: `generateVideoSegmentsWithInfiniteTalk` expects `originalIndex`
+              // so it can map back to the correct scene metadata.
+              originalIndex: missingVideoIndices[originalIdx] // Track original position
             }));
           
           addLog(`🎬 Generating ${segmentsToRegenerate.length} missing lip-sync videos...`);
