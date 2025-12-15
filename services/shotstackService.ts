@@ -307,6 +307,16 @@ const validateAndSanitizeEdit = (edit: any): { valid: boolean; issues: string[];
     if (!track.clips) return;
     
     track.clips.forEach((clip: any, clipIndex: number) => {
+      // Remove invalid properties that Shotstack doesn't accept at clip level
+      // 'trim' should be inside asset, not at clip level
+      const invalidClipProperties = ['trim'];
+      invalidClipProperties.forEach(prop => {
+        if (clip[prop] !== undefined) {
+          issues.push(`Track ${trackIndex}, Clip ${clipIndex}: Removed invalid property "${prop}" from clip level`);
+          delete clip[prop];
+        }
+      });
+      
       // Validate and sanitize offsets
       if (clip.offset) {
         const originalX = clip.offset.x;
@@ -994,12 +1004,11 @@ export const buildPodcastStyleEdit = (
         type: 'video',
         src: scene.video_url,
         volume: 1 // CRITICAL: Use embedded audio from InfiniteTalk
+        // Note: If you need to trim, add 'trim: X' here inside asset (not at clip level)
       },
       start: scene.start,
-      length: clipDuration, // Use exact calculated duration to avoid gaps
-      // CRITICAL: Ensure audio is enabled and synced
-      trim: 0, // No trim - use full video
-      // Ensure video plays at normal speed (no speed adjustment that could desync audio)
+      length: clipDuration // Use exact calculated duration to avoid gaps
+      // Note: Audio is embedded in video from InfiniteTalk, plays at normal speed
     };
     
     // CRITICAL: Validate clip has valid timing
