@@ -275,9 +275,19 @@ const buildShotstackEdit = (config: CompositionConfig): any => {
     'zoomInSlow', 'slideRightSlow', 'zoomOutSlow', 'slideLeftSlow'
   ];
   
-  // Transition rotation for variety
+  // VIRAL SHORTS TRANSITION ROTATION - High-energy, cinematic variety
+  // Mix of smooth and punchy transitions for maximum engagement
   const transitionRotation: ShotstackTransition[] = [
-    'fade', 'slideRight', 'fade', 'wipeLeft', 'fade', 'slideUp'
+    'zoom',           // Dramatic zoom for scene 1→2 (attention grab)
+    'slideRight',     // Smooth slide for flow
+    'fadeFast',       // Quick cut feel
+    'carouselLeft',   // Whip pan for energy
+    'fade',           // Classic smooth transition
+    'slideUp',        // Upward energy
+    'wipeRight',      // Clean wipe
+    'slideLeft',      // Counter-direction variety
+    'fadeFast',       // Quick pace
+    'carouselRight'   // Dramatic whip pan
   ];
   
   validClips.forEach((clip, index) => {
@@ -646,8 +656,8 @@ const determineScenePacing = (
 };
 
 /**
- * Advanced transition selection based on scene context
- * NEW: Contextual transitions for better visual flow
+ * VIRAL SHORTS TRANSITION SELECTION - Context-aware cinematography
+ * Optimized for maximum engagement and professional broadcast feel
  */
 const selectAdvancedTransition = (
   currentScene: PodcastScene,
@@ -660,32 +670,58 @@ const selectAdvancedTransition = (
   // Analyze scene types for contextual transitions
   const currentTitle = currentScene.title?.toLowerCase() || '';
   const nextTitle = nextScene.title?.toLowerCase() || '';
+  const currentText = currentScene.text?.toLowerCase() || '';
   
-  // Hook to Context: Dramatic reveal
+  // === VIRAL SHORTS TRANSITION RULES ===
+  
+  // HOOK (Scene 1→2): Maximum impact transition
   if (sceneIndex === 0) {
-    return 'zoom'; // Zoom transition for hook impact
+    return 'zoom'; // Dramatic zoom for attention retention
   }
   
-  // Conflict scenes: Whip pan for dramatic effect
+  // Scene 2→3: Build momentum
+  if (sceneIndex === 1) {
+    return 'carouselRight'; // Whip pan for energy
+  }
+  
+  // CONFLICT/CRISIS scenes: Fast, dramatic transitions
   if (currentTitle.includes('conflict') || currentTitle.includes('crisis') || 
-      currentTitle.includes('problem') || currentTitle.includes('crash')) {
-    return 'carouselRight'; // Fast whip pan
+      currentTitle.includes('problem') || currentTitle.includes('crash') ||
+      currentTitle.includes('breaking') || currentTitle.includes('urgent')) {
+    return 'carouselLeft'; // Fast whip pan for urgency
   }
   
-  // Payoff/Conclusion: Slow fade for emphasis
+  // REVEAL/PAYOFF scenes: Build anticipation
+  if (currentTitle.includes('reveal') || currentTitle.includes('solution') ||
+      currentTitle.includes('answer') || currentTitle.includes('result')) {
+    return 'zoom'; // Zoom for reveal impact
+  }
+  
+  // SECOND-TO-LAST scene: Slow for emotional buildup
   if (sceneIndex === totalScenes - 2) {
-    return 'fadeSlow'; // Slow fade before final scene
+    return 'fadeSlow'; // Slow fade for emphasis before conclusion
   }
   
-  // Topic change: Slide transition
+  // QUESTIONS in text: Dramatic reveal
+  if (currentText.includes('?')) {
+    return 'slideUp'; // Upward motion for "what next?" feel
+  }
+  
+  // NUMBERS/STATISTICS: Wipe for data reveal
+  if (/\d+%|\$\d+|\d+\s*(million|billion|thousand)/i.test(currentText)) {
+    return 'wipeRight'; // Clean wipe for data transition
+  }
+  
+  // Topic change detection
   const topicChanged = !currentTitle.includes(nextTitle.split(' ')[0]) && 
                        !nextTitle.includes(currentTitle.split(' ')[0]);
   if (topicChanged) {
-    return 'slideRight'; // Slide for topic change
+    return sceneIndex % 2 === 0 ? 'slideRight' : 'slideLeft'; // Alternate slides
   }
   
-  // Continuation: Subtle fade
-  return 'fade';
+  // Default: Rotate through variety for engagement
+  const varietyTransitions: ShotstackTransition[] = ['fade', 'fadeFast', 'slideRight', 'wipeLeft'];
+  return varietyTransitions[sceneIndex % varietyTransitions.length];
 };
 
 /**
@@ -757,10 +793,20 @@ export const buildPodcastStyleEdit = (
   console.log(`🎬 [Podcast Composition] Total duration: ${totalDuration}s across ${scenes.length} scenes (aspect: ${aspectRatio})`);
   console.log(`🎬 [Podcast Composition] Transition: ${config.transition.type}, Effect: ${config.effects.clipEffect}, Filter: ${config.effects.filter}`);
 
-  // Effect rotation for variety (Ken Burns style)
+  // PROFESSIONAL VIRAL SHORTS EFFECT ROTATION
+  // Dynamic Ken Burns effects with high-energy variations for viral impact
+  // Pattern: Start strong, vary throughout, end with impact
   const effectRotation: ShotstackEffect[] = [
-    'zoomInSlow', 'slideRightSlow', 'zoomOutSlow', 'slideLeftSlow',
-    'zoomIn', 'slideUpSlow', 'zoomOutSlow', 'slideDownSlow'
+    'zoomInFast',     // Scene 1: HOOK - dramatic zoom in for attention grab
+    'slideRightSlow', // Scene 2: Smooth pan right for context
+    'zoomIn',         // Scene 3: Moderate zoom for engagement
+    'slideLeftSlow',  // Scene 4: Counter-pan for visual variety
+    'zoomOutSlow',    // Scene 5: Pull back for reveal effect
+    'slideUpSlow',    // Scene 6: Upward motion for energy
+    'zoomInSlow',     // Scene 7: Build tension
+    'slideDownSlow',  // Scene 8: Downward for resolution
+    'zoomInFast',     // Scene 9+: Repeat with energy
+    'slideRightSlow'  // Alternate for variety
   ];
 
   // Build video clips with transitions and effects
@@ -897,23 +943,23 @@ export const buildPodcastStyleEdit = (
     // Progress bar for multi-scene narratives
     if (totalScenes > 3 && sceneIndex < totalScenes - 1) {
       const progress = ((sceneIndex + 1) / totalScenes) * 100;
-      // Use hexadecimal color with transparency: #AARRGGBB format (33 = ~20% opacity)
-      const progressBgColor = '#33ffffff'; // white with 20% opacity
+      // Use solid color and control transparency via clip opacity
+      const progressBgColor = '#ffffff'; // white - transparency controlled by clip opacity
       graphics.push({
         asset: {
           type: 'text',
-          text: '█', // Block character for better visibility, required by Shotstack
+          text: '', // Empty text for color background shapes (per Shotstack examples)
           alignment: { horizontal: 'center', vertical: 'center' },
-          font: { color: progressBgColor, size: 12 }, // Match background for invisible text
+          font: { color: progressBgColor, size: 12 },
           width: isVertical ? 800 : 1200,
-          height: 10, // Increased from 8 to 10px minimum for Shotstack validation
+          height: 10,
           background: { color: progressBgColor }
         },
         start: startTime,
         length: duration,
         offset: { x: 0, y: isVertical ? 0.45 : 0.45 },
         position: 'center',
-        opacity: 0.8
+        opacity: 0.2 // ~20% opacity (was #33 in alpha channel)
       });
       
       // Progress fill (only add if width is at least 10px to avoid validation errors)
@@ -923,11 +969,11 @@ export const buildPodcastStyleEdit = (
         graphics.push({
           asset: {
             type: 'text',
-            text: '█', // Block character for better visibility, required by Shotstack
+            text: '', // Empty text for color background shapes (per Shotstack examples)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: fillColor, size: 12 }, // Match background for invisible text
+            font: { color: fillColor, size: 12 },
             width: fillWidth,
-            height: 10, // Increased from 8 to 10px minimum for Shotstack validation
+            height: 10,
             background: { color: fillColor }
           },
           start: startTime,
@@ -957,13 +1003,13 @@ export const buildPodcastStyleEdit = (
           },
           width: isVertical ? 300 : 400,
           height: isVertical ? 120 : 160,
-          background: { color: '#cc000000' } // rgba(0,0,0,0.8) converted to hex #AARRGGBB format
+          background: { color: '#000000' } // solid black - transparency via clip opacity
         },
         start: startTime + 1, // Appear 1s into scene
         length: 3, // Show for 3 seconds
         offset: { x: isVertical ? 0.3 : 0.35, y: isVertical ? -0.2 : -0.2 },
         position: 'center',
-        opacity: 1.0,
+        opacity: 0.8, // ~80% opacity (was #cc in alpha channel)
         transition: { in: 'zoom', out: 'fade' }
       });
     }
@@ -1025,31 +1071,96 @@ export const buildPodcastStyleEdit = (
   // Determine if vertical format BEFORE using it
   const isVertical = aspectRatio === '9:16' || aspectRatio === '4:5';
 
+  // === VIRAL HOOK EFFECT - FIRST 3 SECONDS ===
+  // Add dramatic zoom pulse and flash at video start for instant attention grab
+  if (scenesWithTiming.length > 0) {
+    const hookClips: any[] = [];
+    const primaryColor = config.newsStyle?.lowerThird?.primaryColor || '#ff3333';
+    
+    // HOOK FLASH 1: Initial attention grab (0.1s flash)
+    hookClips.push({
+      asset: {
+        type: 'text',
+        text: '',
+        alignment: { horizontal: 'center', vertical: 'center' },
+        font: { color: '#ffffff', family: 'Roboto', size: 12, lineHeight: 1 },
+        width: isVertical ? 1080 : 1920,
+        height: isVertical ? 1920 : 1080,
+        background: { color: '#ffffff' }
+      },
+      start: 0,
+      length: 0.15,
+      opacity: 0.6,
+      position: 'center',
+      transition: { out: 'fade' }
+    });
+    
+    // HOOK FLASH 2: Secondary pulse with brand color
+    hookClips.push({
+      asset: {
+        type: 'text',
+        text: '',
+        alignment: { horizontal: 'center', vertical: 'center' },
+        font: { color: primaryColor, family: 'Roboto', size: 12, lineHeight: 1 },
+        width: isVertical ? 1080 : 1920,
+        height: isVertical ? 1920 : 1080,
+        background: { color: primaryColor }
+      },
+      start: 0.1,
+      length: 0.12,
+      opacity: 0.3,
+      position: 'center',
+      transition: { out: 'fade' }
+    });
+    
+    tracks.unshift({ clips: hookClips });
+  }
+
   // === TRANSITION COLOR FLASH TRACK ===
-  // Add subtle color flashes during transitions for a more dynamic look
+  // Add dynamic color flashes during transitions for broadcast energy
   if (config.transition.type !== 'none' && scenesWithTiming.length > 1) {
     const transitionFlashClips: any[] = [];
     const flashColor = config.newsStyle?.lowerThird?.primaryColor || '#ff3333';
     
     scenesWithTiming.forEach((scene, index) => {
       if (index > 0) {
-        // Add a brief color flash at each transition point
+        // Primary flash at transition point
         transitionFlashClips.push({
           asset: {
             type: 'text',
-            text: '█', // Block character required by Shotstack (text cannot be empty)
+            text: '',
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: flashColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
+            font: { color: flashColor, family: 'Roboto', size: 12, lineHeight: 1 },
             width: isVertical ? 1080 : 1920,
             height: isVertical ? 1920 : 1080,
             background: { color: flashColor }
           },
-          start: scene.start - 0.1,
-          length: 0.2,
-          opacity: 0.15,
+          start: Math.max(0, scene.start - 0.08),
+          length: 0.16,
+          opacity: 0.25, // Slightly more visible for impact
           position: 'center',
           transition: { in: 'fade', out: 'fade' }
         });
+        
+        // Secondary white flash for extra punch on key transitions
+        if (index === 1 || index === scenesWithTiming.length - 1) {
+          transitionFlashClips.push({
+            asset: {
+              type: 'text',
+              text: '',
+              alignment: { horizontal: 'center', vertical: 'center' },
+              font: { color: '#ffffff', family: 'Roboto', size: 12, lineHeight: 1 },
+              width: isVertical ? 1080 : 1920,
+              height: isVertical ? 1920 : 1080,
+              background: { color: '#ffffff' }
+            },
+            start: Math.max(0, scene.start - 0.05),
+            length: 0.1,
+            opacity: 0.35,
+            position: 'center',
+            transition: { out: 'fade' }
+          });
+        }
       }
     });
     
@@ -1058,49 +1169,49 @@ export const buildPodcastStyleEdit = (
     }
   }
 
-  // === FORMAT-SPECIFIC OVERLAY PRESETS ===
-  // RENOVATED DESIGN - Premium broadcast style with modern aesthetics
-  // CRITICAL FIX: Larger font sizes for better readability
+  // === VIRAL SHORTS OVERLAY PRESETS ===
+  // Premium broadcast design optimized for maximum visibility on mobile
+  // All elements are larger and bolder for viral impact
   const overlayPresets = isVertical ? {
-    // 9:16 / 4:5 (Vertical - Shorts/Reels/TikTok) - PREMIUM MOBILE DESIGN
+    // 9:16 / 4:5 (Vertical - TikTok/Reels/Shorts) - VIRAL MOBILE DESIGN
     lowerThird: {
-      // Wider banner with gradient-ready structure
-      banner: { width: 1080, height: 200, y: -0.42 }, // Increased height
-      // Sleek category badge with rounded feel - LARGER TEXT
-      badge: { width: 360, height: 60, x: 0, y: -0.32, fontSize: 42 }, // Increased from 32 to 42
-      // Clean headline area - LARGER TEXT
-      headline: { width: 1000, height: 100, x: 0, y: -0.42, fontSize: 64 } // Increased from 48 to 64
+      // Bold banner that commands attention
+      banner: { width: 1080, height: 240, y: -0.40 }, // Taller for impact
+      // Category badge - BOLD and visible
+      badge: { width: 400, height: 72, x: 0, y: -0.30, fontSize: 48 }, // Larger for mobile
+      // Headline - MASSIVE for readability
+      headline: { width: 1000, height: 120, x: 0, y: -0.40, fontSize: 72 } // Extra large
     },
-    // Modern date badge - top right corner - LARGER
-    date: { x: 0.35, y: 0.42, fontSize: 28, width: 200, height: 50 }, // Increased from 20 to 28
-    // LIVE indicator - pulsing red - LARGER
-    live: { x: -0.35, y: 0.42, fontSize: 24, width: 120, height: 46 }, // Increased from 18 to 24
-    // Channel branding - subtle top corner - LARGER
-    branding: { x: 0.35, y: 0.36, fontSize: 24, width: 180, height: 44 }, // Increased from 18 to 24
-    // Breaking news - dramatic center strip - LARGER
-    breakingNews: { width: 900, height: 70, y: -0.22, fontSize: 36 }, // Increased from 26 to 36
-    // Host name plate - sleek left-aligned - LARGER
-    hostName: { width: 320, height: 64, y: -0.48, fontSize: 32, accentWidth: 5 } // Increased from 22 to 32
+    // Date badge - prominent corner placement
+    date: { x: 0.35, y: 0.43, fontSize: 32, width: 220, height: 56 },
+    // LIVE indicator - eye-catching
+    live: { x: -0.35, y: 0.43, fontSize: 28, width: 130, height: 52 },
+    // Channel branding - bold and memorable
+    branding: { x: 0.35, y: 0.36, fontSize: 28, width: 200, height: 52 },
+    // Breaking news - dramatic and urgent
+    breakingNews: { width: 950, height: 80, y: -0.20, fontSize: 42 },
+    // Host name - professional broadcast style
+    hostName: { width: 360, height: 72, y: -0.47, fontSize: 36, accentWidth: 6 }
   } : {
-    // 16:9 (Landscape - YouTube) - CINEMA BROADCAST DESIGN
+    // 16:9 (Landscape - YouTube) - BROADCAST QUALITY DESIGN
     lowerThird: {
       // Full-width cinematic lower third
-      banner: { width: 1920, height: 220, y: -0.42 }, // Increased height
-      // Premium category badge with accent - LARGER TEXT
-      badge: { width: 360, height: 80, x: -0.38, y: -0.42, fontSize: 44 }, // Increased from 32 to 44
-      // Spacious headline with professional typography - LARGER TEXT
-      headline: { width: 1200, height: 110, x: 0.05, y: -0.42, fontSize: 56 } // Increased from 38 to 56
+      banner: { width: 1920, height: 260, y: -0.40 }, // Taller for impact
+      // Category badge - bold and prominent
+      badge: { width: 400, height: 90, x: -0.36, y: -0.40, fontSize: 52 },
+      // Headline - large professional typography
+      headline: { width: 1300, height: 130, x: 0.06, y: -0.40, fontSize: 64 }
     },
-    // Date display - sleek corner badge - LARGER
-    date: { x: 0.40, y: 0.42, fontSize: 28, width: 220, height: 52 }, // Increased from 22 to 28
-    // LIVE indicator with recording dot - LARGER
-    live: { x: -0.40, y: 0.42, fontSize: 28, width: 140, height: 48 }, // Increased from 22 to 28
-    // Channel branding - professional corner - LARGER
-    branding: { x: 0.40, y: 0.36, fontSize: 26, width: 200, height: 46 }, // Increased from 20 to 26
-    // Breaking news - impactful banner - LARGER
-    breakingNews: { width: 700, height: 80, y: -0.25, fontSize: 42 }, // Increased from 32 to 42
-    // Host name plate - broadcast style - LARGER
-    hostName: { width: 360, height: 72, y: -0.48, fontSize: 36, accentWidth: 7 } // Increased from 26 to 36
+    // Date display - sleek corner badge
+    date: { x: 0.40, y: 0.43, fontSize: 32, width: 240, height: 58 },
+    // LIVE indicator - broadcast style
+    live: { x: -0.40, y: 0.43, fontSize: 32, width: 150, height: 54 },
+    // Channel branding - professional corner
+    branding: { x: 0.40, y: 0.36, fontSize: 30, width: 220, height: 52 },
+    // Breaking news - impactful banner
+    breakingNews: { width: 750, height: 90, y: -0.23, fontSize: 48 },
+    // Host name plate - broadcast quality
+    hostName: { width: 400, height: 80, y: -0.47, fontSize: 42, accentWidth: 8 }
   };
 
   // === NEWS-STYLE OVERLAYS - PREMIUM BROADCAST DESIGN ===
@@ -1122,9 +1233,9 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: '█', // Block character required by Shotstack (text cannot be empty)
+            text: '', // Empty text for color background shapes (per Shotstack examples)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: secondaryColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
+            font: { color: secondaryColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Font color matches background
             width: presets.lowerThird.banner.width,
             height: presets.lowerThird.banner.height,
             background: { color: secondaryColor }
@@ -1143,9 +1254,9 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: '█', // Block character required by Shotstack (text cannot be empty)
+            text: '', // Empty text for color background shapes (per Shotstack examples)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: primaryColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
+            font: { color: primaryColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Font color matches background
             width: presets.lowerThird.banner.width,
             height: Math.max(10, isVertical ? 6 : 8), // Ensure minimum 10px for Shotstack validation
             background: { color: primaryColor }
@@ -1163,9 +1274,9 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: '█', // Block character required by Shotstack (text cannot be empty)
+            text: '', // Empty text for color background shapes (per Shotstack examples)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: accentGold, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
+            font: { color: accentGold, family: 'Roboto', size: 12, lineHeight: 1 }, // Font color matches background
             width: presets.lowerThird.banner.width * 0.7,
             height: Math.max(10, isVertical ? 2 : 3), // Ensure minimum 10px for Shotstack validation
             background: { color: accentGold }
@@ -1241,9 +1352,9 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: '█', // Block character required by Shotstack (text cannot be empty)
+            text: '', // Empty text for color background shapes (per Shotstack examples)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: '#0d1b2a', family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
+            font: { color: '#0d1b2a', family: 'Roboto', size: 12, lineHeight: 1 }, // Font color matches background
             width: presets.date.width,
             height: presets.date.height,
             background: { color: '#0d1b2a' }
@@ -1262,9 +1373,9 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: '█', // Block character required by Shotstack (text cannot be empty)
+            text: '', // Empty text for color background shapes (per Shotstack examples)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: primaryColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
+            font: { color: primaryColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Font color matches background
             width: 10, // Increased from 4 to 10px minimum for Shotstack validation
             height: Math.max(10, presets.date.height - 8), // Ensure minimum height of 10px
             background: { color: primaryColor }
@@ -1304,9 +1415,9 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: '█', // Block character required by Shotstack (text cannot be empty)
+            text: '', // Empty text for color background shapes (per Shotstack examples)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: '#dc2626', family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
+            font: { color: '#dc2626', family: 'Roboto', size: 12, lineHeight: 1 }, // Font color matches background
             width: presets.live.width,
             height: presets.live.height,
             background: { color: '#dc2626' }
@@ -1368,9 +1479,9 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: '█', // Block character required by Shotstack (text cannot be empty)
+            text: '', // Empty text for color background shapes (per Shotstack examples)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: primaryColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
+            font: { color: primaryColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Font color matches background
             width: presets.breakingNews.width + 80,
             height: presets.breakingNews.height,
             background: { color: primaryColor }
@@ -1388,9 +1499,9 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: '█', // Block character required by Shotstack (text cannot be empty)
+            text: '', // Empty text for color background shapes (per Shotstack examples)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: '#ffd60a', family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
+            font: { color: '#ffd60a', family: 'Roboto', size: 12, lineHeight: 1 }, // Font color matches background
             width: presets.breakingNews.width + 80,
             height: 10, // Increased from 4 to 10px minimum for Shotstack validation
             background: { color: '#ffd60a' }
@@ -1432,9 +1543,9 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: '█', // Block character required by Shotstack (text cannot be empty)
+            text: '', // Empty text for color background shapes (per Shotstack examples)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: '#0d1b2a', family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
+            font: { color: '#0d1b2a', family: 'Roboto', size: 12, lineHeight: 1 }, // Font color matches background
             width: presets.branding.width,
             height: presets.branding.height,
             background: { color: '#0d1b2a' }
@@ -1494,9 +1605,9 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: '█', // Block character required by Shotstack (text cannot be empty)
+            text: '', // Empty text for color background shapes (per Shotstack examples)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: tickerBgColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
+            font: { color: tickerBgColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Font color matches background
             width: tickerPresets.width * 1.1,
             height: tickerPresets.height,
             background: { color: tickerBgColor }
@@ -1515,9 +1626,9 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: '█', // Block character required by Shotstack (text cannot be empty)
+            text: '', // Empty text for color background shapes (per Shotstack examples)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: primaryColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
+            font: { color: primaryColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Font color matches background
             width: tickerPresets.width * 1.1,
             height: 10, // Increased from 4 to 10px minimum for Shotstack validation
             background: { color: primaryColor }
@@ -1535,9 +1646,9 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: '█', // Block character required by Shotstack (text cannot be empty)
+            text: '', // Empty text for color background shapes (per Shotstack examples)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: primaryColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
+            font: { color: primaryColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Font color matches background
             width: isVertical ? 100 : 120,
             height: Math.max(10, tickerPresets.height - 8), // Ensure minimum 10px for Shotstack validation
             background: { color: primaryColor }
@@ -1619,9 +1730,9 @@ export const buildPodcastStyleEdit = (
         hostNameClips.push({
           asset: {
             type: 'text',
-            text: '█', // Block character required by Shotstack (text cannot be empty)
+            text: '', // Empty text for color background shapes (per Shotstack examples)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: '#0d1b2a', family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
+            font: { color: '#0d1b2a', family: 'Roboto', size: 12, lineHeight: 1 }, // Font color matches background
             width: hostNamePresets.width,
             height: hostNamePresets.height,
             background: { color: '#0d1b2a' }
@@ -1641,9 +1752,9 @@ export const buildPodcastStyleEdit = (
         hostNameClips.push({
           asset: {
             type: 'text',
-            text: '█', // Block character required by Shotstack (text cannot be empty)
+            text: '', // Empty text for color background shapes (per Shotstack examples)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: primaryColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
+            font: { color: primaryColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Font color matches background
             width: hostNamePresets.accentWidth,
             height: hostNamePresets.height,
             background: { color: primaryColor }
@@ -1662,9 +1773,9 @@ export const buildPodcastStyleEdit = (
         hostNameClips.push({
           asset: {
             type: 'text',
-            text: '█', // Block character required by Shotstack (text cannot be empty)
+            text: '', // Empty text for color background shapes (per Shotstack examples)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: accentGold, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
+            font: { color: accentGold, family: 'Roboto', size: 12, lineHeight: 1 }, // Font color matches background
             width: hostNamePresets.width - 10,
             height: 10, // Increased from 2 to 10px minimum for Shotstack validation
             background: { color: accentGold }
@@ -1726,28 +1837,30 @@ export const buildPodcastStyleEdit = (
       top: isVertical ? 0.35 : 0.38
     }[subtitlePosition];
     
-    // CRITICAL FIX: Larger subtitles for better readability - PERFECTED
-    // These sizes ensure subtitles are ALWAYS readable on mobile and desktop
+    // VIRAL SHORTS SUBTITLE SETTINGS - Maximum Impact & Readability
+    // Large, bold subtitles that pop - essential for viral shorts engagement
+    // These sizes are optimized for mobile-first viewing (TikTok, Reels, Shorts)
     const subtitlePresets = isVertical 
-      ? { fontSize: 76, width: 1000, height: 200, maxChars: 42, padding: 24 } // Increased to 76px for mobile readability
-      : { fontSize: 88, width: 1700, height: 180, maxChars: 60, padding: 28 }; // Increased to 88px for perfect desktop readability
+      ? { fontSize: 84, width: 980, height: 240, maxChars: 35, padding: 28 } // LARGE for mobile - fewer chars per line for impact
+      : { fontSize: 96, width: 1600, height: 220, maxChars: 50, padding: 32 }; // EXTRA LARGE for desktop impact
     
-    // Style configurations
+    // Style configurations - VIRAL OPTIMIZED
+    // High contrast, thick outlines, attention-grabbing
     const styleConfig = {
       minimal: { 
         background: undefined, 
         fontColor: '#ffffff',
-        stroke: undefined
+        stroke: { color: '#000000', width: 4 } // Always add stroke for readability
       },
       boxed: { 
-        background: { color: '#1a1a1a' }, 
+        background: { color: '#000000' }, // Solid black for maximum contrast
         fontColor: '#ffffff',
-        stroke: undefined
+        stroke: { color: '#000000', width: 2 }
       },
       outline: { 
         background: undefined, 
         fontColor: '#ffffff',
-        stroke: { color: '#000000', width: 2 }
+        stroke: { color: '#000000', width: 5 } // Extra thick stroke for visibility
       }
     }[subtitleStyle];
     
@@ -1787,34 +1900,33 @@ export const buildPodcastStyleEdit = (
           if (chunk.start < scene.start + scene.duration) {
             const clipDuration = Math.min(chunk.duration, scene.start + scene.duration - chunk.start);
             
+            // VIRAL SHORTS SUBTITLE ASSET - Maximum visibility and impact
             const subtitleAsset: any = {
               type: 'text',
-              text: chunk.text,
+              text: chunk.text.toUpperCase(), // ALL CAPS for viral shorts impact
               alignment: { horizontal: 'center', vertical: 'center' },
               font: { 
                 color: styleConfig.fontColor, 
-                family: 'Montserrat Bold', // Changed to bold for better readability
+                family: 'Montserrat ExtraBold', // Extra bold for maximum impact
                 size: subtitlePresets.fontSize, 
-                lineHeight: 1.3, // Increased line height for better spacing
-                weight: 'bold' // Explicit bold weight
+                lineHeight: 1.2 // Tighter line height for punchy look
               },
               width: subtitlePresets.width,
               height: subtitlePresets.height
             };
             
-            // Enhanced background for better readability
-            if (styleConfig.background) {
-              subtitleAsset.background = {
-                ...styleConfig.background,
-                color: styleConfig.background.color || '#d9000000' // rgba(0,0,0,0.85) converted to hex #AARRGGBB format
+            // ALWAYS add stroke for visibility (viral shorts essential)
+            if (styleConfig.stroke) {
+              subtitleAsset.stroke = {
+                color: styleConfig.stroke.color,
+                width: styleConfig.stroke.width
               };
             }
             
-            // Add stroke for outline style or enhance boxed style
-            if (subtitleStyle === 'outline' || subtitleStyle === 'boxed') {
-              subtitleAsset.stroke = {
-                color: '#000000',
-                width: 3 // Thicker stroke for better visibility
+            // Add background for boxed style
+            if (styleConfig.background) {
+              subtitleAsset.background = {
+                color: styleConfig.background.color
               };
             }
             
@@ -1824,7 +1936,8 @@ export const buildPodcastStyleEdit = (
               length: clipDuration,
               offset: { x: 0, y: positionY },
               position: 'center',
-              transition: { in: 'fade', out: 'fade' }
+              opacity: styleConfig.background ? 0.92 : 1.0, // High opacity for readability
+              transition: { in: 'slideUp', out: 'fade' } // Pop-in animation for viral effect
             });
           }
         });
@@ -1988,18 +2101,19 @@ export const buildPodcastStyleEdit = (
   }
 
   // === BACKGROUND MUSIC TRACK ===
-  // Add background music if provided - CRITICAL: Ensure it always works
+  // Professional audio mixing for viral shorts quality
   if (config.backgroundMusic?.enabled) {
     const musicUrl = config.backgroundMusic.url?.trim();
     if (musicUrl && isValidAudioUrl(musicUrl)) {
-      const musicVolume = Math.max(0.05, Math.min(0.3, config.backgroundMusic.volume || 0.15)); // Clamp between 5-30%
-      const musicFadeIn = config.backgroundMusic.fadeIn || 1.5;
-      const musicFadeOut = config.backgroundMusic.fadeOut || 2.5;
+      // VIRAL SHORTS AUDIO MIXING: Background music should be subtle but present
+      // Too loud = distracting, too quiet = no impact
+      // Optimal range: 8-20% for speech-heavy content
+      const musicVolume = Math.max(0.08, Math.min(0.22, config.backgroundMusic.volume || 0.12));
       
-      // CRITICAL: Ensure music plays for entire duration, including any gaps
-      const musicDuration = Math.max(totalDuration, scenes.reduce((sum, s) => sum + (s.duration || 0), 0));
+      // CRITICAL: Ensure music plays for entire duration + small buffer
+      const musicDuration = Math.max(totalDuration + 1, scenes.reduce((sum, s) => sum + (s.duration || 0), 0) + 1);
       
-      // Add background music as a separate audio track with proper fade
+      // Add background music with professional fades
       tracks.push({
         clips: [{
           asset: {
@@ -2008,23 +2122,20 @@ export const buildPodcastStyleEdit = (
             volume: musicVolume
           },
           start: 0,
-          length: musicDuration, // Play for entire video duration
+          length: musicDuration,
           transition: {
-            in: 'fade',
-            out: 'fade'
+            in: 'fade',  // Smooth fade in
+            out: 'fade'  // Smooth fade out
           }
         }]
       });
       
-      console.log(`🎵 [Podcast Composition] Adding background music (volume: ${(musicVolume * 100).toFixed(0)}%, duration: ${musicDuration.toFixed(1)}s)`);
+      console.log(`🎵 [Viral Shorts] Background music: ${(musicVolume * 100).toFixed(0)}% volume, ${musicDuration.toFixed(1)}s duration`);
     } else if (config.backgroundMusic?.enabled && !musicUrl) {
-      console.warn(`[Shotstack] ⚠️ Background music enabled but no URL provided - music will be silent`);
+      console.warn(`[Shotstack] ⚠️ Background music enabled but no URL provided`);
     } else if (musicUrl && !isValidAudioUrl(musicUrl)) {
-      console.warn(`[Shotstack] ⚠️ Skipping invalid background music URL: ${musicUrl}`);
+      console.warn(`[Shotstack] ⚠️ Invalid background music URL: ${musicUrl}`);
     }
-  } else {
-    // If gaps detected and music not enabled, warn user (gaps will be checked later in renderPodcastVideo)
-    // Note: gaps variable is not in scope here, will be checked in renderPodcastVideo
   }
 
   // === BUILD TIMELINE WITH FONTS ===
@@ -2047,16 +2158,23 @@ export const buildPodcastStyleEdit = (
     fontsToLoad.push({ src: config.fonts.accent });
   }
   
-  // Add premium professional fonts (Shotstack hosted + Google Fonts)
+  // VIRAL SHORTS FONT STACK - Premium typography for maximum impact
   const defaultFonts = [
-    // Montserrat family - Primary display font
+    // Montserrat family - Primary display font (ESSENTIAL for viral shorts)
     'https://fonts.gstatic.com/s/montserrat/v26/JTUSjIg1_i6t8kCHKm459WRhyyTh89ZNpQ.woff2', // Montserrat Bold
     'https://fonts.gstatic.com/s/montserrat/v26/JTUSjIg1_i6t8kCHKm459WlhyyTh89ZNpQ.woff2', // Montserrat SemiBold
+    'https://fonts.gstatic.com/s/montserrat/v26/JTUSjIg1_i6t8kCHKm459W1hyyTh89ZNpQ.woff2', // Montserrat ExtraBold
+    'https://fonts.gstatic.com/s/montserrat/v26/JTUSjIg1_i6t8kCHKm459WZhyyTh89ZNpQ.woff2', // Montserrat Black
     // Roboto family - Body/ticker font
     'https://fonts.gstatic.com/s/roboto/v30/KFOmCnqEu92Fr1Mu4mxK.woff2', // Roboto Medium
-    // Fallback from Shotstack templates
-    'https://templates.shotstack.io/basic-text-overlay/6ab63510-5d0e-401b-86b0-d46e87df0a91/source.ttf', // Montserrat Bold (backup)
-    'https://templates.shotstack.io/breaking-news-channel-template-urgent-announcements-sales/ef4d1738-75fd-4808-84b9-119a36c79c3b/source.ttf'  // Roboto (backup)
+    'https://fonts.gstatic.com/s/roboto/v30/KFOlCnqEu92Fr1MmWUlfBBc4.woff2', // Roboto Bold
+    // Inter - Modern alternative
+    'https://fonts.gstatic.com/s/inter/v13/UcCO3FwrK3iLTeHuS_fvQtMwCp50KnMw2boKoduKmMEVuGKYAZ9hiJ-Ek-_EeA.woff2', // Inter Bold
+    // Oswald - Impact headlines (news style)
+    'https://fonts.gstatic.com/s/oswald/v53/TK3_WkUHHAIjg75cFRf3bXL8LICs1_FvsUZiZQ.woff2', // Oswald Bold
+    // Shotstack template fonts (reliable fallbacks)
+    'https://templates.shotstack.io/basic-text-overlay/6ab63510-5d0e-401b-86b0-d46e87df0a91/source.ttf',
+    'https://templates.shotstack.io/breaking-news-channel-template-urgent-announcements-sales/ef4d1738-75fd-4808-84b9-119a36c79c3b/source.ttf'
   ];
   
   defaultFonts.forEach(fontUrl => {
