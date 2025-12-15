@@ -897,15 +897,17 @@ export const buildPodcastStyleEdit = (
     // Progress bar for multi-scene narratives
     if (totalScenes > 3 && sceneIndex < totalScenes - 1) {
       const progress = ((sceneIndex + 1) / totalScenes) * 100;
+      // Use hexadecimal color with transparency: #AARRGGBB format (33 = ~20% opacity)
+      const progressBgColor = '#33ffffff'; // white with 20% opacity
       graphics.push({
         asset: {
           type: 'text',
-          text: '.', // Dot required by Shotstack (text cannot be empty, space causes validation error with small heights)
+          text: '█', // Block character for better visibility, required by Shotstack
           alignment: { horizontal: 'center', vertical: 'center' },
-          font: { color: 'rgba(255, 255, 255, 0.2)', size: 12 }, // Match background for invisible text
+          font: { color: progressBgColor, size: 12 }, // Match background for invisible text
           width: isVertical ? 800 : 1200,
-          height: 8,
-          background: { color: 'rgba(255, 255, 255, 0.2)' }
+          height: 10, // Increased from 8 to 10px minimum for Shotstack validation
+          background: { color: progressBgColor }
         },
         start: startTime,
         length: duration,
@@ -914,18 +916,19 @@ export const buildPodcastStyleEdit = (
         opacity: 0.8
       });
       
-      // Progress fill (only add if width is at least 1px to avoid validation errors)
-      const fillWidth = Math.max(1, (progress / 100) * (isVertical ? 800 : 1200));
-      if (fillWidth >= 1) {
+      // Progress fill (only add if width is at least 10px to avoid validation errors)
+      const fillWidth = Math.max(10, (progress / 100) * (isVertical ? 800 : 1200));
+      if (fillWidth >= 10) {
+        const fillColor = config.newsStyle?.lowerThird?.primaryColor || '#ff3333';
         graphics.push({
           asset: {
             type: 'text',
-            text: '.', // Dot required by Shotstack (text cannot be empty, space causes validation error with small heights)
+            text: '█', // Block character for better visibility, required by Shotstack
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: config.newsStyle?.lowerThird?.primaryColor || '#ff3333', size: 12 }, // Match background for invisible text
+            font: { color: fillColor, size: 12 }, // Match background for invisible text
             width: fillWidth,
-            height: 8,
-            background: { color: config.newsStyle?.lowerThird?.primaryColor || '#ff3333' }
+            height: 10, // Increased from 8 to 10px minimum for Shotstack validation
+            background: { color: fillColor }
           },
           start: startTime,
           length: duration,
@@ -954,7 +957,7 @@ export const buildPodcastStyleEdit = (
           },
           width: isVertical ? 300 : 400,
           height: isVertical ? 120 : 160,
-          background: { color: 'rgba(0, 0, 0, 0.8)' }
+          background: { color: '#cc000000' } // rgba(0,0,0,0.8) converted to hex #AARRGGBB format
         },
         start: startTime + 1, // Appear 1s into scene
         length: 3, // Show for 3 seconds
@@ -1034,7 +1037,7 @@ export const buildPodcastStyleEdit = (
         transitionFlashClips.push({
           asset: {
             type: 'text',
-            text: '.', // Dot required by Shotstack (text cannot be empty, space causes validation error with small heights)
+            text: '█', // Block character required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
             font: { color: flashColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: isVertical ? 1080 : 1920,
@@ -1119,7 +1122,7 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: '.', // Dot required by Shotstack (text cannot be empty, space causes validation error with small heights)
+            text: '█', // Block character required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
             font: { color: secondaryColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: presets.lowerThird.banner.width,
@@ -1140,11 +1143,11 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: '.', // Dot required by Shotstack (text cannot be empty, space causes validation error with small heights)
+            text: '█', // Block character required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
             font: { color: primaryColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: presets.lowerThird.banner.width,
-            height: isVertical ? 6 : 8,
+            height: Math.max(10, isVertical ? 6 : 8), // Ensure minimum 10px for Shotstack validation
             background: { color: primaryColor }
           },
           start: 0.35,
@@ -1160,11 +1163,11 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: '.', // Dot required by Shotstack (text cannot be empty, space causes validation error with small heights)
+            text: '█', // Block character required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
             font: { color: accentGold, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: presets.lowerThird.banner.width * 0.7,
-            height: isVertical ? 2 : 3,
+            height: Math.max(10, isVertical ? 2 : 3), // Ensure minimum 10px for Shotstack validation
             background: { color: accentGold }
           },
           start: 0.5,
@@ -1238,7 +1241,7 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: '.', // Dot required by Shotstack (text cannot be empty, space causes validation error with small heights)
+            text: '█', // Block character required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
             font: { color: '#0d1b2a', family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: presets.date.width,
@@ -1259,11 +1262,11 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: '.', // Dot required by Shotstack (text cannot be empty, space causes validation error with small heights)
+            text: '█', // Block character required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
             font: { color: primaryColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
-            width: 4,
-            height: presets.date.height - 8,
+            width: 10, // Increased from 4 to 10px minimum for Shotstack validation
+            height: Math.max(10, presets.date.height - 8), // Ensure minimum height of 10px
             background: { color: primaryColor }
           },
           start: 0.9,
@@ -1301,7 +1304,7 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: '.', // Dot required by Shotstack (text cannot be empty, space causes validation error with small heights)
+            text: '█', // Block character required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
             font: { color: '#dc2626', family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: presets.live.width,
@@ -1365,7 +1368,7 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: '.', // Dot required by Shotstack (text cannot be empty, space causes validation error with small heights)
+            text: '█', // Block character required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
             font: { color: primaryColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: presets.breakingNews.width + 80,
@@ -1385,11 +1388,11 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: '.', // Dot required by Shotstack (text cannot be empty, space causes validation error with small heights)
+            text: '█', // Block character required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
             font: { color: '#ffd60a', family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: presets.breakingNews.width + 80,
-            height: 4,
+            height: 10, // Increased from 4 to 10px minimum for Shotstack validation
             background: { color: '#ffd60a' }
           },
           start: 0.1,
@@ -1429,7 +1432,7 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: '.', // Dot required by Shotstack (text cannot be empty, space causes validation error with small heights)
+            text: '█', // Block character required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
             font: { color: '#0d1b2a', family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: presets.branding.width,
@@ -1491,7 +1494,7 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: '.', // Dot required by Shotstack (text cannot be empty, space causes validation error with small heights)
+            text: '█', // Block character required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
             font: { color: tickerBgColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: tickerPresets.width * 1.1,
@@ -1512,11 +1515,11 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: '.', // Dot required by Shotstack (text cannot be empty, space causes validation error with small heights)
+            text: '█', // Block character required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
             font: { color: primaryColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: tickerPresets.width * 1.1,
-            height: 4,
+            height: 10, // Increased from 4 to 10px minimum for Shotstack validation
             background: { color: primaryColor }
           },
           start: 1.4,
@@ -1532,11 +1535,11 @@ export const buildPodcastStyleEdit = (
         clips: [{
           asset: {
             type: 'text',
-            text: '.', // Dot required by Shotstack (text cannot be empty, space causes validation error with small heights)
+            text: '█', // Block character required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
             font: { color: primaryColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: isVertical ? 100 : 120,
-            height: tickerPresets.height - 8,
+            height: Math.max(10, tickerPresets.height - 8), // Ensure minimum 10px for Shotstack validation
             background: { color: primaryColor }
           },
           start: 1.5,
@@ -1616,7 +1619,7 @@ export const buildPodcastStyleEdit = (
         hostNameClips.push({
           asset: {
             type: 'text',
-            text: '.', // Dot required by Shotstack (text cannot be empty, space causes validation error with small heights)
+            text: '█', // Block character required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
             font: { color: '#0d1b2a', family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: hostNamePresets.width,
@@ -1638,7 +1641,7 @@ export const buildPodcastStyleEdit = (
         hostNameClips.push({
           asset: {
             type: 'text',
-            text: '.', // Dot required by Shotstack (text cannot be empty, space causes validation error with small heights)
+            text: '█', // Block character required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
             font: { color: primaryColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: hostNamePresets.accentWidth,
@@ -1659,11 +1662,11 @@ export const buildPodcastStyleEdit = (
         hostNameClips.push({
           asset: {
             type: 'text',
-            text: '.', // Dot required by Shotstack (text cannot be empty, space causes validation error with small heights)
+            text: '█', // Block character required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
             font: { color: accentGold, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: hostNamePresets.width - 10,
-            height: 2,
+            height: 10, // Increased from 2 to 10px minimum for Shotstack validation
             background: { color: accentGold }
           },
           start: scene.start + 0.25,
@@ -1803,7 +1806,7 @@ export const buildPodcastStyleEdit = (
             if (styleConfig.background) {
               subtitleAsset.background = {
                 ...styleConfig.background,
-                color: styleConfig.background.color || 'rgba(0, 0, 0, 0.85)' // More opaque for better contrast
+                color: styleConfig.background.color || '#d9000000' // rgba(0,0,0,0.85) converted to hex #AARRGGBB format
               };
             }
             
