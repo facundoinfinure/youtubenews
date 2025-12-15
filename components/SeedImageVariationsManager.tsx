@@ -28,6 +28,8 @@ const ANGLE_ICONS: Record<string, string> = {
 };
 
 const ALL_ANGLES = ['eye_level', 'low_angle', 'high_angle', 'closeup', 'wide'] as const;
+type Angle = typeof ALL_ANGLES[number];
+type VariationMap = Partial<Record<Angle, string>>;
 
 export const SeedImageVariationsManager: React.FC<SeedImageVariationsManagerProps> = ({
   config,
@@ -56,6 +58,13 @@ export const SeedImageVariationsManager: React.FC<SeedImageVariationsManagerProp
   // Fetch variations from Supabase on mount
   const fetchVariations = useCallback(async () => {
     if (!channelId) {
+      setLoading(false);
+      return;
+    }
+
+    if (!supabase) {
+      console.warn('Supabase not initialized - cannot fetch variations');
+      setExistingVariations(null);
       setLoading(false);
       return;
     }
@@ -214,23 +223,27 @@ export const SeedImageVariationsManager: React.FC<SeedImageVariationsManagerProp
               twoShot: hostType === 'twoShot' ? { ...emptyTwoShotVariations, [angle]: newUrl } : emptyTwoShotVariations
             } as SeedImageVariations;
 
-        // Save to Supabase
-        const { data: channel } = await supabase
-          .from('channels')
-          .select('config')
-          .eq('id', channelId)
-          .single();
-        
-        if (channel) {
-          const updatedConfig = {
-            ...channel.config,
-            seed_image_variations: updatedVariations
-          };
-
-          await supabase
+        // Save to Supabase (if configured)
+        if (supabase) {
+          const { data: channel } = await supabase
             .from('channels')
-            .update({ config: updatedConfig })
-            .eq('id', channelId);
+            .select('config')
+            .eq('id', channelId)
+            .single();
+          
+          if (channel) {
+            const updatedConfig = {
+              ...channel.config,
+              seed_image_variations: updatedVariations
+            };
+
+            await supabase
+              .from('channels')
+              .update({ config: updatedConfig })
+              .eq('id', channelId);
+          }
+        } else {
+          console.warn('Supabase not initialized - variation saved only locally (in-memory)');
         }
 
         setExistingVariations(updatedVariations);
@@ -248,6 +261,11 @@ export const SeedImageVariationsManager: React.FC<SeedImageVariationsManagerProp
 
   const handleDeleteAllVariations = async () => {
     if (!confirm('¿Estás seguro de eliminar todas las variaciones? Esto no se puede deshacer.')) {
+      return;
+    }
+
+    if (!supabase) {
+      toast.error('Supabase no configurado: no se pueden eliminar variaciones.');
       return;
     }
 
@@ -286,6 +304,11 @@ export const SeedImageVariationsManager: React.FC<SeedImageVariationsManagerProp
 
   const handleDeleteSingleVariation = async (hostType: 'hostA' | 'hostB' | 'twoShot', angle: string) => {
     if (!existingVariations) return;
+
+    if (!supabase) {
+      toast.error('Supabase no configurado: no se puede eliminar esta variación.');
+      return;
+    }
 
     try {
       const fallbackUrl = getOriginalUrl(hostType);
@@ -458,7 +481,7 @@ export const SeedImageVariationsManager: React.FC<SeedImageVariationsManagerProp
     label: string,
     emoji: string
   ) => {
-    const variations = existingVariations?.[hostType] || {};
+    const variations = (existingVariations?.[hostType] ?? {}) as VariationMap;
     const isExpanded = expandedHost === hostType;
     
     // Count stats for this host
