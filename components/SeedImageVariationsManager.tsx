@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { ChannelConfig } from '../types';
 import { generateAllSeedVariations, SeedImageVariations, generateSingleVariation } from '../services/seedImageVariations';
-import { supabase } from '../services/supabase';
+import { supabase } from '../services/supabaseService';
 
 interface SeedImageVariationsManagerProps {
   config: ChannelConfig;
@@ -186,6 +186,20 @@ export const SeedImageVariationsManager: React.FC<SeedImageVariationsManagerProp
 
       if (newUrl && newUrl !== baseUrl) {
         // Update local state
+        const emptyHostVariations = {
+          eye_level: '',
+          low_angle: '',
+          high_angle: '',
+          closeup: '',
+          wide: ''
+        };
+        const emptyTwoShotVariations = {
+          eye_level: '',
+          low_angle: '',
+          high_angle: '',
+          wide: ''
+        };
+        
         const updatedVariations: SeedImageVariations = existingVariations 
           ? {
               ...existingVariations,
@@ -193,12 +207,11 @@ export const SeedImageVariationsManager: React.FC<SeedImageVariationsManagerProp
                 ...existingVariations[hostType],
                 [angle]: newUrl
               }
-            }
+            } as SeedImageVariations
           : {
-              hostA: {},
-              hostB: {},
-              twoShot: {},
-              [hostType]: { [angle]: newUrl }
+              hostA: hostType === 'hostA' ? { ...emptyHostVariations, [angle]: newUrl } : emptyHostVariations,
+              hostB: hostType === 'hostB' ? { ...emptyHostVariations, [angle]: newUrl } : emptyHostVariations,
+              twoShot: hostType === 'twoShot' ? { ...emptyTwoShotVariations, [angle]: newUrl } : emptyTwoShotVariations
             } as SeedImageVariations;
 
         // Save to Supabase
@@ -320,20 +333,28 @@ export const SeedImageVariationsManager: React.FC<SeedImageVariationsManagerProp
     if (!existingVariations) return { total: 0, generated: 0, missing: 15 };
     
     let generated = 0;
-    let total = 0;
 
-    ['hostA', 'hostB', 'twoShot'].forEach((hostType) => {
-      const hostVariations = existingVariations[hostType as keyof SeedImageVariations] || {};
+    // Host A and Host B have 5 angles each
+    ['hostA', 'hostB'].forEach((hostType) => {
+      const hostVariations = existingVariations[hostType as 'hostA' | 'hostB'] || {};
       ALL_ANGLES.forEach((angle) => {
-        total++;
-        const url = hostVariations[angle];
-        if (url && !isOriginalImage(hostType as any, url)) {
+        const url = (hostVariations as Record<string, string>)[angle];
+        if (url && !isOriginalImage(hostType as 'hostA' | 'hostB', url)) {
           generated++;
         }
       });
     });
+    
+    // Two-shot has 4 angles (no closeup)
+    const twoShotVariations = existingVariations.twoShot || {};
+    ['eye_level', 'low_angle', 'high_angle', 'wide'].forEach((angle) => {
+      const url = (twoShotVariations as Record<string, string>)[angle];
+      if (url && !isOriginalImage('twoShot', url)) {
+        generated++;
+      }
+    });
 
-    return { total: 15, generated, missing: 15 - generated };
+    return { total: 14, generated, missing: 14 - generated };
   };
 
   const stats = getVariationStats();
