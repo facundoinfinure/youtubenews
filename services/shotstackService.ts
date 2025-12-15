@@ -1168,14 +1168,16 @@ export const buildPodcastStyleEdit = (
     }
     
     if (metricText && sceneIndex < 3) { // Only in first 3 scenes
-      // Adjust card size based on text length - SMALLER and cleaner
+      // Adjust card size based on text length - WIDER to prevent cut-off
       const textLength = metricText.length;
+      // INCREASED widths to prevent text being cut off
       const cardWidth = isVertical 
-        ? Math.min(500, Math.max(250, textLength * 18))
-        : Math.min(700, Math.max(350, textLength * 22));
+        ? Math.min(900, Math.max(400, textLength * 28)) // Much wider for mobile
+        : Math.min(1000, Math.max(500, textLength * 30));
+      // SMALLER font for longer text
       const fontSize = isVertical 
-        ? (textLength > 15 ? 36 : 44) // Reduced from 48/64
-        : (textLength > 15 ? 44 : 52); // Reduced from 56/72
+        ? (textLength > 20 ? 28 : textLength > 12 ? 32 : 38) // Smaller, more levels
+        : (textLength > 20 ? 34 : textLength > 12 ? 40 : 46);
       
       graphics.push({
         asset: {
@@ -1186,19 +1188,19 @@ export const buildPodcastStyleEdit = (
             color: '#ffffff', 
             family: 'Montserrat ExtraBold', 
             size: fontSize,
-            lineHeight: 1.2
+            lineHeight: 1.3 // More line height for wrapping
           },
           stroke: {
             color: '#000000',
-            width: 3 // Black outline for visibility without background
+            width: 4 // Thicker outline for visibility
           },
           width: cardWidth,
-          height: isVertical ? 80 : 100
+          height: isVertical ? 120 : 140 // Taller for text wrapping
           // NO background - clean text with outline only
         },
         start: startTime + 1, // Appear 1s into scene
         length: 3, // Show for 3 seconds
-        offset: { x: isVertical ? 0.25 : 0.30, y: isVertical ? -0.20 : -0.18 },
+        offset: { x: isVertical ? 0 : 0.20, y: isVertical ? -0.12 : -0.10 }, // More centered for visibility
         position: 'center',
         opacity: 1.0, // Full opacity with outline
         transition: { in: 'fade', out: 'fade' }
@@ -1349,8 +1351,8 @@ export const buildPodcastStyleEdit = (
       banner: { width: 1080, height: 240, y: -0.40 }, // Taller for impact
       // Category badge - BOLD and visible
       badge: { width: 400, height: 72, x: 0, y: -0.30, fontSize: 48 }, // Larger for mobile
-      // Headline - MASSIVE for readability
-      headline: { width: 1000, height: 120, x: 0, y: -0.40, fontSize: 72 } // Extra large
+      // Headline - REDUCED to prevent cut-off, multi-line support
+      headline: { width: 980, height: 160, x: 0, y: -0.42, fontSize: 42 } // Smaller font, taller height for wrapping
     },
     // Date badge - prominent corner placement
     date: { x: 0.35, y: 0.43, fontSize: 32, width: 220, height: 56 },
@@ -1369,8 +1371,8 @@ export const buildPodcastStyleEdit = (
       banner: { width: 1920, height: 260, y: -0.40 }, // Taller for impact
       // Category badge - bold and prominent
       badge: { width: 400, height: 90, x: -0.36, y: -0.40, fontSize: 52 },
-      // Headline - large professional typography
-      headline: { width: 1300, height: 130, x: 0.06, y: -0.40, fontSize: 64 }
+      // Headline - REDUCED to prevent cut-off, multi-line support
+      headline: { width: 1400, height: 150, x: 0.06, y: -0.42, fontSize: 48 } // Smaller font, taller height
     },
     // Date display - sleek corner badge
     date: { x: 0.40, y: 0.43, fontSize: 32, width: 240, height: 58 },
