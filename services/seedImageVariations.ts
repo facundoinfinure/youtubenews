@@ -361,8 +361,7 @@ const saveVariationsToConfig = async (
     const { error } = await supabase
       .from('channels')
       .update({
-        config: updatedConfig,
-        updated_at: new Date().toISOString()
+        config: updatedConfig
       })
       .eq('id', channelId);
 
@@ -432,4 +431,26 @@ export const getSeedImageForScene = (
   } else {
     return hostVariations[effectiveAngle as 'eye_level' | 'low_angle' | 'high_angle' | 'wide'] || hostVariations.eye_level || '';
   }
+};
+
+/**
+ * Genera una única variación de ángulo de cámara
+ * Función simplificada para regenerar variaciones individuales
+ */
+export const generateSingleVariation = async (
+  originalImageUrl: string,
+  angle: 'eye_level' | 'low_angle' | 'high_angle' | 'closeup' | 'wide',
+  channelId: string,
+  hostType: 'hostA' | 'hostB' | 'twoShot'
+): Promise<string | null> => {
+  // Character descriptions based on host type
+  const descriptions: Record<string, string> = {
+    hostA: 'Professional podcast host, confident posture, looking at camera, news anchor aesthetic',
+    hostB: 'Professional podcast co-host, engaged expression, news anchor aesthetic',
+    twoShot: 'Two professional podcast hosts sitting together in a news studio setting'
+  };
+
+  const description = descriptions[hostType] || descriptions.hostA;
+  
+  return generateSeedImageVariation(originalImageUrl, angle, description, channelId);
 };

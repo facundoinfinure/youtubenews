@@ -1973,6 +1973,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
                         seed_image_variations: variations
                       }));
                     }}
+                    onVariationsDeleted={() => {
+                      setTempConfig(prev => {
+                        const updated = { ...prev };
+                        delete (updated as any).seed_image_variations;
+                        return updated;
+                      });
+                    }}
                   />
                 </SettingsSection>
 
