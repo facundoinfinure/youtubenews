@@ -902,7 +902,7 @@ export const buildPodcastStyleEdit = (
           type: 'text',
           text: ' ', // Space required by Shotstack (text cannot be empty)
           alignment: { horizontal: 'center', vertical: 'center' },
-          font: { color: 'rgba(255, 255, 255, 0)', size: 1 }, // Transparent text
+          font: { color: 'rgba(255, 255, 255, 0.2)', size: 12 }, // Match background for invisible text
           width: isVertical ? 800 : 1200,
           height: 8,
           background: { color: 'rgba(255, 255, 255, 0.2)' }
@@ -920,7 +920,7 @@ export const buildPodcastStyleEdit = (
           type: 'text',
           text: ' ', // Space required by Shotstack (text cannot be empty)
           alignment: { horizontal: 'center', vertical: 'center' },
-          font: { color: 'rgba(255, 255, 255, 0)', size: 1 }, // Transparent text
+          font: { color: config.newsStyle?.lowerThird?.primaryColor || '#ff3333', size: 12 }, // Match background for invisible text
           width: (progress / 100) * (isVertical ? 800 : 1200),
           height: 8,
           background: { color: config.newsStyle?.lowerThird?.primaryColor || '#ff3333' }
@@ -1033,7 +1033,7 @@ export const buildPodcastStyleEdit = (
             type: 'text',
             text: ' ', // Space required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: 'rgba(0, 0, 0, 0)', family: 'Roboto', size: 1, lineHeight: 1 }, // Transparent text
+            font: { color: flashColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: isVertical ? 1080 : 1920,
             height: isVertical ? 1920 : 1080,
             background: { color: flashColor }
@@ -1118,7 +1118,7 @@ export const buildPodcastStyleEdit = (
             type: 'text',
             text: ' ', // Space required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: 'rgba(0, 0, 0, 0)', family: 'Roboto', size: 1, lineHeight: 1 }, // Transparent text
+            font: { color: secondaryColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: presets.lowerThird.banner.width,
             height: presets.lowerThird.banner.height,
             background: { color: secondaryColor }
@@ -1139,7 +1139,7 @@ export const buildPodcastStyleEdit = (
             type: 'text',
             text: ' ', // Space required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: 'rgba(0, 0, 0, 0)', family: 'Roboto', size: 1, lineHeight: 1 }, // Transparent text
+            font: { color: primaryColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: presets.lowerThird.banner.width,
             height: isVertical ? 6 : 8,
             background: { color: primaryColor }
@@ -1159,7 +1159,7 @@ export const buildPodcastStyleEdit = (
             type: 'text',
             text: ' ', // Space required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: 'rgba(0, 0, 0, 0)', family: 'Roboto', size: 1, lineHeight: 1 }, // Transparent text
+            font: { color: accentGold, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: presets.lowerThird.banner.width * 0.7,
             height: isVertical ? 2 : 3,
             background: { color: accentGold }
@@ -1237,7 +1237,7 @@ export const buildPodcastStyleEdit = (
             type: 'text',
             text: ' ', // Space required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: 'rgba(0, 0, 0, 0)', family: 'Roboto', size: 1, lineHeight: 1 }, // Transparent text
+            font: { color: '#0d1b2a', family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: presets.date.width,
             height: presets.date.height,
             background: { color: '#0d1b2a' }
@@ -1258,7 +1258,7 @@ export const buildPodcastStyleEdit = (
             type: 'text',
             text: ' ', // Space required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: 'rgba(0, 0, 0, 0)', family: 'Roboto', size: 1, lineHeight: 1 }, // Transparent text
+            font: { color: primaryColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: 4,
             height: presets.date.height - 8,
             background: { color: primaryColor }
@@ -1300,7 +1300,7 @@ export const buildPodcastStyleEdit = (
             type: 'text',
             text: ' ', // Space required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: 'rgba(0, 0, 0, 0)', family: 'Roboto', size: 1, lineHeight: 1 }, // Transparent text
+            font: { color: '#dc2626', family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: presets.live.width,
             height: presets.live.height,
             background: { color: '#dc2626' }
@@ -1364,7 +1364,7 @@ export const buildPodcastStyleEdit = (
             type: 'text',
             text: ' ', // Space required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: 'rgba(0, 0, 0, 0)', family: 'Roboto', size: 1, lineHeight: 1 }, // Transparent text
+            font: { color: primaryColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: presets.breakingNews.width + 80,
             height: presets.breakingNews.height,
             background: { color: primaryColor }
@@ -1384,7 +1384,7 @@ export const buildPodcastStyleEdit = (
             type: 'text',
             text: ' ', // Space required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: 'rgba(0, 0, 0, 0)', family: 'Roboto', size: 1, lineHeight: 1 }, // Transparent text
+            font: { color: '#ffd60a', family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: presets.breakingNews.width + 80,
             height: 4,
             background: { color: '#ffd60a' }
@@ -1428,7 +1428,7 @@ export const buildPodcastStyleEdit = (
             type: 'text',
             text: ' ', // Space required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: 'rgba(0, 0, 0, 0)', family: 'Roboto', size: 1, lineHeight: 1 }, // Transparent text
+            font: { color: '#0d1b2a', family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: presets.branding.width,
             height: presets.branding.height,
             background: { color: '#0d1b2a' }
@@ -1490,7 +1490,7 @@ export const buildPodcastStyleEdit = (
             type: 'text',
             text: ' ', // Space required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: 'rgba(0, 0, 0, 0)', family: 'Roboto', size: 1, lineHeight: 1 }, // Transparent text
+            font: { color: tickerBgColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: tickerPresets.width * 1.1,
             height: tickerPresets.height,
             background: { color: tickerBgColor }
@@ -1511,7 +1511,7 @@ export const buildPodcastStyleEdit = (
             type: 'text',
             text: ' ', // Space required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: 'rgba(0, 0, 0, 0)', family: 'Roboto', size: 1, lineHeight: 1 }, // Transparent text
+            font: { color: primaryColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: tickerPresets.width * 1.1,
             height: 4,
             background: { color: primaryColor }
@@ -1531,7 +1531,7 @@ export const buildPodcastStyleEdit = (
             type: 'text',
             text: ' ', // Space required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: 'rgba(0, 0, 0, 0)', family: 'Roboto', size: 1, lineHeight: 1 }, // Transparent text
+            font: { color: primaryColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: isVertical ? 100 : 120,
             height: tickerPresets.height - 8,
             background: { color: primaryColor }
@@ -1615,7 +1615,7 @@ export const buildPodcastStyleEdit = (
             type: 'text',
             text: ' ', // Space required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: 'rgba(0, 0, 0, 0)', family: 'Roboto', size: 1, lineHeight: 1 }, // Transparent text
+            font: { color: '#0d1b2a', family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: hostNamePresets.width,
             height: hostNamePresets.height,
             background: { color: '#0d1b2a' }
@@ -1637,7 +1637,7 @@ export const buildPodcastStyleEdit = (
             type: 'text',
             text: ' ', // Space required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: 'rgba(0, 0, 0, 0)', family: 'Roboto', size: 1, lineHeight: 1 }, // Transparent text
+            font: { color: primaryColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: hostNamePresets.accentWidth,
             height: hostNamePresets.height,
             background: { color: primaryColor }
@@ -1658,7 +1658,7 @@ export const buildPodcastStyleEdit = (
             type: 'text',
             text: ' ', // Space required by Shotstack (text cannot be empty)
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: 'rgba(0, 0, 0, 0)', family: 'Roboto', size: 1, lineHeight: 1 }, // Transparent text
+            font: { color: accentGold, family: 'Roboto', size: 12, lineHeight: 1 }, // Match background for invisible text
             width: hostNamePresets.width - 10,
             height: 2,
             background: { color: accentGold }
