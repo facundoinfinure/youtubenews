@@ -24,6 +24,7 @@ export type NarrativeType =
   | "double_conflict" 
   | "hot_take" 
   | "perspective_clash"
+  | "viral_hook_heavy"    // NEW: Hook-heavy retention-optimized structure
   | "inverted_pyramid"    // NEW: News → Details → Context → Analysis → Takeaway
   | "question_driven"     // NEW: Question → Answer 1 → Answer 2 → Debate → Synthesis → Conclusion
   | "timeline_arc"        // NEW: Present → Past → Context → Development → Current → Future → Implications

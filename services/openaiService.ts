@@ -859,9 +859,28 @@ const addSceneTransitions = (script: ScriptWithScenes, config: ChannelConfig) =>
   }
 };
 
-const VALID_NARRATIVES: NarrativeType[] = ['classic', 'double_conflict', 'hot_take', 'perspective_clash'];
+const VALID_NARRATIVES: NarrativeType[] = [
+  'classic',
+  'double_conflict',
+  'hot_take',
+  'perspective_clash',
+  'viral_hook_heavy',
+  'inverted_pyramid',
+  'question_driven',
+  'timeline_arc',
+  'contrast_arc'
+];
 const VALID_VIDEO_MODES: Scene['video_mode'][] = ['hostA', 'hostB']; // Removed 'both' for dynamic single-character scenes
-const VALID_SHOTS: Scene['shot'][] = ['medium', 'closeup', 'wide'];
+const VALID_SHOTS: Scene['shot'][] = [
+  'extreme_closeup',
+  'closeup',
+  'medium_closeup',
+  'medium',
+  'medium_wide',
+  'wide',
+  'dutch_angle',
+  'over_shoulder'
+];
 const VALID_ORDERS: Scene['order'][] = ['left_first', 'right_first', 'meanwhile'];
 
 const validateScriptWithScenes = (script: ScriptWithScenes) => {
@@ -874,7 +893,9 @@ const validateScriptWithScenes = (script: ScriptWithScenes) => {
   }
 
   if (!VALID_NARRATIVES.includes(script.narrative_used as NarrativeType)) {
-    throw new Error(`Invalid narrative_used "${script.narrative_used}"`);
+    // Be resilient to model drift: accept the script but normalize the narrative.
+    console.warn(`[Script] ⚠️ Invalid narrative_used "${script.narrative_used}", falling back to "hot_take"`);
+    (script as any).narrative_used = 'hot_take';
   }
 
   if (!script.scenes || typeof script.scenes !== 'object' || Object.keys(script.scenes).length === 0) {

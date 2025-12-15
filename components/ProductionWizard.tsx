@@ -16,7 +16,8 @@ import {
   ViralMetadata,
   BroadcastSegment,
   ScriptWithScenes,
-  ScriptHistoryItem
+  ScriptHistoryItem,
+  NarrativeType
 } from '../types';
 import { saveProduction, updateSegmentStatus, deleteAudioFromStorage, getProductionById } from '../services/supabaseService';
 import { 
@@ -49,7 +50,7 @@ interface ProductionWizardProps {
   onClose: () => void;
   // External generation functions
   onFetchNews: () => Promise<NewsItem[]>;
-  onGenerateScript: (newsItems: NewsItem[], improvements?: { implement: string[]; maintain: string[] }, narrativeOverride?: 'classic' | 'double_conflict' | 'hot_take' | 'perspective_clash') => Promise<{ scenes: ScriptWithScenes; metadata: ViralMetadata }>;
+  onGenerateScript: (newsItems: NewsItem[], improvements?: { implement: string[]; maintain: string[] }, narrativeOverride?: NarrativeType) => Promise<{ scenes: ScriptWithScenes; metadata: ViralMetadata }>;
   onGenerateAudio: (segmentIndex: number, text: string, speaker: string) => Promise<{ audioUrl: string; duration: number }>;
   onGenerateVideo: (segmentIndex: number, audioUrl: string, speaker: string) => Promise<{ videoUrl: string }>;
 }
@@ -639,7 +640,8 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
   
   // Narrative style selection for script generation
-  const [selectedNarrative, setSelectedNarrative] = useState<'auto' | 'classic' | 'double_conflict' | 'hot_take' | 'perspective_clash'>('auto');
+  type SelectedNarrative = 'auto' | NarrativeType;
+  const [selectedNarrative, setSelectedNarrative] = useState<SelectedNarrative>('auto');
   
   // Internationalization - get translations based on channel language
   const t = getTranslationsForChannel(config.language);
@@ -2714,7 +2716,7 @@ export const ProductionWizard: React.FC<ProductionWizardProps> = ({
                 ].map(({ value, label, desc }) => (
                   <button
                     key={value}
-                    onClick={() => setSelectedNarrative(value as typeof selectedNarrative)}
+                    onClick={() => setSelectedNarrative(value as SelectedNarrative)}
                     title={desc}
                     className={`p-3 rounded-lg text-sm font-medium transition-all ${
                       selectedNarrative === value
