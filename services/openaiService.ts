@@ -56,16 +56,27 @@ export const openaiRequest = async (
       
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        const errorMsg = errorData.error?.message || 'Unknown error';
+        const errorMsg = errorData.error?.message || errorData.message || errorData.error || 'Unknown error';
+        const fullErrorMsg = typeof errorMsg === 'string' ? errorMsg : JSON.stringify(errorMsg);
+        
+        // Check if API key is not configured (500 with specific message)
+        if (response.status === 500 && (
+          fullErrorMsg.toLowerCase().includes('not configured') ||
+          fullErrorMsg.toLowerCase().includes('openai_api_key')
+        )) {
+          console.error(`[OpenAI] ❌ API key not configured: ${fullErrorMsg}`);
+          throw new Error(`OpenAI API key not configured: ${fullErrorMsg}`);
+        }
         
         // Check if it's a quota exceeded error (don't retry)
-        const isQuotaExceeded = errorMsg.toLowerCase().includes('quota') || 
-                                errorMsg.toLowerCase().includes('exceeded your current quota') ||
-                                errorMsg.toLowerCase().includes('billing');
+        const isQuotaExceeded = fullErrorMsg.toLowerCase().includes('quota') || 
+                                fullErrorMsg.toLowerCase().includes('exceeded your current quota') ||
+                                fullErrorMsg.toLowerCase().includes('billing') ||
+                                fullErrorMsg.toLowerCase().includes('insufficient_quota');
         
         if (isQuotaExceeded) {
-          console.error(`[OpenAI] ❌ Quota exceeded: ${errorMsg}`);
-          throw new Error(`OpenAI API error: 429 - ${errorMsg}`);
+          console.error(`[OpenAI] ❌ Quota exceeded: ${fullErrorMsg}`);
+          throw new Error(`OpenAI API error: 429 - ${fullErrorMsg}`);
         }
         
         // Handle rate limiting (429) with longer backoff (only if not quota exceeded)
@@ -75,12 +86,12 @@ export const openaiRequest = async (
           // If we get multiple 429 errors in a row, reduce retries to avoid hammering the API
           if (consecutive429Errors >= 2) {
             console.error(`[OpenAI] ❌ Multiple 429 errors detected. Stopping retries to avoid quota issues.`);
-            throw new Error(`OpenAI API error: 429 - ${errorMsg}`);
+            throw new Error(`OpenAI API error: 429 - ${fullErrorMsg}`);
           }
           
           const backoffDelay = Math.min(5000 * Math.pow(2, attempt), 60000); // 5s, 10s, 20s... max 60s
           console.warn(`[OpenAI] ⚠️ Rate limited (429), retrying after ${backoffDelay}ms (attempt ${attempt + 1}/${retries + 1})...`);
-          lastError = new Error(`OpenAI API error: 429 - ${errorMsg}`);
+          lastError = new Error(`OpenAI API error: 429 - ${fullErrorMsg}`);
           await new Promise(r => setTimeout(r, backoffDelay));
           continue;
         }
@@ -88,12 +99,18 @@ export const openaiRequest = async (
         // If timeout or server error, allow retry
         if (response.status >= 500 && attempt < retries) {
           console.warn(`[OpenAI] ⚠️ Attempt ${attempt + 1} failed (${response.status}), retrying...`);
-          lastError = new Error(`OpenAI API error: ${response.status} - ${errorMsg}`);
+          lastError = new Error(`OpenAI API error: ${response.status} - ${fullErrorMsg}`);
           await new Promise(r => setTimeout(r, 1000 * (attempt + 1))); // Exponential backoff
           continue;
         }
         
-        throw new Error(`OpenAI API error: ${response.status} - ${errorMsg}`);
+        // For 400/401/403 errors, don't retry (likely configuration issue)
+        if (response.status >= 400 && response.status < 500 && response.status !== 429) {
+          console.error(`[OpenAI] ❌ Client error (${response.status}): ${fullErrorMsg}`);
+          throw new Error(`OpenAI API error: ${response.status} - ${fullErrorMsg}`);
+        }
+        
+        throw new Error(`OpenAI API error: ${response.status} - ${fullErrorMsg}`);
       }
       
       // Reset consecutive 429 counter on success
@@ -103,16 +120,31 @@ export const openaiRequest = async (
       if (error.name === 'AbortError') {
         console.warn(`[OpenAI] ⏱️ Request timeout after ${timeout}ms`);
         lastError = new Error('Request timeout');
+      } else if (error.message?.includes('not configured')) {
+        // Don't retry if API key is not configured
+        console.error(`[OpenAI] ❌ Configuration error: ${error.message}`);
+        throw error;
+      } else if (error.message?.includes('quota') || error.message?.includes('exceeded')) {
+        // Don't retry quota errors
+        throw error;
       } else {
         lastError = error;
+        console.warn(`[OpenAI] ⚠️ Attempt ${attempt + 1} failed: ${error.message}`);
       }
       
-      if (attempt < retries) {
-        console.warn(`[OpenAI] ⚠️ Attempt ${attempt + 1} failed, retrying...`);
+      if (attempt < retries && !error.message?.includes('not configured') && !error.message?.includes('quota')) {
+        console.warn(`[OpenAI] ⚠️ Retrying... (${attempt + 1}/${retries + 1})`);
         await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
         continue;
       }
     }
+  }
+  
+  // Log final error with more context
+  if (lastError) {
+    console.error(`[OpenAI] ❌ Request failed after all retries: ${lastError.message}`);
+    console.error(`[OpenAI] 🔍 Proxy URL: ${proxyUrl}/api/openai`);
+    console.error(`[OpenAI] 🔍 Endpoint: ${endpoint}`);
   }
   
   throw lastError || new Error('OpenAI request failed after retries');
@@ -1745,6 +1777,41 @@ export const calculateViralScoresBatch = async (
   
   console.log(`[Viral Score] 🔥 Analyzing ${newsItems.length} news items in batches of ${BATCH_SIZE}...`);
   
+  // Check proxy availability before starting
+  const proxyUrl = getProxyUrl().replace(/\/$/, '');
+  if (!proxyUrl) {
+    console.warn(`[Viral Score] ⚠️ No backend URL configured. Using basic algorithm for all items.`);
+    console.warn(`[Viral Score] 💡 Set VITE_BACKEND_URL in environment variables or ensure proxy is accessible`);
+    return newsItems.map(item => ({
+      score: calculateBasicViralScore(item.headline, item.summary, item.source, item.date),
+      reasoning: 'Basic algorithm (Backend URL not configured)'
+    }));
+  }
+  
+  // Try to check proxy health (non-blocking)
+  try {
+    const healthUrl = `${proxyUrl}/api/openai?endpoint=health`;
+    const healthResponse = await fetch(healthUrl, { 
+      method: 'GET',
+      signal: AbortSignal.timeout(3000) // 3 second timeout for health check
+    });
+    if (healthResponse.ok) {
+      const healthData = await healthResponse.json();
+      console.log(`[Viral Score] ✅ Proxy health check: ${JSON.stringify(healthData)}`);
+      if (!healthData.apiKeyConfigured) {
+        console.error(`[Viral Score] ❌ OpenAI API key not configured on server`);
+        console.error(`[Viral Score] 💡 Configure OPENAI_API_KEY in Vercel Project Settings > Environment Variables`);
+        return newsItems.map(item => ({
+          score: calculateBasicViralScore(item.headline, item.summary, item.source, item.date),
+          reasoning: 'Basic algorithm (OpenAI API key not configured on server)'
+        }));
+      }
+    }
+  } catch (healthError: any) {
+    console.warn(`[Viral Score] ⚠️ Proxy health check failed (non-critical): ${healthError.message}`);
+    console.warn(`[Viral Score] 💡 Will attempt to proceed with API calls anyway...`);
+  }
+  
   // Split into batches
   const batches: Array<Array<{ headline: string; summary: string; source: string; date?: string; originalIndex: number }>> = [];
   for (let i = 0; i < newsItems.length; i += BATCH_SIZE) {
@@ -1886,12 +1953,34 @@ Return JSON: {"results":[{"i":1,"s":<score>,"r":"<10 word reason>"},...]}`;
       throw error; // Re-throw to be handled by calculateViralScoresBatch
     }
     
-    console.warn(`[Viral Score] ⚠️ Batch ${batchNum} failed: ${error.message}, using basic algorithm`);
+    // Check if API key is not configured
+    if (error.message?.includes('not configured')) {
+      console.error(`[Viral Score] ❌ Batch ${batchNum} failed: OpenAI API key not configured. Please set OPENAI_API_KEY in Vercel environment variables.`);
+      console.error(`[Viral Score] 💡 To fix: Go to Vercel Project Settings > Environment Variables > Add OPENAI_API_KEY`);
+      // Still use fallback but with more informative message
+      return batch.map(item => ({
+        score: calculateBasicViralScore(item.headline, item.summary, item.source, item.date),
+        reasoning: 'Basic algorithm (OpenAI API key not configured)',
+        originalIndex: item.originalIndex
+      }));
+    }
+    
+    // Check for network/proxy errors
+    if (error.message?.includes('timeout') || error.message?.includes('Failed to fetch') || error.message?.includes('NetworkError')) {
+      console.error(`[Viral Score] ❌ Batch ${batchNum} failed: Network/proxy error - ${error.message}`);
+      console.error(`[Viral Score] 💡 Check if VITE_BACKEND_URL is correctly configured or if the proxy is running`);
+    } else {
+      console.warn(`[Viral Score] ⚠️ Batch ${batchNum} failed: ${error.message}, using basic algorithm`);
+    }
     
     // Fallback to basic algorithm for this batch only (for non-quota errors)
     return batch.map(item => ({
       score: calculateBasicViralScore(item.headline, item.summary, item.source, item.date),
-      reasoning: 'Basic algorithm (API unavailable)',
+      reasoning: error.message?.includes('not configured') 
+        ? 'Basic algorithm (OpenAI API key not configured)' 
+        : error.message?.includes('timeout') || error.message?.includes('Failed to fetch')
+        ? 'Basic algorithm (Network/proxy error)'
+        : 'Basic algorithm (API unavailable)',
       originalIndex: item.originalIndex
     }));
   }
