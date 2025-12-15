@@ -385,7 +385,8 @@ export const DEFAULT_RENDER_CONFIG: RenderConfig = {
     showDate: true,
     showHostNames: true,
     showLiveIndicator: false,
-    showSubtitles: false,
+    // VIRAL SHORTS: Subtitles always on for maximum engagement
+    showSubtitles: true,
     subtitleStyle: 'boxed',
     subtitlePosition: 'bottom'
   },

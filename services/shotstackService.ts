@@ -1132,30 +1132,71 @@ export const buildPodcastStyleEdit = (
       }
     }
     
-    // Info cards for statistics (if scene text contains numbers)
+    // Info cards for statistics (if scene text contains numbers with context)
+    // IMPROVED: Extract full metric phrase with context, not just the number
     const sceneText = scene.text || '';
-    const numberMatch = sceneText.match(/\d+[.,]?\d*[%$€£¥]?/);
-    if (numberMatch && sceneIndex < 3) { // Only in first 3 scenes
+    
+    // Regex patterns for common metric formats with context:
+    // - Currency: "$56 million", "£56 Million Pound fine", "€1.5 billion"
+    // - Percentages: "75% increase", "a 50% drop"
+    // - Large numbers: "3.5 billion users", "100 million downloads"
+    const metricPatterns = [
+      // Currency with magnitude and optional context (e.g., "$56 million fine", "£56 Million Pound fine")
+      /[$€£¥]\s*\d+(?:[.,]\d+)?\s*(?:million|billion|trillion|thousand|M|B|K)?\s*(?:pound|dollar|euro)?s?\s*\w*/gi,
+      // Currency symbol after number (e.g., "56 million dollars")
+      /\d+(?:[.,]\d+)?\s*(?:million|billion|trillion|thousand|M|B|K)?\s*(?:dollars?|pounds?|euros?|¥|£|\$|€)\s*\w*/gi,
+      // Percentage with context (e.g., "75% increase", "a 50% drop")
+      /\d+(?:[.,]\d+)?%\s*\w*/gi,
+      // Large numbers with magnitude (e.g., "3.5 billion users")
+      /\d+(?:[.,]\d+)?\s*(?:million|billion|trillion|thousand)\s*\w*/gi
+    ];
+    
+    let metricText: string | null = null;
+    for (const pattern of metricPatterns) {
+      const match = sceneText.match(pattern);
+      if (match && match[0]) {
+        // Clean up and limit length for display
+        metricText = match[0].trim();
+        // Limit to reasonable length for the card (max ~25 chars)
+        if (metricText.length > 25) {
+          metricText = metricText.substring(0, 25).trim();
+        }
+        // Capitalize first letter of each word for visual impact
+        metricText = metricText.replace(/\b\w/g, c => c.toUpperCase());
+        break;
+      }
+    }
+    
+    if (metricText && sceneIndex < 3) { // Only in first 3 scenes
+      // Adjust card size based on text length
+      const textLength = metricText.length;
+      const cardWidth = isVertical 
+        ? Math.min(600, Math.max(300, textLength * 25))
+        : Math.min(800, Math.max(400, textLength * 30));
+      const fontSize = isVertical 
+        ? (textLength > 15 ? 48 : 64) 
+        : (textLength > 15 ? 56 : 72);
+      
       graphics.push({
         asset: {
           type: 'text',
-          text: numberMatch[0],
+          text: metricText,
           alignment: { horizontal: 'center', vertical: 'center' },
           font: { 
             color: '#ffffff', 
-            family: 'Arial Black', 
-            size: isVertical ? 72 : 96,
+            family: 'Montserrat ExtraBold', 
+            size: fontSize,
             lineHeight: 1.2
           },
-          width: isVertical ? 300 : 400,
-          height: isVertical ? 120 : 160,
+          width: cardWidth,
+          height: isVertical ? 100 : 120,
           background: { color: '#000000' } // solid black - transparency via clip opacity
         },
         start: startTime + 1, // Appear 1s into scene
         length: 3, // Show for 3 seconds
-        offset: { x: isVertical ? 0.3 : 0.35, y: isVertical ? -0.2 : -0.2 },
+        offset: { x: isVertical ? 0.25 : 0.30, y: isVertical ? -0.15 : -0.15 },
         position: 'center',
-        opacity: 0.8, // ~80% opacity (was #cc in alpha channel)
+        opacity: 0.9, // Higher opacity for better readability
         transition: { in: 'zoom', out: 'fade' }
       });
     }
