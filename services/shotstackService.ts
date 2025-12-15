@@ -227,6 +227,128 @@ const isValidPublicUrl = (url: string): boolean => {
   return url.startsWith('http://') || url.startsWith('https://');
 };
 
+// =============================================================================================
+// VALIDATION HELPERS - Prevent Shotstack API errors
+// =============================================================================================
+
+/**
+ * Valid Shotstack effects as a Set for O(1) lookup
+ */
+const VALID_EFFECTS = new Set<string>([
+  'zoomIn', 'zoomInSlow', 'zoomInFast',
+  'zoomOut', 'zoomOutSlow', 'zoomOutFast',
+  'slideLeft', 'slideLeftSlow', 'slideLeftFast',
+  'slideRight', 'slideRightSlow', 'slideRightFast',
+  'slideUp', 'slideUpSlow', 'slideUpFast',
+  'slideDown', 'slideDownSlow', 'slideDownFast'
+]);
+
+/**
+ * Validate and return a valid effect, or fallback to default
+ */
+const validateEffect = (effect: string | undefined): ShotstackEffect | undefined => {
+  if (!effect) return undefined;
+  if (VALID_EFFECTS.has(effect)) return effect as ShotstackEffect;
+  // If effect is invalid, try to find closest valid effect
+  console.warn(`[Shotstack] ⚠️ Invalid effect "${effect}", using fallback`);
+  // Fallback based on effect type
+  if (effect.includes('zoom')) return 'zoomInSlow';
+  if (effect.includes('slide')) return 'slideRightSlow';
+  return 'zoomInSlow'; // Default fallback
+};
+
+/**
+ * Clamp offset values to Shotstack's valid range (-10 to 10)
+ * Typically we use -1 to 1 for normalized positions
+ */
+const clampOffset = (value: number): number => {
+  if (!isFinite(value) || isNaN(value)) {
+    console.warn(`[Shotstack] ⚠️ Invalid offset value: ${value}, using 0`);
+    return 0;
+  }
+  if (value < -10) {
+    console.warn(`[Shotstack] ⚠️ Offset ${value} below minimum -10, clamping`);
+    return -10;
+  }
+  if (value > 10) {
+    console.warn(`[Shotstack] ⚠️ Offset ${value} above maximum 10, clamping`);
+    return 10;
+  }
+  return value;
+};
+
+/**
+ * Validate and sanitize a clip's offset object
+ */
+const sanitizeClipOffset = (clip: any): any => {
+  if (clip.offset) {
+    clip.offset = {
+      x: clampOffset(clip.offset.x ?? 0),
+      y: clampOffset(clip.offset.y ?? 0)
+    };
+  }
+  return clip;
+};
+
+/**
+ * Validate and sanitize the entire Shotstack edit before submission
+ * This catches any invalid values that could cause API errors
+ */
+const validateAndSanitizeEdit = (edit: any): { valid: boolean; issues: string[]; sanitizedEdit: any } => {
+  const issues: string[] = [];
+  const sanitizedEdit = JSON.parse(JSON.stringify(edit)); // Deep clone
+  
+  if (!sanitizedEdit.timeline?.tracks) {
+    issues.push('Missing timeline.tracks');
+    return { valid: false, issues, sanitizedEdit };
+  }
+  
+  sanitizedEdit.timeline.tracks.forEach((track: any, trackIndex: number) => {
+    if (!track.clips) return;
+    
+    track.clips.forEach((clip: any, clipIndex: number) => {
+      // Validate and sanitize offsets
+      if (clip.offset) {
+        const originalX = clip.offset.x;
+        const originalY = clip.offset.y;
+        sanitizeClipOffset(clip);
+        if (originalX !== clip.offset.x || originalY !== clip.offset.y) {
+          issues.push(`Track ${trackIndex}, Clip ${clipIndex}: Offset sanitized from (${originalX}, ${originalY}) to (${clip.offset.x}, ${clip.offset.y})`);
+        }
+      }
+      
+      // Validate effect
+      if (clip.effect) {
+        const originalEffect = clip.effect;
+        clip.effect = validateEffect(clip.effect);
+        if (originalEffect !== clip.effect) {
+          issues.push(`Track ${trackIndex}, Clip ${clipIndex}: Effect changed from "${originalEffect}" to "${clip.effect}"`);
+        }
+      }
+      
+      // Validate start time
+      if (clip.start < 0) {
+        issues.push(`Track ${trackIndex}, Clip ${clipIndex}: Negative start time ${clip.start}, setting to 0`);
+        clip.start = 0;
+      }
+      
+      // Validate length
+      if (clip.length !== undefined && clip.length <= 0) {
+        issues.push(`Track ${trackIndex}, Clip ${clipIndex}: Invalid length ${clip.length}, setting to 0.1`);
+        clip.length = 0.1;
+      }
+      
+      // Validate opacity
+      if (clip.opacity !== undefined) {
+        if (clip.opacity < 0) clip.opacity = 0;
+        if (clip.opacity > 1) clip.opacity = 1;
+      }
+    });
+  });
+  
+  return { valid: true, issues, sanitizedEdit };
+};
+
 /**
  * Convert our config to Shotstack Edit format
  * Docs: https://shotstack.io/docs/api/
@@ -891,16 +1013,20 @@ export const buildPodcastStyleEdit = (
 
     // Add effect (Ken Burns motion) - adjust intensity based on pacing
     if (clipEffect) {
+      let adjustedEffect: string = clipEffect;
+      
       // Modify effect based on pacing intensity
       if (pacing.effectIntensity === 'fast' && clipEffect.includes('Slow')) {
         // Use faster version for fast pacing
-        clip.effect = clipEffect.replace('Slow', '') as ShotstackEffect;
+        adjustedEffect = clipEffect.replace('Slow', '');
       } else if (pacing.effectIntensity === 'slow' && !clipEffect.includes('Slow')) {
-        // Use slower version for slow pacing
-        clip.effect = (clipEffect + 'Slow') as ShotstackEffect;
-      } else {
-        clip.effect = clipEffect;
+        // Use slower version for slow pacing - but validate it exists
+        const slowVersion = clipEffect + 'Slow';
+        adjustedEffect = VALID_EFFECTS.has(slowVersion) ? slowVersion : clipEffect;
       }
+      
+      // CRITICAL: Validate the final effect before using it
+      clip.effect = validateEffect(adjustedEffect);
     }
 
     // Add filter if configured
@@ -963,9 +1089,20 @@ export const buildPodcastStyleEdit = (
       });
       
       // Progress fill (only add if width is at least 10px to avoid validation errors)
-      const fillWidth = Math.max(10, (progress / 100) * (isVertical ? 800 : 1200));
+      const totalBarWidth = isVertical ? 800 : 1200;
+      const fillWidth = Math.max(10, (progress / 100) * totalBarWidth);
       if (fillWidth >= 10) {
         const fillColor = config.newsStyle?.lowerThird?.primaryColor || '#ff3333';
+        // Calculate normalized offset for left-aligned progress bar
+        // The progress bar should "grow" from the left edge of the background bar
+        // Background bar is centered at x=0 with full width
+        // Offset must be normalized values (Shotstack allows -10 to 10, typically -1 to 1)
+        const screenWidth = isVertical ? 1080 : 1920;
+        const normalizedTotalWidth = totalBarWidth / screenWidth; // ~0.74 for vertical
+        const normalizedFillWidth = fillWidth / screenWidth;
+        // To align left edge: offset = -halfTotalWidth + halfFillWidth
+        const offsetX = -(normalizedTotalWidth / 2) + (normalizedFillWidth / 2);
+        
         graphics.push({
           asset: {
             type: 'text',
@@ -978,7 +1115,7 @@ export const buildPodcastStyleEdit = (
           },
           start: startTime,
           length: duration,
-          offset: { x: -(isVertical ? 400 : 600) + ((progress / 100) * (isVertical ? 400 : 600)), y: isVertical ? 0.45 : 0.45 },
+          offset: { x: offsetX, y: isVertical ? 0.45 : 0.45 },
           position: 'center',
           opacity: 1.0,
           transition: { in: 'slideRight' }
@@ -2055,9 +2192,9 @@ export const buildPodcastStyleEdit = (
         }
       } else if (effectUrl && !isValidAudioUrl(effectUrl)) {
         console.warn(`[Shotstack] ⚠️ Skipping invalid sound effect URL from scene: ${effectUrl}`);
-      } else if (!effectUrl) {
-        console.warn(`[Shotstack] ⚠️ Scene ${index + 1} has sound effect metadata but no URL provided`);
       }
+      // Note: We don't warn about missing URLs anymore - this is expected behavior
+      // when scenes have AI-suggested sound effect types but no audio files assigned yet
     }
     
     // Also add transition sounds at scene changes (if enabled in config)
@@ -2159,32 +2296,33 @@ export const buildPodcastStyleEdit = (
   }
   
   // VIRAL SHORTS FONT STACK - Premium typography for maximum impact
+  // NOTE: If any font URL fails, Shotstack will fall back to system fonts (Arial, Helvetica, etc.)
+  // We prioritize Shotstack's own template fonts as they are most reliable
   const defaultFonts = [
-    // Montserrat family - Primary display font (ESSENTIAL for viral shorts)
-    'https://fonts.gstatic.com/s/montserrat/v26/JTUSjIg1_i6t8kCHKm459WRhyyTh89ZNpQ.woff2', // Montserrat Bold
-    'https://fonts.gstatic.com/s/montserrat/v26/JTUSjIg1_i6t8kCHKm459WlhyyTh89ZNpQ.woff2', // Montserrat SemiBold
-    'https://fonts.gstatic.com/s/montserrat/v26/JTUSjIg1_i6t8kCHKm459W1hyyTh89ZNpQ.woff2', // Montserrat ExtraBold
-    'https://fonts.gstatic.com/s/montserrat/v26/JTUSjIg1_i6t8kCHKm459WZhyyTh89ZNpQ.woff2', // Montserrat Black
-    // Roboto family - Body/ticker font
-    'https://fonts.gstatic.com/s/roboto/v30/KFOmCnqEu92Fr1Mu4mxK.woff2', // Roboto Medium
-    'https://fonts.gstatic.com/s/roboto/v30/KFOlCnqEu92Fr1MmWUlfBBc4.woff2', // Roboto Bold
-    // Inter - Modern alternative
-    'https://fonts.gstatic.com/s/inter/v13/UcCO3FwrK3iLTeHuS_fvQtMwCp50KnMw2boKoduKmMEVuGKYAZ9hiJ-Ek-_EeA.woff2', // Inter Bold
-    // Oswald - Impact headlines (news style)
-    'https://fonts.gstatic.com/s/oswald/v53/TK3_WkUHHAIjg75cFRf3bXL8LICs1_FvsUZiZQ.woff2', // Oswald Bold
-    // Shotstack template fonts (reliable fallbacks)
+    // PRIMARY: Shotstack template fonts (most reliable - hosted by Shotstack)
     'https://templates.shotstack.io/basic-text-overlay/6ab63510-5d0e-401b-86b0-d46e87df0a91/source.ttf',
-    'https://templates.shotstack.io/breaking-news-channel-template-urgent-announcements-sales/ef4d1738-75fd-4808-84b9-119a36c79c3b/source.ttf'
+    'https://templates.shotstack.io/breaking-news-channel-template-urgent-announcements-sales/ef4d1738-75fd-4808-84b9-119a36c79c3b/source.ttf',
+    // SECONDARY: Google Fonts (generally reliable but can change URLs)
+    // Montserrat family - Primary display font
+    'https://fonts.gstatic.com/s/montserrat/v26/JTUSjIg1_i6t8kCHKm459WRhyyTh89ZNpQ.woff2', // Bold
+    'https://fonts.gstatic.com/s/montserrat/v26/JTUSjIg1_i6t8kCHKm459W1hyyTh89ZNpQ.woff2', // ExtraBold
+    // Roboto family - Body/ticker font
+    'https://fonts.gstatic.com/s/roboto/v30/KFOlCnqEu92Fr1MmWUlfBBc4.woff2', // Bold
+    // Oswald - Impact headlines (news style)
+    'https://fonts.gstatic.com/s/oswald/v53/TK3_WkUHHAIjg75cFRf3bXL8LICs1_FvsUZiZQ.woff2' // Bold
   ];
   
+  // Only add fonts that aren't already in the list
   defaultFonts.forEach(fontUrl => {
     if (!fontsToLoad.some(f => f.src === fontUrl)) {
       fontsToLoad.push({ src: fontUrl });
     }
   });
   
+  // Add fonts to timeline (Shotstack will gracefully handle any that fail to load)
   if (fontsToLoad.length > 0) {
     timeline.fonts = fontsToLoad;
+    console.log(`🔤 [Podcast Composition] Loading ${fontsToLoad.length} fonts`);
   }
 
   return {
@@ -2359,11 +2497,36 @@ export const renderPodcastVideo = async (
     renderConfig: config
   });
   
-  console.log(`📋 [Podcast Render] Edit config built with ${edit.timeline.tracks.length} tracks, submitting to Shotstack...`);
+  console.log(`📋 [Podcast Render] Edit config built with ${edit.timeline.tracks.length} tracks`);
+  
+  // CRITICAL: Validate and sanitize edit before submission
+  const { valid, issues, sanitizedEdit } = validateAndSanitizeEdit(edit);
+  
+  if (issues.length > 0) {
+    console.warn(`⚠️ [Podcast Render] Sanitization applied ${issues.length} fixes:`);
+    issues.forEach((issue, i) => console.warn(`  ${i + 1}. ${issue}`));
+  }
+  
+  // Log detailed stats for debugging
+  const totalClips = sanitizedEdit.timeline.tracks.reduce(
+    (sum: number, track: any) => sum + (track.clips?.length || 0), 0
+  );
+  console.log(`📊 [Podcast Render] Stats: ${sanitizedEdit.timeline.tracks.length} tracks, ${totalClips} total clips`);
+  console.log(`📊 [Podcast Render] Output: ${sanitizedEdit.output.size.width}x${sanitizedEdit.output.size.height} @ ${sanitizedEdit.output.fps}fps`);
+  
+  // Log first and last clip timing for debugging
+  const firstTrack = sanitizedEdit.timeline.tracks.find((t: any) => t.clips?.length > 0);
+  if (firstTrack?.clips?.length > 0) {
+    const firstClip = firstTrack.clips[0];
+    const lastClip = firstTrack.clips[firstTrack.clips.length - 1];
+    console.log(`📊 [Podcast Render] Timeline: ${firstClip.start?.toFixed(2) || 0}s to ${((lastClip.start || 0) + (lastClip.length || 0)).toFixed(2)}s`);
+  }
 
   try {
-    // Submit to Shotstack
-    const response = await shotstackRequest('/render', 'POST', edit);
+    console.log(`🚀 [Podcast Render] Submitting to Shotstack...`);
+    
+    // Submit to Shotstack with sanitized edit
+    const response = await shotstackRequest('/render', 'POST', sanitizedEdit);
     const renderId = response.response.id;
     
     console.log(`✅ [Podcast Render] Job submitted: ${renderId}`);
@@ -2372,6 +2535,14 @@ export const renderPodcastVideo = async (
     return await pollRenderJob(renderId);
   } catch (error) {
     console.error('❌ [Podcast Render] Error:', (error as Error).message);
+    
+    // Log the problematic edit for debugging (truncated)
+    console.error('❌ [Podcast Render] Failed edit summary:', {
+      tracks: sanitizedEdit.timeline?.tracks?.length,
+      output: sanitizedEdit.output,
+      firstTrackClips: sanitizedEdit.timeline?.tracks?.[0]?.clips?.length
+    });
+    
     return {
       success: false,
       error: (error as Error).message
