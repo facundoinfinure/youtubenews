@@ -1168,14 +1168,14 @@ export const buildPodcastStyleEdit = (
     }
     
     if (metricText && sceneIndex < 3) { // Only in first 3 scenes
-      // Adjust card size based on text length
+      // Adjust card size based on text length - SMALLER and cleaner
       const textLength = metricText.length;
       const cardWidth = isVertical 
-        ? Math.min(600, Math.max(300, textLength * 25))
-        : Math.min(800, Math.max(400, textLength * 30));
+        ? Math.min(500, Math.max(250, textLength * 18))
+        : Math.min(700, Math.max(350, textLength * 22));
       const fontSize = isVertical 
-        ? (textLength > 15 ? 48 : 64) 
-        : (textLength > 15 ? 56 : 72);
+        ? (textLength > 15 ? 36 : 44) // Reduced from 48/64
+        : (textLength > 15 ? 44 : 52); // Reduced from 56/72
       
       graphics.push({
         asset: {
@@ -1188,16 +1188,20 @@ export const buildPodcastStyleEdit = (
             size: fontSize,
             lineHeight: 1.2
           },
+          stroke: {
+            color: '#000000',
+            width: 3 // Black outline for visibility without background
+          },
           width: cardWidth,
-          height: isVertical ? 100 : 120,
-          background: { color: '#000000' } // solid black - transparency via clip opacity
+          height: isVertical ? 80 : 100
+          // NO background - clean text with outline only
         },
         start: startTime + 1, // Appear 1s into scene
         length: 3, // Show for 3 seconds
-        offset: { x: isVertical ? 0.25 : 0.30, y: isVertical ? -0.15 : -0.15 },
+        offset: { x: isVertical ? 0.25 : 0.30, y: isVertical ? -0.20 : -0.18 },
         position: 'center',
-        opacity: 0.9, // Higher opacity for better readability
-        transition: { in: 'zoom', out: 'fade' }
+        opacity: 1.0, // Full opacity with outline
+        transition: { in: 'fade', out: 'fade' }
       });
     }
     
@@ -1356,8 +1360,8 @@ export const buildPodcastStyleEdit = (
     branding: { x: 0.35, y: 0.36, fontSize: 28, width: 200, height: 52 },
     // Breaking news - dramatic and urgent
     breakingNews: { width: 950, height: 80, y: -0.20, fontSize: 42 },
-    // Host name - professional broadcast style
-    hostName: { width: 360, height: 72, y: -0.47, fontSize: 36, accentWidth: 6 }
+    // Host name - MOVED to top right, below date/branding
+    hostName: { width: 280, height: 52, y: 0.28, fontSize: 28, accentWidth: 4, x: 0.25 }
   } : {
     // 16:9 (Landscape - YouTube) - BROADCAST QUALITY DESIGN
     lowerThird: {
@@ -1376,8 +1380,8 @@ export const buildPodcastStyleEdit = (
     branding: { x: 0.40, y: 0.36, fontSize: 30, width: 220, height: 52 },
     // Breaking news - impactful banner
     breakingNews: { width: 750, height: 90, y: -0.23, fontSize: 48 },
-    // Host name plate - broadcast quality
-    hostName: { width: 400, height: 80, y: -0.47, fontSize: 42, accentWidth: 8 }
+    // Host name plate - MOVED to top right, below date/branding
+    hostName: { width: 320, height: 60, y: 0.28, fontSize: 32, accentWidth: 5, x: 0.30 }
   };
 
   // === NEWS-STYLE OVERLAYS - PREMIUM BROADCAST DESIGN ===
@@ -1754,10 +1758,10 @@ export const buildPodcastStyleEdit = (
       const accentGold = '#ffd60a';
       
       // Ticker positioning - sleek bottom bar
-      // CRITICAL FIX: Larger ticker text for better readability
+      // ADJUSTED: Smaller font to avoid text being cut off
       const tickerPresets = isVertical
-        ? { y: -0.48, height: 56, fontSize: 24, width: 1080 } // Increased from 18 to 24
-        : { y: -0.475, height: 60, fontSize: 28, width: 1920 }; // Increased from 22 to 28
+        ? { y: -0.48, height: 48, fontSize: 18, width: 1080 } // Reduced for cleaner look
+        : { y: -0.475, height: 52, fontSize: 22, width: 1920 }; // Reduced for cleaner look
       
       // Speed settings
       const speedDurations = { slow: 35, normal: 25, fast: 18 };
@@ -1892,94 +1896,76 @@ export const buildPodcastStyleEdit = (
       if (scene.speaker) {
         const showDuration = Math.min(4, scene.duration - 0.4);
         
+        // HOST NAME - TOP RIGHT POSITION (below date/branding)
+        // Simplified design: background + name only (cleaner look)
+        const hostX = (hostNamePresets as any).x || (isVertical ? 0.25 : 0.30);
+        
         // LAYER 1: Dark background plate
         hostNameClips.push({
           asset: {
             type: 'text',
-            text: '', // Empty text for color background shapes (per Shotstack examples)
+            text: '', // Empty text for color background shapes
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: '#0d1b2a', family: 'Roboto', size: 12, lineHeight: 1 }, // Font color matches background
+            font: { color: '#0d1b2a', family: 'Roboto', size: 12, lineHeight: 1 },
             width: hostNamePresets.width,
             height: hostNamePresets.height,
             background: { color: '#0d1b2a' }
           },
           start: scene.start + 0.15,
           length: showDuration,
-          offset: { 
-            x: isVertical ? -0.28 : -0.36, 
-            y: hostNamePresets.y 
+          offset: {
+            x: hostX,
+            y: hostNamePresets.y
           },
           position: 'center',
-          opacity: 0.95,
-          transition: { in: 'slideRight', out: 'fade' }
+          opacity: 0.92,
+          transition: { in: 'slideLeft', out: 'fade' }
         });
-        
+
         // LAYER 2: Primary color accent bar (left edge)
         hostNameClips.push({
           asset: {
             type: 'text',
-            text: '', // Empty text for color background shapes (per Shotstack examples)
+            text: '',
             alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: primaryColor, family: 'Roboto', size: 12, lineHeight: 1 }, // Font color matches background
+            font: { color: primaryColor, family: 'Roboto', size: 12, lineHeight: 1 },
             width: hostNamePresets.accentWidth,
             height: hostNamePresets.height,
             background: { color: primaryColor }
           },
           start: scene.start + 0.2,
           length: showDuration - 0.1,
-          offset: { 
-            x: isVertical ? -0.40 : -0.45, 
-            y: hostNamePresets.y 
+          offset: {
+            x: hostX - (isVertical ? 0.11 : 0.09),
+            y: hostNamePresets.y
           },
           position: 'center',
-          transition: { in: 'slideRight', out: 'fade' }
+          transition: { in: 'slideLeft', out: 'fade' }
         });
-        
-        // LAYER 3: Gold accent line (top)
-        hostNameClips.push({
-          asset: {
-            type: 'text',
-            text: '', // Empty text for color background shapes (per Shotstack examples)
-            alignment: { horizontal: 'center', vertical: 'center' },
-            font: { color: accentGold, family: 'Roboto', size: 12, lineHeight: 1 }, // Font color matches background
-            width: hostNamePresets.width - 10,
-            height: 10, // Increased from 2 to 10px minimum for Shotstack validation
-            background: { color: accentGold }
-          },
-          start: scene.start + 0.25,
-          length: showDuration - 0.15,
-          offset: { 
-            x: isVertical ? -0.28 : -0.36, 
-            y: hostNamePresets.y + (isVertical ? 0.016 : 0.018) 
-          },
-          position: 'center',
-          opacity: 0.7,
-          transition: { in: 'slideRight', out: 'fade' }
-        });
-        
-        // LAYER 4: Speaker name - clean typography
+
+        // LAYER 3: Speaker name - clean typography
         hostNameClips.push({
           asset: {
             type: 'text',
             text: scene.speaker.toUpperCase(),
-            alignment: { horizontal: 'left', vertical: 'center' },
-            font: { 
-              color: '#ffffff', 
-              family: 'Montserrat SemiBold', 
-              size: hostNamePresets.fontSize, 
-              lineHeight: 1 
+            alignment: { horizontal: 'center', vertical: 'center' },
+            font: {
+              color: '#ffffff',
+              family: 'Montserrat SemiBold',
+              size: hostNamePresets.fontSize,
+              lineHeight: 1
             },
-            width: hostNamePresets.width - 20,
-            height: hostNamePresets.height - 12
+            width: hostNamePresets.width - 16,
+            height: hostNamePresets.height - 8
           },
-          start: scene.start + 0.3,
-          length: showDuration - 0.2,
-          offset: { 
-            x: isVertical ? -0.26 : -0.34, 
-            y: hostNamePresets.y 
+          start: scene.start + 0.25,
+          length: showDuration - 0.15,
+          offset: {
+            x: hostX,
+            y: hostNamePresets.y
           },
           position: 'center',
-          transition: { in: 'slideRight', out: 'fade' }
+          transition: { in: 'slideLeft', out: 'fade' }
         });
       }
     });
